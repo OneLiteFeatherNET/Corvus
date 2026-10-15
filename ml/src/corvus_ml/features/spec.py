@@ -22,9 +22,13 @@ from typing import Any
 
 from corvus_ml.features.config import FeaturizerConfig
 from corvus_ml.features.constants import AGGREGATE_NAMES, NULLABLE_AGGREGATES, TOKEN_NAMES
+from corvus_ml.raw.spec import RawBytesSpec, sha256_file
 
 FEATURE_SPEC_NAME = "corvus-features"
 FEATURE_SPEC_VERSION = 1
+# A spec with a ``raw_bytes`` section is version 2: a scorer that only knows the aggregate / token
+# models refuses it (version mismatch) instead of feeding the token tensor into the wrong graph.
+FEATURE_SPEC_RAW_VERSION = 2
 SPEC_FILE = "feature_spec.json"
 
 # Model input "agg": window aggregates (+ n_frames) with nullable ones zero-filled and followed by
@@ -90,13 +94,20 @@ class FeatureSpec:
     agg_inputs: tuple[str, ...]
     seq_inputs: tuple[tuple[str, str], ...]
     seq_len: int
+    raw_bytes: RawBytesSpec | None = None  # kind ``raw_bytes`` (ADR-CORV-0008)
 
     @classmethod
-    def current(cls, window: FeaturizerConfig | None = None, seq_len: int = 256) -> FeatureSpec:
+    def current(
+        cls,
+        window: FeaturizerConfig | None = None,
+        seq_len: int = 256,
+        raw_bytes: RawBytesSpec | None = None,
+    ) -> FeatureSpec:
         """The spec of the code in this checkout for the given windowing parameters."""
         return cls(
             name=FEATURE_SPEC_NAME,
-            version=FEATURE_SPEC_VERSION,
+            version=FEATURE_SPEC_VERSION if raw_bytes is None else FEATURE_SPEC_RAW_VERSION,
+            raw_bytes=raw_bytes,
             window=(window or FeaturizerConfig()).featurizer(),
             aggregate_names=AGGREGATE_NAMES,
             token_columns=TOKEN_NAMES,
@@ -117,6 +128,12 @@ class FeatureSpec:
     # --- serialisation -----------------------------------------------------------------------
 
     def to_dict(self) -> dict[str, Any]:
+        out = self._base_dict()
+        if self.raw_bytes is not None:
+            out["model_inputs"]["raw_bytes"] = self.raw_bytes.to_dict()
+        return out
+
+    def _base_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "version": self.version,
@@ -145,7 +162,11 @@ class FeatureSpec:
             if unknown:
                 raise FeatureSpecError(f"unknown window keys: {sorted(unknown)}")
             inputs = raw["model_inputs"]
+            raw_bytes = (
+                RawBytesSpec.from_dict(inputs["raw_bytes"]) if "raw_bytes" in inputs else None
+            )
             return cls(
+                raw_bytes=raw_bytes,
                 name=str(raw["name"]),
                 version=int(raw["version"]),
                 window=FeaturizerConfig(**window_raw),
@@ -199,6 +220,13 @@ class FeatureSpec:
         cmp("token_columns", self.token_columns, other.token_columns)
         cmp("model_inputs.agg", self.agg_inputs, other.agg_inputs)
         cmp("model_inputs.seq", self.seq_inputs, other.seq_inputs)
+        if (self.raw_bytes is None) != (other.raw_bytes is None):
+            out.append(
+                f"model_inputs.raw_bytes: model has {self.raw_bytes is not None}, "
+                f"runtime expects {other.raw_bytes is not None}"
+            )
+        elif self.raw_bytes is not None and other.raw_bytes is not None:
+            out.extend(self.raw_bytes.differences(other.raw_bytes, window=window))
         if window:
             cmp("seq_len", self.seq_len, other.seq_len)
             for f in fields(FeaturizerConfig):
@@ -214,17 +242,41 @@ class FeatureSpec:
             )
 
     @classmethod
-    def load(cls, path: Path, expected: FeatureSpec | None = None) -> FeatureSpec:
+    def load(
+        cls, path: Path, expected: FeatureSpec | None = None, *, require_tokenizer: bool = False
+    ) -> FeatureSpec:
         """Read a spec and validate it.
 
         With ``expected`` (e.g. the window parameters a serving process is configured with) the
         whole spec must match. Without it only the feature definitions and the input layout are
         checked against this checkout; the window parameters and ``seq_len`` of the file are then
         authoritative, so a service builds its featurizer from ``spec.window``.
+
+        For a ``raw_bytes`` spec the ``tokenizer.json`` next to the file must hash to the recorded
+        value (a missing file is an error with ``require_tokenizer``, otherwise it is skipped).
         """
         spec = cls.read(path)
         if expected is None:
-            spec.require_compatible(cls.current(spec.window, spec.seq_len))
+            spec.require_compatible(cls.current(spec.window, spec.seq_len, spec.raw_bytes))
         else:
             spec.require_compatible(expected)
+        if spec.raw_bytes is not None:
+            spec.check_tokenizer_file(Path(path), require=require_tokenizer)
         return spec
+
+    def check_tokenizer_file(self, path: Path, *, require: bool = False) -> None:
+        """Compare the hash of the tokenizer file next to ``path`` with the spec."""
+        if self.raw_bytes is None:
+            return
+        directory = path if path.is_dir() else path.parent
+        file = directory / self.raw_bytes.tokenizer_file
+        if not file.is_file():
+            if require:
+                raise FeatureSpecError(f"tokenizer file {file} is missing")
+            return
+        actual = sha256_file(file)
+        if actual != self.raw_bytes.tokenizer_sha256:
+            raise FeatureSpecMismatch(
+                "feature spec of the model does not match the runtime:\n  - tokenizer hash: "
+                f"model has {self.raw_bytes.tokenizer_sha256}, {file.name} is {actual}"
+            )
