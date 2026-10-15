@@ -37,7 +37,6 @@ printf '00000000000000000000000000000000' | xxd -r -p \
 ## Where it is tested
 
 - API: `services/tests/api/test_api_players.py` (`test_pseudonym_matches_the_documented_vector` and the second vector).
-- Plugin: **not yet.** `PseudonymizerTest` only checks properties (determinism, length, no raw UUID bytes), and the
-  Java test has no fixed expected value. The plugin should get a test that asserts the two pseudonyms above for
-  `new PseudonymKey("0123456789abcdef".getBytes(), "k1")` with `UUID.fromString("11111111-2222-3333-4444-555555555555")`,
-  and for the 32-byte key of vector 2. Plugin changes are outside the control-plane API change.
+- Plugin: `plugin/src/test/java/net/onelitefeather/corvus/plugin/privacy/PseudonymTestVectorTest.java` loads each
+  base64 key through `KeyLoader` (environment value injected) and asserts both pseudonyms above via `Pseudonymizer`.
+  `PseudonymizerTest` additionally checks properties (determinism, length, no raw UUID bytes).
