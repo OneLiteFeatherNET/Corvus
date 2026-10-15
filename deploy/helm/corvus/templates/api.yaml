@@ -1,0 +1,187 @@
+{{- if .Values.api.enabled }}
+{{- $k8sJobs := eq .Values.api.jobs.runner "kubernetes" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "corvus.fullname" . }}-api
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "api") | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      {{- include "corvus.componentSelectorLabels" (dict "root" . "component" "api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "corvus.podLabels" (dict "root" . "component" "api") | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "corvus.serviceAccountName" (dict "root" . "component" "api") }}
+      # Only the kubernetes job runner talks to the Kubernetes API.
+      automountServiceAccountToken: {{ $k8sJobs }}
+      {{- include "corvus.podCommon" . | nindent 6 }}
+      containers:
+        - name: api
+          image: {{ include "corvus.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["corvus-api"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            {{- include "corvus.pgEnv" . | nindent 12 }}
+            - name: CORVUS_API_PORT
+              value: {{ .Values.api.port | quote }}
+            - name: CORVUS_API_ROLES_CLAIM
+              value: {{ .Values.api.oidc.rolesClaim | quote }}
+            {{- with .Values.api.oidc.issuer }}
+            - name: CORVUS_API_OIDC_ISSUER
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.api.oidc.audience }}
+            - name: CORVUS_API_OIDC_AUDIENCE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.api.oidc.jwksUrl }}
+            - name: CORVUS_API_OIDC_JWKS_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.api.oidc.roleMapping }}
+            - name: CORVUS_API_ROLE_MAPPING
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.pseudonym.enabled }}
+            {{- include "corvus.secretEnv" (dict "name" "CORVUS_PSEUDONYM_KEY" "secret" .Values.pseudonym.existingSecret "key" .Values.pseudonym.key) | nindent 12 }}
+            - name: CORVUS_PSEUDONYM_KEY_ID
+              value: {{ .Values.pseudonym.keyId | quote }}
+            {{- end }}
+            - name: CORVUS_API_JOB_RUNNER
+              value: {{ .Values.api.jobs.runner | quote }}
+            {{- if $k8sJobs }}
+            - name: CORVUS_API_JOB_K8S_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: CORVUS_API_JOB_K8S_IMAGE
+              value: {{ include "corvus.jobsImage" . | quote }}
+            - name: CORVUS_API_JOB_K8S_CPU_REQUEST
+              value: {{ .Values.api.jobs.cpuRequest | quote }}
+            - name: CORVUS_API_JOB_K8S_CPU_LIMIT
+              value: {{ .Values.api.jobs.cpuLimit | quote }}
+            - name: CORVUS_API_JOB_K8S_MEMORY_REQUEST
+              value: {{ .Values.api.jobs.memoryRequest | quote }}
+            - name: CORVUS_API_JOB_K8S_MEMORY_LIMIT
+              value: {{ .Values.api.jobs.memoryLimit | quote }}
+            {{- with .Values.api.jobs.serviceAccount }}
+            - name: CORVUS_API_JOB_K8S_SERVICE_ACCOUNT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.api.jobs.envSecret }}
+            - name: CORVUS_API_JOB_K8S_ENV_SECRET
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
+            {{- include "corvus.extraEnv" .Values.api.env | nindent 12 }}
+          {{- with .Values.api.extraSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.port }}
+              protocol: TCP
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "corvus.tmpMount" . | nindent 12 }}
+      volumes:
+        {{- include "corvus.tmpVolume" . | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "corvus.fullname" . }}-api
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "api") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "corvus.componentSelectorLabels" (dict "root" . "component" "api") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.api.port }}
+      targetPort: http
+      protocol: TCP
+{{- if .Values.api.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "corvus.fullname" . }}-api
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "api") | nindent 4 }}
+  {{- with .Values.api.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- include "corvus.ingressSpec" (dict "cfg" .Values.api.ingress "svc" (printf "%s-api" (include "corvus.fullname" .)) "port" .Values.api.port) | nindent 2 }}
+{{- end }}
+{{- if .Values.api.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "corvus.fullname" . }}-api
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "api") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.api.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "corvus.componentSelectorLabels" (dict "root" . "component" "api") | nindent 6 }}
+{{- end }}
+{{- if $k8sJobs }}
+---
+# The job runner creates and watches batch/v1 Jobs in the release namespace, nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "corvus.fullname" . }}-api-jobs
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "api") | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "corvus.fullname" . }}-api-jobs
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "api") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "corvus.fullname" . }}-api-jobs
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "corvus.serviceAccountName" (dict "root" . "component" "api") }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

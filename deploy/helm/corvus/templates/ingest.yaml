@@ -1,0 +1,126 @@
+{{- if .Values.ingest.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "corvus.fullname" . }}-ingest
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "ingest") | nindent 4 }}
+spec:
+  {{- if not .Values.ingest.autoscaling.enabled }}
+  replicas: {{ .Values.ingest.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "corvus.componentSelectorLabels" (dict "root" . "component" "ingest") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "corvus.podLabels" (dict "root" . "component" "ingest") | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "corvus.serviceAccountName" (dict "root" . "component" "ingest") }}
+      automountServiceAccountToken: false
+      # Leaves time to flush the buffered frames and ack before the pod is killed.
+      terminationGracePeriodSeconds: {{ .Values.ingest.terminationGracePeriodSeconds }}
+      {{- include "corvus.podCommon" . | nindent 6 }}
+      containers:
+        - name: ingest
+          image: {{ include "corvus.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["corvus-ingest"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            {{- include "corvus.natsEnv" . | nindent 12 }}
+            {{- include "corvus.pgEnv" . | nindent 12 }}
+            {{- include "corvus.s3Env" . | nindent 12 }}
+            {{- include "corvus.secretEnv" (dict "name" "CORVUS_KEK" "secret" .Values.kek.existingSecret "key" .Values.kek.key) | nindent 12 }}
+            - name: CORVUS_KEK_ID
+              value: {{ .Values.kek.id | quote }}
+            - name: CORVUS_METRICS_PORT
+              value: {{ .Values.ingest.metricsPort | quote }}
+            {{- with .Values.ingest.workers }}
+            - name: CORVUS_WORKERS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- include "corvus.extraEnv" .Values.ingest.env | nindent 12 }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.ingest.metricsPort }}
+              protocol: TCP
+          startupProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.ingest.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "corvus.tmpMount" . | nindent 12 }}
+      volumes:
+        {{- include "corvus.tmpVolume" . | nindent 8 }}
+---
+# Metrics endpoint (and ServiceMonitor target); ingest receives its work from NATS, not over HTTP.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "corvus.fullname" . }}-ingest
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "ingest") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "corvus.componentSelectorLabels" (dict "root" . "component" "ingest") | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.ingest.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+{{- if .Values.ingest.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "corvus.fullname" . }}-ingest
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "ingest") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "corvus.fullname" . }}-ingest
+  minReplicas: {{ .Values.ingest.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.ingest.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.ingest.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- if .Values.ingest.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "corvus.fullname" . }}-ingest
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "ingest") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.ingest.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "corvus.componentSelectorLabels" (dict "root" . "component" "ingest") | nindent 6 }}
+{{- end }}
+{{- end }}

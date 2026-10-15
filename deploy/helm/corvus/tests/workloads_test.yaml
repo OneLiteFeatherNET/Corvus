@@ -1,0 +1,147 @@
+suite: workloads
+templates:
+  - migrate-job.yaml
+  - ingest.yaml
+  - api.yaml
+  - score.yaml
+  - housekeeping.yaml
+  - ui.yaml
+tests:
+  - it: runs the migration as a pre-install and pre-upgrade hook
+    template: migrate-job.yaml
+    asserts:
+      - equal:
+          path: metadata.annotations["helm.sh/hook"]
+          value: pre-install,pre-upgrade
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value: ["corvus-migrate"]
+
+  - it: wires the score replica count and the pod ordinal from one source
+    template: score.yaml
+    documentIndex: 0
+    set:
+      score.replicas: 4
+    asserts:
+      - isKind:
+          of: StatefulSet
+      - equal:
+          path: spec.replicas
+          value: 4
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_SCORE_REPLICAS
+            value: "4"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_SCORE_REPLICA_INDEX
+            valueFrom:
+              fieldRef:
+                fieldPath: "metadata.labels['apps.kubernetes.io/pod-index']"
+
+  - it: gives score a headless service
+    template: score.yaml
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: spec.clusterIP
+          value: None
+
+  - it: forbids overlapping housekeeping runs
+    template: housekeeping.yaml
+    asserts:
+      - equal:
+          path: spec.concurrencyPolicy
+          value: Forbid
+      - exists:
+          path: spec.startingDeadlineSeconds
+      - exists:
+          path: spec.jobTemplate.spec.ttlSecondsAfterFinished
+
+  - it: hardens every container
+    template: ingest.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          value: ["ALL"]
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.securityContext.seccompProfile.type
+          value: RuntimeDefault
+
+  - it: reads credentials from secrets, never as literal values
+    template: ingest.yaml
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_KEK
+            valueFrom:
+              secretKeyRef:
+                name: corvus-kek
+                key: kek
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_PG_DSN
+            valueFrom:
+              secretKeyRef:
+                name: corvus-database
+                key: uri
+
+  - it: leaves the replica count to the autoscaler when it is enabled
+    template: ingest.yaml
+    documentIndex: 0
+    set:
+      ingest.autoscaling.enabled: true
+    asserts:
+      - notExists:
+          path: spec.replicas
+
+  - it: does not render the ui by default
+    template: ui.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders the ui config.json when enabled
+    template: ui.yaml
+    documentIndex: 0
+    set:
+      ui.enabled: true
+      ui.config.apiBaseUrl: https://api.example.invalid
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - matchRegex:
+          path: data["config.json"]
+          pattern: https://api.example.invalid
+
+  - it: mounts a service account token only for the kubernetes job runner
+    template: api.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: true
+  - it: does not mount a token for the local job runner
+    template: api.yaml
+    documentIndex: 0
+    set:
+      api.jobs.runner: local
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false

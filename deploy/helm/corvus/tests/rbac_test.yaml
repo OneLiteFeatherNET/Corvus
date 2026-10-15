@@ -1,0 +1,35 @@
+suite: api job runner rbac
+templates:
+  - api.yaml
+tests:
+  - it: grants the api only create, get, list and watch on jobs
+    documentSelector:
+      path: kind
+      value: Role
+    asserts:
+      - equal:
+          path: rules
+          value:
+            - apiGroups: ["batch"]
+              resources: ["jobs"]
+              verbs: ["create", "get", "list", "watch"]
+
+  - it: binds the role to the api service account
+    documentSelector:
+      path: kind
+      value: RoleBinding
+    asserts:
+      - equal:
+          path: subjects[0].name
+          value: RELEASE-NAME-corvus-api
+
+  - it: renders no rbac for the local runner
+    set:
+      api.jobs.runner: local
+    documentSelector:
+      path: kind
+      value: Role
+      skipEmptyTemplates: true
+    asserts:
+      - hasDocuments:
+          count: 0
