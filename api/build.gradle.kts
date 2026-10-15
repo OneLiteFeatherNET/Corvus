@@ -13,7 +13,7 @@ tasks.compileJava { options.release = 21 }
 tasks.compileTestJava { options.release = 21 }
 
 dependencies {
-    testImplementation(platform("org.junit:junit-bom:6.0.2"))
+    testImplementation(platform("org.junit:junit-bom:6.0.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
