@@ -98,6 +98,10 @@ message Frame {
   uint32 packet_type = 6;
   // Raw packet body after the packet id. Short retention only.
   bytes payload = 7;
+  // Size in bytes of the readable payload before truncation to max_payload_bytes.
+  // 0 if no payload was recorded for this frame. payload_original_size > payload.length
+  // means the payload was truncated.
+  uint32 payload_original_size = 8;
 
   // Decoded, version-independent event for the packet types relevant to the models.
   oneof event {
