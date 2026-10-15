@@ -28,7 +28,7 @@ class SegmentOut(BaseModel):
     game_context: str
 
 
-class LabelOut(BaseModel):
+class SessionLabelOut(BaseModel):
     label: str
     source: str
     confidence: float
@@ -41,7 +41,9 @@ class SessionOut(BaseModel):
     pseudonym: str | None = Field(description="64 hex characters; null if the session is gone")
     started_at: datetime | None
     segments: list[SegmentOut]
-    labels: list[LabelOut] = Field(description="Labels applicable to the session at its start")
+    labels: list[SessionLabelOut] = Field(
+        description="Labels applicable to the session at its start"
+    )
     erased: bool = Field(description="The player was erased; always false with exclude_erased")
 
     @classmethod
@@ -52,7 +54,7 @@ class SessionOut(BaseModel):
             started_at=s.started_at,
             segments=[SegmentOut(segment=g.segment, game_context=g.game_context) for g in s.segments],
             labels=[
-                LabelOut(
+                SessionLabelOut(
                     label=lb.label, source=lb.source, confidence=lb.confidence,
                     valid_from=lb.valid_from, valid_to=lb.valid_to,
                 )
