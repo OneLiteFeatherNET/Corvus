@@ -1,4 +1,10 @@
 {{- if .Values.ui.enabled }}
+{{- $config := include "corvus.uiConfig" . }}
+{{- $upstream := include "corvus.uiApiUpstream" . }}
+{{- $apiOrigin := default (include "corvus.origin" .Values.ui.config.apiBaseUrl) .Values.ui.apiOrigin }}
+{{- $oidcOrigin := default (include "corvus.origin" .Values.ui.config.oidc.issuer) .Values.ui.oidcOrigin }}
+{{- /* The nginx-unprivileged image runs as uid 101: its podSecurityContext wins over the global one. */}}
+{{- $podCtx := dict "Values" (dict "podSecurityContext" (merge (deepCopy .Values.ui.podSecurityContext) (deepCopy .Values.podSecurityContext)) "imagePullSecrets" .Values.imagePullSecrets "nodeSelector" .Values.nodeSelector "tolerations" .Values.tolerations "affinity" .Values.affinity "topologySpreadConstraints" .Values.topologySpreadConstraints) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,7 +13,7 @@ metadata:
     {{- include "corvus.componentLabels" (dict "root" . "component" "ui") | nindent 4 }}
 data:
   config.json: |
-    {{- .Values.ui.config | toPrettyJson | nindent 4 }}
+    {{- $config | nindent 4 }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -25,29 +31,53 @@ spec:
       labels:
         {{- include "corvus.podLabels" (dict "root" . "component" "ui") | nindent 8 }}
       annotations:
-        checksum/config: {{ .Values.ui.config | toJson | sha256sum }}
+        checksum/config: {{ $config | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
       serviceAccountName: {{ include "corvus.serviceAccountName" (dict "root" . "component" "ui") }}
       automountServiceAccountToken: false
-      {{- include "corvus.podCommon" . | nindent 6 }}
+      {{- include "corvus.podCommon" $podCtx | nindent 6 }}
       containers:
         - name: ui
           image: {{ include "corvus.uiImage" . }}
           imagePullPolicy: {{ .Values.uiImage.pullPolicy }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: CORVUS_UI_BASE_PATH
+              value: {{ .Values.ui.basePath | quote }}
+            {{- with $upstream }}
+            - name: CORVUS_UI_API_UPSTREAM
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $apiOrigin }}
+            - name: CORVUS_UI_API_ORIGIN
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $oidcOrigin }}
+            - name: CORVUS_UI_OIDC_ORIGIN
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.ui.extraConnect }}
+            - name: CORVUS_UI_EXTRA_CONNECT
+              value: {{ join " " . | quote }}
+            {{- end }}
           ports:
             - name: http
-              containerPort: {{ .Values.ui.port }}
+              # Fixed by ui/docker/default.conf.template.
+              containerPort: 8080
               protocol: TCP
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 2
+            failureThreshold: 15
           readinessProbe:
-            httpGet: {path: /, port: http}
+            httpGet: {path: /healthz, port: http}
             periodSeconds: 10
           livenessProbe:
-            httpGet: {path: /, port: http}
+            httpGet: {path: /healthz, port: http}
             periodSeconds: 20
           resources:
             {{- toYaml .Values.ui.resources | nindent 12 }}
@@ -59,6 +89,9 @@ spec:
             {{- include "corvus.tmpMount" . | nindent 12 }}
             - name: nginx-cache
               mountPath: /var/cache/nginx
+            # The entrypoint renders the server block from the template into this directory.
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d
       volumes:
         - name: config
           configMap:
@@ -66,6 +99,9 @@ spec:
         {{- include "corvus.tmpVolume" . | nindent 8 }}
         - name: nginx-cache
           emptyDir: {}
+        - name: nginx-conf
+          emptyDir:
+            sizeLimit: 1Mi
 ---
 apiVersion: v1
 kind: Service

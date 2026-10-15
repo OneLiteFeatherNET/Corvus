@@ -188,6 +188,24 @@
           }
         },
         "extraSecret": {"type": "string"},
+        "cors": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "origins": {
+              "type": "array",
+              "items": {"type": "string", "pattern": "^(\\*|https?://[A-Za-z0-9.:_-]+)$"}
+            }
+          }
+        },
+        "jobTokens": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {"type": "string"},
+            "key": {"type": "string", "minLength": 1}
+          }
+        },
         "jobs": {
           "type": "object",
           "properties": {
@@ -237,7 +255,42 @@
         "enabled": {"type": "boolean"},
         "replicas": {"type": "integer", "minimum": 1},
         "port": {"type": "integer", "minimum": 1, "maximum": 65535},
-        "config": {"type": "object"},
+        "basePath": {"type": "string", "pattern": "^/([A-Za-z0-9._~/-]*)$"},
+        "proxyApi": {"type": "boolean"},
+        "apiUpstream": {"type": "string", "pattern": "^(https?://[A-Za-z0-9.:_/-]+)?$"},
+        "apiOrigin": {"type": "string", "pattern": "^(https?://[A-Za-z0-9.:_-]+)?$"},
+        "oidcOrigin": {"type": "string", "pattern": "^(https?://[A-Za-z0-9.:_-]+)?$"},
+        "extraConnect": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^(https?|wss?)://[A-Za-z0-9.:_/-]+$"}
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "apiBaseUrl": {"type": "string", "pattern": "^(https?://|/)"},
+            "basePath": {"type": "string"},
+            "auth": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mode": {"enum": ["oidc", "token"]},
+                "rolesClaim": {"type": "string", "minLength": 1},
+                "roleMapping": {"type": "object", "additionalProperties": {"type": "string"}}
+              }
+            },
+            "oidc": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "issuer": {"type": "string"},
+                "clientId": {"type": "string"},
+                "scopes": {"type": "string"}
+              }
+            }
+          }
+        },
+        "podSecurityContext": {"type": "object"},
         "resources": {"$ref": "#/definitions/resources"},
         "podDisruptionBudget": {"$ref": "#/definitions/pdb"},
         "ingress": {"$ref": "#/definitions/ingress"}

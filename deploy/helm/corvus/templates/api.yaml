@@ -53,6 +53,13 @@ spec:
             - name: CORVUS_API_ROLE_MAPPING
               value: {{ . | quote }}
             {{- end }}
+            {{- with .Values.api.cors.origins }}
+            - name: CORVUS_API_CORS_ORIGINS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- with .Values.api.jobTokens.existingSecret }}
+            {{- include "corvus.secretEnv" (dict "name" "CORVUS_API_JOB_TOKENS" "secret" . "key" $.Values.api.jobTokens.key) | nindent 12 }}
+            {{- end }}
             {{- if .Values.pseudonym.enabled }}
             {{- include "corvus.secretEnv" (dict "name" "CORVUS_PSEUDONYM_KEY" "secret" .Values.pseudonym.existingSecret "key" .Values.pseudonym.key) | nindent 12 }}
             - name: CORVUS_PSEUDONYM_KEY_ID

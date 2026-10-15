@@ -88,7 +88,21 @@ off (non-root, read-only root filesystem, no capabilities, `RuntimeDefault` secc
 
 ## Optional parts
 
-- `ui.enabled: true` deploys the UI; `ui.config` is rendered as `/usr/share/nginx/html/config.json`.
+- `ui.enabled: true` deploys the UI. `ui.config` is rendered as `/usr/share/nginx/html/config.json` and uses the keys
+  the UI reads (`apiBaseUrl`, `auth.mode`, `auth.rolesClaim`, `auth.roleMapping`, `oidc.issuer`, `oidc.clientId`,
+  `oidc.scopes`, see [run-the-ui.md](run-the-ui.md)); the schema rejects other keys. `basePath` comes from
+  `ui.basePath`, which also sets `CORVUS_UI_BASE_PATH`. The container always listens on 8080 (`ui.port` is only the
+  Service port) and runs as uid 101 (`ui.podSecurityContext`), the user of the nginx-unprivileged image.
+  - **Same origin (default).** `ui.proxyApi: true` makes nginx proxy `/api/` to the in-cluster api Service
+    (`CORVUS_UI_API_UPSTREAM`), so `ui.config.apiBaseUrl: /api/v1` needs neither CORS nor an extra CSP entry. With
+    `networkPolicy.enabled` the chart lets the UI pods reach the api pods. Set `ui.apiUpstream` to proxy elsewhere.
+  - **Separate origin.** Put the absolute URL into `ui.config.apiBaseUrl`, set `ui.proxyApi: false` and list the UI's
+    origin in `api.cors.origins` (`CORVUS_API_CORS_ORIGINS`). The origins for the Content-Security-Policy are derived
+    from `apiBaseUrl` and `oidc.issuer`; override them with `ui.apiOrigin`, `ui.oidcOrigin` and `ui.extraConnect`.
+- `api.jobTokens.existingSecret` (key `api.jobTokens.key`, default `job-tokens`) provides `CORVUS_API_JOB_TOKENS`, the
+  comma separated `<sha256 hex of the token>:<job name>` entries of the ML jobs (see
+  [control-plane-api.md](../reference/control-plane-api.md)). The jobs themselves need `CORVUS_API_URL` and the plain
+  `CORVUS_API_TOKEN`: put both into the Secret named by `api.jobs.envSecret`.
 - `networkPolicy.enabled: true` restricts every component to DNS plus the ports in `networkPolicy.egressPorts`
   (NATS 4222, PostgreSQL 5432, HTTP(S), Kubernetes API) and to ingress on its own port.
 - `serviceMonitor.enabled: true` creates Prometheus Operator ServiceMonitors for ingest, score and api.

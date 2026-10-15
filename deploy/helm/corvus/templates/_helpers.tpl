@@ -143,6 +143,25 @@ topologySpreadConstraints:
   value: {{ .Values.nats.stream | quote }}
 {{- end }}
 
+{{/* Origin (scheme://host[:port]) of an absolute URL; empty for anything else. */}}
+{{- define "corvus.origin" -}}
+{{- regexFind "^https?://[^/?#]+" (toString .) -}}
+{{- end }}
+
+{{/* Upstream the UI proxies /api/ to: ui.apiUpstream, else the in-cluster api Service. */}}
+{{- define "corvus.uiApiUpstream" -}}
+{{- if .Values.ui.apiUpstream -}}
+{{- .Values.ui.apiUpstream -}}
+{{- else if and .Values.ui.proxyApi .Values.api.enabled -}}
+{{- printf "http://%s-api:%v" (include "corvus.fullname" .) .Values.api.port -}}
+{{- end -}}
+{{- end }}
+
+{{/* The UI's config.json: ui.config with basePath taken from ui.basePath. */}}
+{{- define "corvus.uiConfig" -}}
+{{- mustMergeOverwrite (deepCopy .Values.ui.config) (dict "basePath" .Values.ui.basePath) | toPrettyJson -}}
+{{- end }}
+
 {{/* Plain extra env map. Call with the map. */}}
 {{- define "corvus.extraEnv" -}}
 {{- range $k, $v := . }}

@@ -24,6 +24,10 @@ api:
     rolesClaim: realm_access.roles
     roleMapping: '{"corvus-admin": "admin"}'
   extraSecret: corvus-api-extra
+  cors:
+    origins: [https://corvus.example.invalid]
+  jobTokens:
+    existingSecret: corvus-job-tokens
   jobs:
     serviceAccount: corvus-jobs
     envSecret: corvus-job-env
@@ -40,11 +44,15 @@ score:
 ui:
   enabled: true
   config:
-    apiBaseUrl: https://corvus-api.example.invalid/api/v1
+    apiBaseUrl: /api/v1
+    auth:
+      rolesClaim: realm_access.roles
+      roleMapping:
+        corvus-admin: admin
     oidc:
-      authority: https://idp.example.invalid/realms/olf
+      issuer: https://idp.example.invalid/realms/olf
       clientId: corvus-ui
-      scope: openid profile
+      scopes: openid profile
   ingress:
     enabled: true
     className: nginx
