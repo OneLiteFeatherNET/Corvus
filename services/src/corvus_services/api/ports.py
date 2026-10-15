@@ -30,6 +30,7 @@ class PoolRecord:
     created_by: str
     created_at: datetime
     updated_at: datetime
+    raw_retention_days: int | None = None  # None: the deployment default
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,24 @@ class SnapshotRecord:
     file_count: int
     created_by: str
     created_at: datetime
+    needs_rebuild: bool = False  # raw-derived artefacts were deleted by erasure
+
+
+@dataclass(frozen=True)
+class ArtifactRecord:
+    """A prefix a job wrote below the lake bucket for a snapshot (``corvus.derived_artifacts``)."""
+
+    id: UUID
+    snapshot_id: UUID
+    job_id: UUID | None
+    kind: str
+    s3_prefix: str
+    contains_raw: bool
+    created_at: datetime
+
+
+class StaleBuildError(Exception):
+    """The job started before an erasure invalidated the snapshot's raw-derived artefacts."""
 
 
 @dataclass(frozen=True)
@@ -174,6 +193,7 @@ class SnapshotSession:
     segments: list[SessionSegment] = field(default_factory=list)
     labels: list[SessionLabel] = field(default_factory=list)
     erased: bool = False
+    client_protocol: int | None = None  # corvus.sessions.client_protocol
 
 
 @dataclass(frozen=True)
@@ -220,6 +240,25 @@ class SnapshotRepo(Protocol):
     async def current_files(self, snapshot_id: UUID) -> list[CurrentFile]:
         """Live files for the manifest's ``events`` files: a file replaced by compaction is
         followed to its successor; a file without live successor is omitted."""
+        ...
+
+    async def current_raw_files(self, snapshot_id: UUID) -> list[CurrentFile]:
+        """Live ``raw`` files that hold payloads of the manifest's sessions (found through
+        ``lake_file_sessions``, so a compaction replacement is already followed). The manifest
+        lists no raw files; ``manifest_file_id`` equals ``id``."""
+        ...
+
+    async def register_artifact(
+        self, artifact: ArtifactRecord, job_started_at: datetime | None
+    ) -> tuple[ArtifactRecord, bool]:
+        """Insert, or revive/update the row of ``(snapshot_id, s3_prefix)``; returns the stored
+        row and whether it is new. Raises :class:`StaleBuildError` if ``job_started_at`` is before
+        the snapshot's ``needs_rebuild_at``; a ``contains_raw`` artefact of a job that started
+        after it clears ``needs_rebuild``."""
+        ...
+
+    async def list_artifacts(self, snapshot_id: UUID) -> list[ArtifactRecord]:
+        """Live (not deleted) artefacts of a snapshot, ordered by prefix."""
         ...
 
 

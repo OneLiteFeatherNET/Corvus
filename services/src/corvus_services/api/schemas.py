@@ -42,12 +42,20 @@ class PoolOut(BaseModel):
     created_by: str
     created_at: datetime
     updated_at: datetime
+    raw_retention_days: int | None = Field(
+        description="Days raw payloads of the pool's sessions are kept; null: the deployment default"
+    )
+    effective_raw_retention_days: int = Field(
+        description="The retention that applies: the pool's value or the default, capped at the maximum"
+    )
 
     @classmethod
-    def of(cls, p: PoolRecord) -> PoolOut:
+    def of(cls, p: PoolRecord, effective_raw_retention_days: int) -> PoolOut:
         return cls(
             id=p.id, name=p.name, description=p.description, filter=p.filter,
             created_by=p.created_by, created_at=p.created_at, updated_at=p.updated_at,
+            raw_retention_days=p.raw_retention_days,
+            effective_raw_retention_days=effective_raw_retention_days,
         )  # fmt: skip
 
 
@@ -60,6 +68,10 @@ class SnapshotOut(BaseModel):
     file_count: int
     created_by: str
     created_at: datetime
+    needs_rebuild: bool = Field(
+        default=False,
+        description="Erasure deleted the snapshot's raw-derived artefacts; rebuild the features",
+    )
     manifest: dict[str, Any] | None = Field(
         default=None, description="Present on the detail view only"
     )
@@ -69,7 +81,8 @@ class SnapshotOut(BaseModel):
         return cls(
             id=s.id, pool_id=s.pool_id, pool_name=s.pool_name, sha256=s.sha256,
             session_count=s.session_count, file_count=s.file_count, created_by=s.created_by,
-            created_at=s.created_at, manifest=s.manifest if with_manifest else None,
+            created_at=s.created_at, needs_rebuild=s.needs_rebuild,
+            manifest=s.manifest if with_manifest else None,
         )  # fmt: skip
 
 

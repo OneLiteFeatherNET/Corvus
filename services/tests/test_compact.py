@@ -6,18 +6,20 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from uuid import UUID, uuid4
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
 from corvus_services.compact import (
+    DerivedItem,
     LiveFile,
     PurgeItem,
     rewrite_parquet,
     run_compaction,
 )
-from corvus_services.ports import FileRecord
+from corvus_services.ports import FileRecord, ObjectInfo
 from helpers import T0, FakeClock, make_settings
 
 SCHEMA = pa.schema([pa.field("session_id", pa.binary(16)), pa.field("seq", pa.uint64())])
@@ -127,6 +129,13 @@ class FakeLake:
             raise Boom("delete")
         self.objects.pop(key, None)
 
+    async def list_objects(self, prefix: str) -> list[ObjectInfo]:
+        return [
+            ObjectInfo(k, T0, len(v))
+            for k, v in sorted(self.objects.items())
+            if k.startswith(prefix)
+        ]
+
 
 @dataclass
 class FakeCatalog:
@@ -139,6 +148,8 @@ class FakeCatalog:
     held: set[int] = field(default_factory=set)
     fail_replace: bool = False
     next_id: int = 100
+    derived: list[DerivedItem] = field(default_factory=list)
+    invalidated: list[DerivedItem] = field(default_factory=list)
 
     async def pending_request_ids(self, requested_before: datetime) -> list[object]:
         return sorted(
@@ -152,6 +163,12 @@ class FakeCatalog:
             for i, f in sorted(self.files.items())
             if not f.deleted and self.file_sessions[i] & sessions
         ]
+
+    async def derived_for_requests(self, request_ids: list[object]) -> list[DerivedItem]:
+        return [d for d in self.derived if d not in self.invalidated]
+
+    async def invalidate_artifact(self, item: DerivedItem, now: datetime) -> None:
+        self.invalidated.append(item)
 
     @asynccontextmanager
     async def try_lock_file(self, file_id: int) -> AsyncIterator[bool]:
@@ -433,3 +450,44 @@ async def test_crash_after_the_commit_is_finished_by_the_next_run(world: World):
     assert not world.cat.files[1].purge_pending
     assert world.cat.requests["req-1"][1] is False
     world.assert_consistent()
+
+
+def derived_item(prefix: str = "features/snap/raw/") -> DerivedItem:
+    return DerivedItem(uuid4(), UUID(int=1), prefix, T0 - timedelta(hours=1))
+
+
+async def test_raw_derived_artifacts_of_an_erased_player_are_deleted_and_invalidated(world: World):
+    item = derived_item()
+    world.cat.derived = [item]
+    world.lake.objects["features/snap/raw/packets/part-0.parquet"] = b"tokens"
+    world.lake.objects["features/snap/raw/tokenizer.json"] = b"{}"
+    world.lake.objects["features/snap/windows/part-0.parquet"] = b"aggregates"
+
+    report = await world.run()
+
+    assert not report.errors
+    assert world.cat.invalidated == [item]
+    assert report.artifacts_deleted == 1
+    assert not any(k.startswith("features/snap/raw/") for k in world.lake.objects)
+    assert "features/snap/windows/part-0.parquet" in world.lake.objects  # not registered: untouched
+
+
+async def test_a_failed_artifact_delete_keeps_the_row_and_the_request_pending(world: World):
+    world.cat.derived = [derived_item()]
+    world.lake.objects["features/snap/raw/packets/part-0.parquet"] = b"tokens"
+    world.lake.fail_delete = {"features/snap/raw/packets/part-0.parquet"}
+
+    report = await world.run()
+
+    assert world.cat.invalidated == []
+    assert len(report.errors) == 1
+    assert world.cat.requests["req-1"][1] is True  # retried by the next run
+
+
+async def test_an_artifact_outside_the_derived_roots_is_refused(world: World):
+    world.cat.derived = [derived_item("lake/events/")]
+
+    report = await world.run()
+
+    assert world.cat.invalidated == []
+    assert any("refusing" in e for e in report.errors)

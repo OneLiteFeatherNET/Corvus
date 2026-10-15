@@ -91,6 +91,7 @@ def test_a_session_item_has_the_shape_the_jobs_read(env: Env, ds):
         "session_id": SESSIONS[0].hex(),
         "pseudonym": "ab" * 32,
         "started_at": "2026-10-15T12:00:00Z",
+        "client_protocol": None,
         "segments": [
             {"segment": 0, "game_context": "pvp"},
             {"segment": 1, "game_context": "bedwars"},
@@ -176,6 +177,7 @@ def test_files_follow_replacements_and_omit_vanished_files(env: Env, ds):
     resp = env.client.get(f"/api/v1/snapshots/{SNAP}/files", headers=ds)
 
     assert resp.json()["items"] == [{"manifest_file_id": 1, "id": 7, "key": "lake/events/a2"}]
+    assert resp.json()["raw"] == []
 
 
 def test_untouched_files_are_returned_as_they_are(env: Env, ds):

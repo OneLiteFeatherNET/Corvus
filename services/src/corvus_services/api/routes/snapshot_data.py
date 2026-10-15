@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from ..auth import Principal, Role, require
 from ..deps import Deps, get_deps
-from ..ports import SnapshotSession
+from ..ports import CurrentFile, SnapshotSession
 from ..problems import ProblemError
 
 router = APIRouter(tags=["snapshots"])
@@ -40,6 +40,9 @@ class SessionOut(BaseModel):
     session_id: str = Field(description="32 hex characters")
     pseudonym: str | None = Field(description="64 hex characters; null if the session is gone")
     started_at: datetime | None
+    client_protocol: int | None = Field(
+        description="Client protocol version of the session (corvus.sessions); null if the session is gone"
+    )
     segments: list[SegmentOut]
     labels: list[LabelOut] = Field(description="Labels applicable to the session at its start")
     erased: bool = Field(description="The player was erased; always false with exclude_erased")
@@ -50,6 +53,7 @@ class SessionOut(BaseModel):
             session_id=s.session_id.hex(),
             pseudonym=s.pseudonym.hex() if s.pseudonym is not None else None,
             started_at=s.started_at,
+            client_protocol=s.client_protocol,
             segments=[SegmentOut(segment=g.segment, game_context=g.game_context) for g in s.segments],
             labels=[
                 LabelOut(
@@ -76,7 +80,13 @@ class CurrentFileOut(BaseModel):
 
 
 class FilesOut(BaseModel):
-    items: list[CurrentFileOut]
+    items: list[CurrentFileOut] = Field(description="Live `events` files")
+    raw: list[CurrentFileOut] = Field(
+        description=(
+            "Live `raw` files that hold payloads of the snapshot's sessions "
+            "(`manifest_file_id` equals `id`: the manifest lists no raw files)"
+        )
+    )
 
 
 def _after(cursor: str | None) -> bytes | None:
@@ -128,7 +138,7 @@ async def snapshot_sessions(
     "/snapshots/{snapshot_id}/files",
     response_model=FilesOut,
     responses=_NOT_FOUND,
-    summary="Live events files of a snapshot (follows compaction replacements)",
+    summary="Live events and raw files of a snapshot (follows compaction replacements)",
 )
 async def snapshot_files(
     snapshot_id: UUID, _: Principal = _DS, deps: Deps = Depends(get_deps)
@@ -136,8 +146,9 @@ async def snapshot_files(
     if await deps.repos.snapshots.get(snapshot_id) is None:
         raise ProblemError(404, "snapshot not found", slug="not-found")
     files = await deps.repos.snapshots.current_files(snapshot_id)
-    return FilesOut(
-        items=[
-            CurrentFileOut(manifest_file_id=f.manifest_file_id, id=f.id, key=f.key) for f in files
-        ]
-    )
+    raw = await deps.repos.snapshots.current_raw_files(snapshot_id)
+
+    def out(f: CurrentFile) -> CurrentFileOut:
+        return CurrentFileOut(manifest_file_id=f.manifest_file_id, id=f.id, key=f.key)
+
+    return FilesOut(items=[out(f) for f in files], raw=[out(f) for f in raw])

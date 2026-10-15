@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MIB = 1024 * 1024
@@ -65,6 +65,8 @@ class Settings(BaseSettings):
 
     # Housekeeping
     raw_retention_days: int = Field(default=21, ge=1)
+    # Upper limit of a pool's raw_retention_days (the API refuses more; housekeeping clamps).
+    raw_retention_max_days: int = Field(default=365, ge=1)
     orphan_grace_s: int = 3600
     staging_max_age_s: int = 3600
     batch_log_retention_days: int = Field(default=3, ge=1)
@@ -76,6 +78,14 @@ class Settings(BaseSettings):
     # Erasure requests are compacted only after this age, so that frames still buffered or cached
     # by ingest at erasure time have landed in the lake (session cache TTL plus flush age).
     compact_grace_s: int = Field(default=600, ge=0)
+
+    @model_validator(mode="after")
+    def _retention_default_within_max(self) -> Settings:
+        if self.raw_retention_days > self.raw_retention_max_days:
+            raise ValueError(
+                "CORVUS_RAW_RETENTION_DAYS must not exceed CORVUS_RAW_RETENTION_MAX_DAYS"
+            )
+        return self
 
     @field_validator("kek")
     @classmethod
