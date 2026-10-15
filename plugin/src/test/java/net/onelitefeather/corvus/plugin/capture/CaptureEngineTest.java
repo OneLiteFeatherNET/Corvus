@@ -178,6 +178,26 @@ class CaptureEngineTest {
     }
 
     @Test
+    void truncatedPayloadKeepsItsOriginalSize() {
+        RecordingSink sink = new RecordingSink();
+        EngineFixture f = new EngineFixture().build(sink, EngineFixture.KEY, true, 4);
+
+        f.engine.onPacket(new FakePacketView().payload(new byte[100]));
+
+        assertEquals(100, ((WriteItem.FrameItem) sink.frames.get(0)).frame().getPayloadOriginalSize());
+    }
+
+    @Test
+    void payloadOriginalSizeIsZeroWhenNoPayloadIsRecorded() {
+        RecordingSink sink = new RecordingSink();
+        EngineFixture f = new EngineFixture().build(sink, EngineFixture.KEY, false, 2048);
+
+        f.engine.onPacket(new FakePacketView().payload(new byte[100]));
+
+        assertEquals(0, ((WriteItem.FrameItem) sink.frames.get(0)).frame().getPayloadOriginalSize());
+    }
+
+    @Test
     void frameCarriesStableVocabularyIdAndOffsetFromInjectedClock() {
         RecordingSink sink = new RecordingSink();
         EngineFixture f = EngineFixture.withSink(sink);

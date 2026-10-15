@@ -78,6 +78,11 @@ final class PacketEventsView implements PacketView {
     }
 
     @Override
+    public int payloadSize() {
+        return ((ByteBuf) event.getByteBuf()).readableBytes();
+    }
+
+    @Override
     public void decodeEvent(Frame.Builder target) {
         EventDecoder.decode(event, target);
     }

@@ -110,6 +110,11 @@ public class FakePacketView implements PacketView {
     }
 
     @Override
+    public int payloadSize() {
+        return payload.length;
+    }
+
+    @Override
     public void decodeEvent(Frame.Builder target) {
         if (decodeFailure != null) {
             throw decodeFailure;

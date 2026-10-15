@@ -30,6 +30,9 @@ public interface PacketView {
     /** The single byte copy per frame: the payload after the packet id, at most {@code maxBytes} long. */
     byte[] copyPayload(int maxBytes);
 
+    /** Size of the readable payload before any truncation. */
+    int payloadSize();
+
     /** Fills the decoded event of the frame, if this packet type has one. May throw; the engine tolerates that. */
     void decodeEvent(Frame.Builder target);
 

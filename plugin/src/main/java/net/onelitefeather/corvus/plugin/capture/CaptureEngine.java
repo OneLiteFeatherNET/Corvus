@@ -127,6 +127,7 @@ public final class CaptureEngine {
                 .setPacketType(CorvusPacket.idOf(view.packetType()));
         if (settings.rawPayloads()) {
             frame.setPayload(UnsafeByteOperations.unsafeWrap(view.copyPayload(settings.maxPayloadBytes())));
+            frame.setPayloadOriginalSize(view.payloadSize());
         }
         try {
             view.decodeEvent(frame);
