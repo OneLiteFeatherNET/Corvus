@@ -18,7 +18,7 @@ from corvus_ml.raw.crypto import (
     payload_aad,
     unwrap_dek,
 )
-from corvus_ml.raw.keys import MappingDekProvider, WrappedKeyDekProvider
+from corvus_ml.raw.keys import MappingDekProvider, PgDekProvider, WrappedKeyDekProvider
 
 DEK = bytes(range(32))
 SESSION = bytes(range(16, 32))
@@ -106,3 +106,69 @@ def test_mapping_provider():
     provider = MappingDekProvider({PSEUDONYM: DEK})
     assert provider.dek_for(PSEUDONYM) == DEK
     assert provider.dek_for(bytes(32)) is None
+
+
+class _FakeCursor:
+    def __init__(self, rows, log):
+        self.rows, self.log = rows, log
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params):
+        self.log.append((sql, params))
+
+    def fetchall(self):
+        return self.rows
+
+
+class _FakeConnection:
+    def __init__(self, rows, log):
+        self.rows, self.log, self.read_only = rows, log, False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def cursor(self):
+        return _FakeCursor(self.rows, self.log)
+
+
+def test_pg_provider_reads_player_keys_read_only_and_unwraps(monkeypatch):
+    import types
+
+    log, conns = [], []
+
+    def connect(dsn):
+        conn = _FakeConnection([(PSEUDONYM, WRAPPED)], log)
+        conns.append((dsn, conn))
+        return conn
+
+    monkeypatch.setitem(
+        __import__("sys").modules, "psycopg", types.SimpleNamespace(connect=connect)
+    )
+    provider = PgDekProvider("postgresql://job@db/corvus", KEK)
+
+    assert provider.dek_for(PSEUDONYM) == DEK
+    assert provider.dek_for(bytes([7]) * 32) is None, "no row: erased"
+    (sql, params), *_ = log
+    assert "FROM corvus.player_keys" in sql
+    assert sql.lstrip().upper().startswith("SELECT")
+    assert params == ([PSEUDONYM],)
+    assert conns[0][0] == "postgresql://job@db/corvus"
+    assert conns[0][1].read_only is True
+
+
+def test_pg_provider_needs_dsn_and_kek_in_the_environment():
+    kek = base64.b64encode(KEK).decode()
+
+    with pytest.raises(ValueError, match="CORVUS_PG_DSN"):
+        PgDekProvider.from_env({"CORVUS_KEK": kek})
+    with pytest.raises(ValueError, match="CORVUS_KEK"):
+        PgDekProvider.from_env({"CORVUS_PG_DSN": "postgresql://x"})
+    assert PgDekProvider.from_env({"CORVUS_PG_DSN": "postgresql://x", "CORVUS_KEK": kek})
