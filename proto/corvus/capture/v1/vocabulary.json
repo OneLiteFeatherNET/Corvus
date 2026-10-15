@@ -1,0 +1,1050 @@
+[
+  {
+    "id": 1,
+    "name": "C_TELEPORT_CONFIRM",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 2,
+    "name": "C_CLIENT_STATUS",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 3,
+    "name": "C_CLIENT_SETTINGS",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 4,
+    "name": "C_WINDOW_CONFIRMATION",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 5,
+    "name": "C_CLICK_WINDOW_BUTTON",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 6,
+    "name": "C_CLICK_WINDOW",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "stripped"
+  },
+  {
+    "id": 7,
+    "name": "C_CLOSE_WINDOW",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 8,
+    "name": "C_PLUGIN_MESSAGE",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "stripped"
+  },
+  {
+    "id": 9,
+    "name": "C_INTERACT_ENTITY",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 10,
+    "name": "C_KEEP_ALIVE",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 11,
+    "name": "C_PLAYER_POSITION",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 12,
+    "name": "C_PLAYER_POSITION_AND_ROTATION",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 13,
+    "name": "C_PLAYER_ROTATION",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 14,
+    "name": "C_PLAYER_FLYING",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 15,
+    "name": "C_VEHICLE_MOVE",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 16,
+    "name": "C_STEER_BOAT",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 17,
+    "name": "C_PLAYER_ABILITIES",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 18,
+    "name": "C_PLAYER_DIGGING",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 19,
+    "name": "C_ENTITY_ACTION",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 20,
+    "name": "C_STEER_VEHICLE",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 21,
+    "name": "C_PONG",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 22,
+    "name": "C_HELD_ITEM_CHANGE",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 23,
+    "name": "C_CREATIVE_INVENTORY_ACTION",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "stripped"
+  },
+  {
+    "id": 24,
+    "name": "C_ANIMATION",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 25,
+    "name": "C_PLAYER_BLOCK_PLACEMENT",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 26,
+    "name": "C_USE_ITEM",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 27,
+    "name": "C_CLIENT_TICK_END",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 28,
+    "name": "C_PLAYER_INPUT",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 29,
+    "name": "C_ATTACK",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 30,
+    "name": "C_PUNCH",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 31,
+    "name": "C_SPECTATE",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "stripped"
+  },
+  {
+    "id": 32,
+    "name": "C_PICK_ITEM",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 33,
+    "name": "C_CONFIGURATION_ACK",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 34,
+    "name": "C_CHUNK_BATCH_ACK",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 35,
+    "name": "C_RESOURCE_PACK_STATUS",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 36,
+    "name": "C_PLAYER_LOADED",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 37,
+    "name": "C_EDIT_BOOK",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "stripped"
+  },
+  {
+    "id": 38,
+    "name": "C_NAME_ITEM",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "stripped"
+  },
+  {
+    "id": 39,
+    "name": "C_UPDATE_COMMAND_BLOCK",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "stripped"
+  },
+  {
+    "id": 40,
+    "name": "C_UPDATE_COMMAND_BLOCK_MINECART",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "stripped"
+  },
+  {
+    "id": 41,
+    "name": "C_UPDATE_STRUCTURE_BLOCK",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "stripped"
+  },
+  {
+    "id": 42,
+    "name": "C_UPDATE_JIGSAW_BLOCK",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "stripped"
+  },
+  {
+    "id": 43,
+    "name": "C_UPDATE_SIGN",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "stripped"
+  },
+  {
+    "id": 44,
+    "name": "C_COOKIE_RESPONSE",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "stripped"
+  },
+  {
+    "id": 45,
+    "name": "C_SET_TEST_BLOCK",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "stripped"
+  },
+  {
+    "id": 46,
+    "name": "C_TEST_INSTANCE_BLOCK_ACTION",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "stripped"
+  },
+  {
+    "id": 47,
+    "name": "C_CUSTOM_CLICK_ACTION",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "stripped"
+  },
+  {
+    "id": 48,
+    "name": "C_SET_GAME_RULE",
+    "direction": "serverbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "stripped"
+  },
+  {
+    "id": 49,
+    "name": "C_CHAT_PREVIEW",
+    "direction": "serverbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 50,
+    "name": "C_CHAT_MESSAGE",
+    "direction": "serverbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 51,
+    "name": "C_TAB_COMPLETE",
+    "direction": "serverbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 52,
+    "name": "C_CHAT_COMMAND",
+    "direction": "serverbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 53,
+    "name": "C_CHAT_COMMAND_UNSIGNED",
+    "direction": "serverbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 54,
+    "name": "C_CHAT_ACK",
+    "direction": "serverbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 55,
+    "name": "C_CHAT_SESSION_UPDATE",
+    "direction": "serverbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 100,
+    "name": "S_ENTITY_RELATIVE_MOVE",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 101,
+    "name": "S_ENTITY_RELATIVE_MOVE_AND_ROTATION",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 102,
+    "name": "S_ENTITY_ROTATION",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 103,
+    "name": "S_ENTITY_HEAD_LOOK",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 104,
+    "name": "S_ENTITY_TELEPORT",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 105,
+    "name": "S_ENTITY_VELOCITY",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 106,
+    "name": "S_ENTITY_POSITION_SYNC",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 107,
+    "name": "S_PLAYER_POSITION_AND_LOOK",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "default"
+  },
+  {
+    "id": 108,
+    "name": "S_KEEP_ALIVE",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 109,
+    "name": "S_PING",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 110,
+    "name": "S_WINDOW_CONFIRMATION",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 111,
+    "name": "S_DAMAGE_EVENT",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 112,
+    "name": "S_HURT_ANIMATION",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 113,
+    "name": "S_ENTITY_ANIMATION",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 114,
+    "name": "S_ENTITY_STATUS",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 115,
+    "name": "S_EXPLOSION",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 116,
+    "name": "S_UPDATE_HEALTH",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 117,
+    "name": "S_RESPAWN",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 118,
+    "name": "S_JOIN_GAME",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 119,
+    "name": "S_DESTROY_ENTITIES",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 120,
+    "name": "S_SPAWN_ENTITY",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 121,
+    "name": "S_ENTITY_EFFECT",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 122,
+    "name": "S_REMOVE_ENTITY_EFFECT",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 123,
+    "name": "S_ENTITY_EQUIPMENT",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 124,
+    "name": "S_ENTITY_METADATA",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 125,
+    "name": "S_BLOCK_CHANGE",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 126,
+    "name": "S_ACKNOWLEDGE_PLAYER_DIGGING",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 127,
+    "name": "S_ACKNOWLEDGE_BLOCK_CHANGES",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 128,
+    "name": "S_CHANGE_GAME_STATE",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 129,
+    "name": "S_PLAYER_ABILITIES",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 130,
+    "name": "S_SET_SLOT",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 131,
+    "name": "S_WINDOW_ITEMS",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 132,
+    "name": "S_CLOSE_WINDOW",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 133,
+    "name": "S_OPEN_WINDOW",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 134,
+    "name": "S_UPDATE_ATTRIBUTES",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 135,
+    "name": "S_PLUGIN_MESSAGE",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 136,
+    "name": "S_DISCONNECT",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 137,
+    "name": "S_SET_PASSENGERS",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 138,
+    "name": "S_ATTACH_ENTITY",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 139,
+    "name": "S_COLLECT_ITEM",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 140,
+    "name": "S_ENTITY_MOVEMENT",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 141,
+    "name": "S_PLAYER_ROTATION",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 142,
+    "name": "S_MOVE_MINECART",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 143,
+    "name": "S_BUNDLE",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 144,
+    "name": "S_TIME_UPDATE",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 145,
+    "name": "S_SET_COOLDOWN",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 146,
+    "name": "S_CHAT_PREVIEW_PACKET",
+    "direction": "clientbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 147,
+    "name": "S_PLAYER_CHAT_HEADER",
+    "direction": "clientbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 148,
+    "name": "S_TAB_COMPLETE",
+    "direction": "clientbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 149,
+    "name": "S_DECLARE_COMMANDS",
+    "direction": "clientbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 150,
+    "name": "S_CHAT_MESSAGE",
+    "direction": "clientbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 151,
+    "name": "S_SYSTEM_CHAT_MESSAGE",
+    "direction": "clientbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 152,
+    "name": "S_DELETE_CHAT",
+    "direction": "clientbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 153,
+    "name": "S_DISGUISED_CHAT",
+    "direction": "clientbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 154,
+    "name": "S_DISPLAY_CHAT_PREVIEW",
+    "direction": "clientbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 155,
+    "name": "S_CUSTOM_CHAT_COMPLETIONS",
+    "direction": "clientbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 156,
+    "name": "S_SERVER_DATA",
+    "direction": "clientbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 157,
+    "name": "S_PLAYER_INFO",
+    "direction": "clientbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 158,
+    "name": "S_PLAYER_INFO_UPDATE",
+    "direction": "clientbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 159,
+    "name": "S_PLAYER_INFO_REMOVE",
+    "direction": "clientbound",
+    "state": "play",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  },
+  {
+    "id": 200,
+    "name": "CFG_C_CLIENT_SETTINGS",
+    "direction": "serverbound",
+    "state": "configuration",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 201,
+    "name": "CFG_C_PLUGIN_MESSAGE",
+    "direction": "serverbound",
+    "state": "configuration",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 202,
+    "name": "CFG_C_CONFIGURATION_END_ACK",
+    "direction": "serverbound",
+    "state": "configuration",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 203,
+    "name": "CFG_C_KEEP_ALIVE",
+    "direction": "serverbound",
+    "state": "configuration",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 204,
+    "name": "CFG_C_PONG",
+    "direction": "serverbound",
+    "state": "configuration",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 205,
+    "name": "CFG_C_RESOURCE_PACK_STATUS",
+    "direction": "serverbound",
+    "state": "configuration",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 206,
+    "name": "CFG_C_SELECT_KNOWN_PACKS",
+    "direction": "serverbound",
+    "state": "configuration",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 220,
+    "name": "CFG_S_PLUGIN_MESSAGE",
+    "direction": "clientbound",
+    "state": "configuration",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 221,
+    "name": "CFG_S_DISCONNECT",
+    "direction": "clientbound",
+    "state": "configuration",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 222,
+    "name": "CFG_S_CONFIGURATION_END",
+    "direction": "clientbound",
+    "state": "configuration",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 223,
+    "name": "CFG_S_KEEP_ALIVE",
+    "direction": "clientbound",
+    "state": "configuration",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 224,
+    "name": "CFG_S_PING",
+    "direction": "clientbound",
+    "state": "configuration",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 225,
+    "name": "CFG_S_REGISTRY_DATA",
+    "direction": "clientbound",
+    "state": "configuration",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 226,
+    "name": "CFG_S_UPDATE_TAGS",
+    "direction": "clientbound",
+    "state": "configuration",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 227,
+    "name": "CFG_S_SELECT_KNOWN_PACKS",
+    "direction": "clientbound",
+    "state": "configuration",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
+    "id": 228,
+    "name": "CFG_S_RESET_CHAT",
+    "direction": "clientbound",
+    "state": "configuration",
+    "private": true,
+    "payload_policy": "frame_dropped"
+  }
+]

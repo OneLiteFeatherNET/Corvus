@@ -17,3 +17,11 @@ Rules:
   test enforces this.
 - Packet types that are not in the vocabulary are recorded with id `0`, and their payload is only kept in
   `capture.raw_payloads = "all"` (fail closed).
+
+## Machine-readable export
+
+`proto/corvus/capture/v1/vocabulary.json` lists every id with `name`, `direction`, `state`, `private` (frame is
+never recorded) and `payload_policy` (`frame_dropped`, `stripped`, `default`, `all_only`). The pilot analyzer
+loads it as its privacy denylist and payload policy. `VocabularyJsonTest` fails when the file and the Java
+vocabulary, `PrivacyFilter` or `PayloadPolicy` disagree. After an intended change regenerate it with
+`./gradlew :plugin:test --tests '*VocabularyJsonTest' -PupdateVocabulary` and commit the result.

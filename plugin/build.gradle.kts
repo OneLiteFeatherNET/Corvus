@@ -44,9 +44,16 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
+val vocabularyJson = rootProject.file("proto/corvus/capture/v1/vocabulary.json")
+
 tasks.test {
     useJUnitPlatform()
     maxParallelForks = 1
+    // The committed vocabulary export is checked against the Java vocabulary. Regenerate it with
+    //   ./gradlew :plugin:test --tests '*VocabularyJsonTest' -PupdateVocabulary
+    inputs.files(vocabularyJson)
+    systemProperty("corvus.vocabulary.json", vocabularyJson.absolutePath)
+    systemProperty("corvus.vocabulary.update", providers.gradleProperty("updateVocabulary").isPresent.toString())
 }
 
 tasks.shadowJar {

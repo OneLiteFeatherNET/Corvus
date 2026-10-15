@@ -2,6 +2,8 @@ package net.onelitefeather.corvus.plugin.vocab;
 
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.packettype.PacketTypeCommon;
+import net.onelitefeather.corvus.proto.capture.v1.ConnectionState;
+import net.onelitefeather.corvus.proto.capture.v1.Direction;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -174,6 +176,18 @@ public enum CorvusPacket {
 
     public PacketTypeCommon packetEventsType() {
         return type;
+    }
+
+    /** Direction of the packet as seen from the proxy: serverbound = sent by the client. */
+    public Direction direction() {
+        return type instanceof PacketType.Play.Client || type instanceof PacketType.Configuration.Client
+                ? Direction.DIRECTION_SERVERBOUND : Direction.DIRECTION_CLIENTBOUND;
+    }
+
+    /** Connection state of the packet (play or configuration). */
+    public ConnectionState state() {
+        return type instanceof PacketType.Configuration.Client || type instanceof PacketType.Configuration.Server
+                ? ConnectionState.CONNECTION_STATE_CONFIGURATION : ConnectionState.CONNECTION_STATE_PLAY;
     }
 
     /** @return the stable id of the given type, or 0 if unmapped. */
