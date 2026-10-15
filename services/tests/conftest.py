@@ -9,11 +9,18 @@ from pathlib import Path
 _SERVICES = Path(__file__).resolve().parents[1]
 _PB2 = _SERVICES / "src/corvus_services/_gen/corvus/capture/v1/capture_pb2.py"
 _PROTO = _SERVICES.parent / "proto/corvus/capture/v1/capture.proto"
+_SCORE_PB2 = _SERVICES / "src/corvus_services/_gen/corvus/score/v1/score_pb2.py"
+_SCORE_PROTO = _SERVICES.parent / "proto/corvus/score/v1/score.proto"
 
 
 def _ensure_bindings() -> None:
     """Generate the bindings once per checkout (or when the .proto is newer)."""
-    if _PB2.exists() and _PB2.stat().st_mtime >= _PROTO.stat().st_mtime:
+    if (
+        _PB2.exists()
+        and _PB2.stat().st_mtime >= _PROTO.stat().st_mtime
+        and _SCORE_PB2.exists()
+        and _SCORE_PB2.stat().st_mtime >= _SCORE_PROTO.stat().st_mtime
+    ):
         return
     out = _PB2.parents[3]
     out.mkdir(parents=True, exist_ok=True)
@@ -25,6 +32,7 @@ def _ensure_bindings() -> None:
             f"--proto_path={_PROTO.parents[3]}",
             f"--python_out={out}",
             str(_PROTO),
+            str(_SCORE_PROTO),
         ],
         check=True,
     )

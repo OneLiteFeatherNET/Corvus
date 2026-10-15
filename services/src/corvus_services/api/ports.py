@@ -241,6 +241,51 @@ class JobRepo(Protocol):
     ) -> JobRecord: ...
 
 
+@dataclass(frozen=True)
+class ScoreLatestRecord:
+    """Latest score of a player for one (game context, domain, model)."""
+
+    game_context: str
+    domain: str
+    model_name: str
+    model_version: str
+    stage: str
+    score: float
+    smoothed: float
+    windows: int
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class ScoreHistoryRecord:
+    id: int
+    session_id: bytes
+    segment: int
+    game_context: str
+    domain: str
+    model_name: str
+    model_version: str
+    stage: str
+    score: float
+    smoothed: float
+    windows: int
+    window_start_offset_nanos: int
+    window_end_offset_nanos: int
+    scored_at: datetime
+
+
+class ScoreRepo(Protocol):
+    async def latest(self, pseudonym: bytes) -> list[ScoreLatestRecord]:
+        """Ordered by game context, domain, model name."""
+        ...
+
+    async def history(
+        self, pseudonym: bytes, game_context: str | None, limit: int
+    ) -> list[ScoreHistoryRecord]:
+        """Newest first, at most ``limit`` rows."""
+        ...
+
+
 class Database(Protocol):
     async def ping(self) -> None: ...
 
@@ -256,5 +301,6 @@ class Repos:
     blocklist: BlocklistRepo
     models: ModelRepo
     jobs: JobRepo
+    scores: ScoreRepo
     db: Database
     closers: list[Any] = field(default_factory=list)

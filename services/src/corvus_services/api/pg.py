@@ -37,6 +37,8 @@ from .ports import (
     PlayerInfo,
     PoolRecord,
     Repos,
+    ScoreHistoryRecord,
+    ScoreLatestRecord,
     SnapshotMaterial,
     SnapshotRecord,
     StaleError,
@@ -692,6 +694,35 @@ class PgJobRepo:
         return _job(tuple(row))
 
 
+class PgScoreRepo:
+    def __init__(self, pool: Pool) -> None:
+        self._pool = pool
+
+    async def latest(self, pseudonym: bytes) -> list[ScoreLatestRecord]:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT game_context, domain, model_name, model_version, stage, score, smoothed,"
+                " windows, updated_at FROM corvus.scores_latest WHERE pseudonym = %s"
+                " ORDER BY game_context, domain, model_name",
+                (pseudonym,),
+            )
+            return [ScoreLatestRecord(*r) for r in await cur.fetchall()]
+
+    async def history(
+        self, pseudonym: bytes, game_context: str | None, limit: int
+    ) -> list[ScoreHistoryRecord]:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT id, session_id, segment, game_context, domain, model_name, model_version,"
+                " stage, score, smoothed, windows, window_start_offset_nanos,"
+                " window_end_offset_nanos, scored_at FROM corvus.score_history"
+                " WHERE pseudonym = %s AND (%s::text IS NULL OR game_context = %s)"
+                " ORDER BY scored_at DESC, id DESC LIMIT %s",
+                (pseudonym, game_context, game_context, limit),
+            )
+            return [ScoreHistoryRecord(r[0], bytes(r[1]), *r[2:]) for r in await cur.fetchall()]
+
+
 class PgDatabase:
     def __init__(self, pool: Pool) -> None:
         self._pool = pool
@@ -713,6 +744,7 @@ async def open_repos(dsn: str, max_size: int) -> Repos:
         blocklist=PgBlocklistRepo(pool),
         models=PgModelRepo(pool),
         jobs=PgJobRepo(pool),
+        scores=PgScoreRepo(pool),
         db=PgDatabase(pool),
         closers=[pool.close],
     )

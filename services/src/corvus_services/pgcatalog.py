@@ -234,3 +234,10 @@ class PgCatalog:
                 "DELETE FROM corvus.session_batches WHERE received_at < %s", (before,)
             )
             return int(cur.rowcount)
+
+    async def prune_score_history(self, before: datetime) -> int:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "DELETE FROM corvus.score_history WHERE scored_at < %s", (before,)
+            )
+            return int(cur.rowcount)

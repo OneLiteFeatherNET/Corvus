@@ -5,7 +5,8 @@
 * ``_staging/`` objects older than the staging age are leftovers and are deleted;
 * ``raw`` files whose date partition is older than the retention are deleted and marked
   ``deleted_at`` in the catalog;
-* ``session_batches`` rows (redelivery bookkeeping) older than their retention are pruned.
+* ``session_batches`` rows (redelivery bookkeeping) older than their retention are pruned;
+* ``score_history`` rows (online scoring) older than their retention are pruned.
 """
 
 from __future__ import annotations
@@ -51,6 +52,7 @@ class HousekeepingCatalog(Protocol):
     async def live_raw_files_before(self, day: date) -> list[tuple[int, str]]: ...
     async def mark_deleted(self, file_id: int, at: datetime) -> None: ...
     async def prune_batches(self, before: datetime) -> int: ...
+    async def prune_score_history(self, before: datetime) -> int: ...
 
 
 @dataclass
@@ -59,6 +61,7 @@ class Report:
     staging: int = 0
     raw_expired: int = 0
     batches_pruned: int = 0
+    scores_pruned: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -106,12 +109,17 @@ async def run_housekeeping(
     report.batches_pruned = await catalog.prune_batches(
         now - timedelta(days=settings.batch_log_retention_days)
     )
+    report.scores_pruned = await catalog.prune_score_history(
+        now - timedelta(days=settings.score_history_retention_days)
+    )
     log.info(
-        "housekeeping: %d orphans, %d staging, %d raw expired, %d batches pruned, %d errors",
+        "housekeeping: %d orphans, %d staging, %d raw expired, %d batches pruned, "
+        "%d score rows pruned, %d errors",
         report.orphans,
         report.staging,
         report.raw_expired,
         report.batches_pruned,
+        report.scores_pruned,
         len(report.errors),
     )
     return report

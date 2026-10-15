@@ -17,7 +17,7 @@ from .jobs import build_runner
 from .pg import open_repos
 from .problems import install_problem_handlers
 from .pseudonym import Pseudonymizer
-from .routes import jobs, labels, models, players, pools, system
+from .routes import jobs, labels, models, players, pools, scores, system
 from .settings import ApiSettings
 
 log = logging.getLogger("corvus.api")
@@ -103,7 +103,7 @@ def create_app(settings: ApiSettings | None = None, deps: Deps | None = None) ->
             m.latency.labels(template, request.method).observe(time.perf_counter() - started)
 
     for router in (pools.router, labels.router, players.router, players.plugin_router,
-                   models.router, jobs.router):  # fmt: skip
+                   models.router, jobs.router, scores.router):  # fmt: skip
         app.include_router(router, prefix=API_PREFIX)
     app.include_router(system.router)
     return app

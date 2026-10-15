@@ -17,6 +17,8 @@ from .ports import (
     ModelRecord,
     PlayerInfo,
     PoolRecord,
+    ScoreHistoryRecord,
+    ScoreLatestRecord,
     SnapshotRecord,
     TransitionRecord,
 )
@@ -209,3 +211,54 @@ class JobOut(BaseModel):
             runner=j.runner, message=j.message, created_by=j.created_by, created_at=j.created_at,
             updated_at=j.updated_at, finished_at=j.finished_at,
         )  # fmt: skip
+
+
+class ScoreLatestOut(BaseModel):
+    game_context: str
+    domain: str
+    model_name: str
+    model_version: str
+    stage: Literal["shadow", "canary", "enforce"]
+    score: float = Field(description="Window score in [0, 1]; higher = more likely cheating")
+    smoothed: float = Field(description="Exponential moving average over the segment's windows")
+    windows: int = Field(description="Number of windows behind `smoothed`")
+    updated_at: datetime
+
+    @classmethod
+    def of(cls, r: ScoreLatestRecord) -> ScoreLatestOut:
+        return cls(
+            game_context=r.game_context, domain=r.domain, model_name=r.model_name,
+            model_version=r.model_version, stage=r.stage,  # type: ignore[arg-type]
+            score=r.score, smoothed=r.smoothed, windows=r.windows, updated_at=r.updated_at,
+        )  # fmt: skip
+
+
+class ScoreHistoryOut(BaseModel):
+    session_id: str = Field(description="32 hex characters")
+    segment: int
+    game_context: str
+    domain: str
+    model_name: str
+    model_version: str
+    stage: Literal["shadow", "canary", "enforce"]
+    score: float
+    smoothed: float
+    windows: int
+    window_start_offset_nanos: int
+    window_end_offset_nanos: int
+    scored_at: datetime
+
+    @classmethod
+    def of(cls, r: ScoreHistoryRecord) -> ScoreHistoryOut:
+        return cls(
+            session_id=r.session_id.hex(), segment=r.segment, game_context=r.game_context,
+            domain=r.domain, model_name=r.model_name, model_version=r.model_version,
+            stage=r.stage,  # type: ignore[arg-type]
+            score=r.score, smoothed=r.smoothed, windows=r.windows,
+            window_start_offset_nanos=r.window_start_offset_nanos,
+            window_end_offset_nanos=r.window_end_offset_nanos, scored_at=r.scored_at,
+        )  # fmt: skip
+
+
+class Items[T](BaseModel):
+    items: list[T]

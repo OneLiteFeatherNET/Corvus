@@ -166,6 +166,20 @@ The runner is selected with `CORVUS_API_JOB_RUNNER`:
 Contract with the job process, identical for both runners: arguments are the command followed by the job type; the
 environment carries `CORVUS_JOB_ID`, `CORVUS_JOB_TYPE`, `CORVUS_JOB_SNAPSHOT_ID` and `CORVUS_JOB_PARAMS` (JSON).
 
+### Scores (staff)
+
+Read-only view of what `corvus-score` persisted (see [data-lake.md](data-lake.md) section 6). Role `staff` (and
+`admin`). The pseudonym is the 64-hex form (`POST /players/lookup` resolves a UUID); a malformed one is `422`.
+Scores of `shadow` models are visible here although they are never published. A player without scores yields an
+empty list, not `404`. Scores are informational, Corvus never sanctions players.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /scores/players/{pseudonym}` | `{"items": [...]}`: the latest score per (`game_context`, `domain`, `model_name`) with `model_version`, `stage`, `score`, `smoothed`, `windows`, `updated_at`. |
+| `GET /scores/players/{pseudonym}/history?game_context=&limit=` | `{"items": [...]}` newest first: the same fields per window plus `session_id`, `segment`, `window_start_offset_nanos`, `window_end_offset_nanos`, `scored_at`. `game_context` is optional, `limit` defaults to 100 (1 to 1000). |
+
+The history keeps `CORVUS_SCORE_HISTORY_RETENTION_DAYS` (default 14) days; `corvus-housekeeping` prunes it.
+
 ### Operations
 
 `GET /healthz` (liveness, no dependencies), `GET /readyz` (`503` when PostgreSQL does not answer within 3 s),
@@ -189,5 +203,5 @@ unauthenticated; keep it on the cluster network.
 ## Data model
 
 `0002_control_plane.sql` adds `pools`, `dataset_snapshots` (with the immutability trigger), `labels`, `blocklist`,
-`erasure_requests`, `models`, `model_transitions` and `jobs` to the `corvus` schema. Run `corvus-migrate` before
-starting the API.
+`erasure_requests`, `models`, `model_transitions` and `jobs` to the `corvus` schema; `0003_scores.sql` adds
+`scores_latest` and `score_history`. Run `corvus-migrate` before starting the API.
