@@ -1,0 +1,28 @@
+# Build output
+build/
+.gradle/
+out/
+*.class
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node / Nuxt
+node_modules/
+.nuxt/
+.output/
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Local pilot data (pseudonymised captures stay local)
+deploy/pilot/data/
+captures/

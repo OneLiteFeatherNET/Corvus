@@ -1,0 +1,175 @@
+syntax = "proto3";
+
+package corvus.capture.v1;
+
+option java_multiple_files = true;
+option java_package = "net.onelitefeather.corvus.proto.capture.v1";
+
+// Wire and file format of the capture stream produced by the Velocity plugin.
+// A capture stream is a sequence of length-delimited Envelope messages.
+// No message may carry a clear-text player UUID, player name, IP address or chat content.
+
+message Envelope {
+  oneof body {
+    SessionStart session_start = 1;
+    SegmentStart segment_start = 2;
+    CaptureBatch batch = 3;
+    SessionEnd session_end = 4;
+  }
+}
+
+// Emitted once when a player's proxy connection reaches a capturable state.
+message SessionStart {
+  // Random per-connection id (16 bytes), never derived from the player UUID.
+  bytes session_id = 1;
+  // HMAC-SHA-256(key, player UUID); key is held outside the data lake.
+  bytes player_pseudonym = 2;
+  // Identifier of the HMAC key version, needed for key rotation.
+  string pseudonym_key_id = 3;
+  // Protocol version spoken by the client (native, before any translation).
+  int32 client_protocol_version = 4;
+  // Protocol version of the frames as observed by the plugin.
+  int32 observed_protocol_version = 5;
+  string proxy_id = 6;
+  string plugin_version = 7;
+  int64 started_at_unix_millis = 8;
+}
+
+// Emitted when the player connects to a backend server (first join and every switch).
+message SegmentStart {
+  bytes session_id = 1;
+  uint32 segment = 2;
+  string backend_server = 3;
+  // Tag from the backend-server -> context mapping, e.g. "pvp", "survival", "lobby".
+  string game_context = 4;
+  // Client brand as reported by the client (e.g. "vanilla", "fabric"); may be empty.
+  string client_brand = 5;
+  int64 started_at_unix_millis = 6;
+}
+
+message SessionEnd {
+  bytes session_id = 1;
+  int64 ended_at_unix_millis = 2;
+  CaptureCounters counters = 3;
+}
+
+message CaptureBatch {
+  bytes session_id = 1;
+  uint32 segment = 2;
+  repeated Frame frames = 3;
+  // Counters accumulated since the previous batch of this session.
+  CaptureCounters counters = 4;
+}
+
+message CaptureCounters {
+  // Frames dropped because the capture queue was full.
+  uint64 dropped_queue_full = 1;
+  // Frames intentionally not recorded (chat, commands, signing).
+  uint64 dropped_privacy = 2;
+  // Exceptions caught inside the listener.
+  uint64 listener_errors = 3;
+}
+
+enum Direction {
+  DIRECTION_UNSPECIFIED = 0;
+  DIRECTION_SERVERBOUND = 1;
+  DIRECTION_CLIENTBOUND = 2;
+}
+
+enum ConnectionState {
+  CONNECTION_STATE_UNSPECIFIED = 0;
+  CONNECTION_STATE_HANDSHAKING = 1;
+  CONNECTION_STATE_STATUS = 2;
+  CONNECTION_STATE_LOGIN = 3;
+  CONNECTION_STATE_CONFIGURATION = 4;
+  CONNECTION_STATE_PLAY = 5;
+}
+
+message Frame {
+  // Monotonic per-session sequence number; gaps mean dropped frames.
+  uint64 seq = 1;
+  // Nanoseconds since SessionStart, from a monotonic clock.
+  uint64 offset_nanos = 2;
+  Direction direction = 3;
+  ConnectionState state = 4;
+  // Packet id as seen on the wire (version dependent).
+  int32 wire_packet_id = 5;
+  // Corvus' own version-stable packet vocabulary id (0 = unmapped).
+  uint32 packet_type = 6;
+  // Raw packet body after the packet id. Short retention only.
+  bytes payload = 7;
+
+  // Decoded, version-independent event for the packet types relevant to the models.
+  oneof event {
+    MovementEvent movement = 10;
+    InteractEntityEvent interact_entity = 11;
+    SwingEvent swing = 12;
+    DigEvent dig = 13;
+    PlaceEvent place = 14;
+    HeldItemEvent held_item = 15;
+    EntityMotionEvent entity_motion = 16;
+  }
+}
+
+message MovementEvent {
+  bool has_position = 1;
+  bool has_rotation = 2;
+  double x = 3;
+  double y = 4;
+  double z = 5;
+  float yaw = 6;
+  float pitch = 7;
+  bool on_ground = 8;
+}
+
+message InteractEntityEvent {
+  int32 entity_id = 1;
+  enum Action {
+    ACTION_UNSPECIFIED = 0;
+    ACTION_INTERACT = 1;
+    ACTION_ATTACK = 2;
+    ACTION_INTERACT_AT = 3;
+  }
+  Action action = 2;
+  bool sneaking = 3;
+  bool off_hand = 4;
+}
+
+message SwingEvent {
+  bool off_hand = 1;
+}
+
+message DigEvent {
+  int32 status = 1;
+  int32 x = 2;
+  int32 y = 3;
+  int32 z = 4;
+  int32 face = 5;
+}
+
+message PlaceEvent {
+  int32 x = 1;
+  int32 y = 2;
+  int32 z = 3;
+  int32 face = 4;
+  bool off_hand = 5;
+}
+
+message HeldItemEvent {
+  int32 slot = 1;
+}
+
+// Clientbound movement of other entities; context for combat features.
+message EntityMotionEvent {
+  int32 entity_id = 1;
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_RELATIVE = 1;
+    KIND_TELEPORT = 2;
+    KIND_VELOCITY = 3;
+  }
+  Kind kind = 2;
+  double x = 3;
+  double y = 4;
+  double z = 5;
+}
