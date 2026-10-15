@@ -95,6 +95,29 @@
         "title": "BrandFilter",
         "type": "object"
       },
+      "CurrentFileOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "manifest_file_id": {
+            "title": "Manifest File Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "manifest_file_id",
+          "id",
+          "key"
+        ],
+        "title": "CurrentFileOut",
+        "type": "object"
+      },
       "DateRange": {
         "additionalProperties": false,
         "description": "Inclusive UTC calendar dates of the session start.",
@@ -125,6 +148,42 @@
           }
         },
         "title": "DateRange",
+        "type": "object"
+      },
+      "ErasureBriefOut": {
+        "properties": {
+          "compaction_pending": {
+            "title": "Compaction Pending",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "pseudonym_prefix": {
+            "description": "First 12 hex characters of the pseudonym",
+            "title": "Pseudonym Prefix",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "pseudonym_prefix",
+          "requested_at",
+          "status",
+          "compaction_pending"
+        ],
+        "title": "ErasureBriefOut",
         "type": "object"
       },
       "ErasureIn": {
@@ -161,6 +220,18 @@
       },
       "ErasureOut": {
         "properties": {
+          "compacted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compacted At"
+          },
           "compaction_pending": {
             "title": "Compaction Pending",
             "type": "boolean"
@@ -209,6 +280,22 @@
         "title": "ErasureOut",
         "type": "object"
       },
+      "FilesOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CurrentFileOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "FilesOut",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -220,6 +307,93 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Items_ScoreHistoryOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScoreHistoryOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Items[ScoreHistoryOut]",
+        "type": "object"
+      },
+      "Items_ScoreLatestOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScoreLatestOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Items[ScoreLatestOut]",
+        "type": "object"
+      },
+      "JobBriefOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "format": "uuid",
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "status",
+          "snapshot_id",
+          "created_at",
+          "updated_at",
+          "finished_at"
+        ],
+        "title": "JobBriefOut",
         "type": "object"
       },
       "JobIn": {
@@ -284,6 +458,19 @@
             "title": "Params",
             "type": "object"
           },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Result document reported by the job when it finished",
+            "title": "Result"
+          },
           "runner": {
             "title": "Runner",
             "type": "string"
@@ -321,6 +508,38 @@
           "finished_at"
         ],
         "title": "JobOut",
+        "type": "object"
+      },
+      "JobReportIn": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Message",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Result document (metrics, artefact keys); must not contain secrets",
+            "title": "Result"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobState"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "JobReportIn",
         "type": "object"
       },
       "JobState": {
@@ -463,91 +682,6 @@
         "title": "LabelIn",
         "type": "object"
       },
-      "LabelOut": {
-        "properties": {
-          "confidence": {
-            "title": "Confidence",
-            "type": "number"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "created_by": {
-            "title": "Created By",
-            "type": "string"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "note": {
-            "title": "Note",
-            "type": "string"
-          },
-          "source": {
-            "title": "Source",
-            "type": "string"
-          },
-          "subject": {
-            "title": "Subject",
-            "type": "string"
-          },
-          "subject_type": {
-            "enum": [
-              "pseudonym",
-              "session"
-            ],
-            "title": "Subject Type",
-            "type": "string"
-          },
-          "valid_from": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Valid From"
-          },
-          "valid_to": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Valid To"
-          }
-        },
-        "required": [
-          "id",
-          "subject_type",
-          "subject",
-          "label",
-          "source",
-          "confidence",
-          "valid_from",
-          "valid_to",
-          "note",
-          "created_by",
-          "created_at"
-        ],
-        "title": "LabelOut",
-        "type": "object"
-      },
       "LookupIn": {
         "additionalProperties": false,
         "properties": {
@@ -562,6 +696,40 @@
           "uuid"
         ],
         "title": "LookupIn",
+        "type": "object"
+      },
+      "MeOut": {
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "From the token, if it carries one",
+            "title": "Display Name"
+          },
+          "roles": {
+            "description": "Corvus roles after `CORVUS_API_ROLE_MAPPING`",
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "roles"
+        ],
+        "title": "MeOut",
         "type": "object"
       },
       "ModelIn": {
@@ -727,6 +895,34 @@
         "title": "Paged[BlockEntryOut]",
         "type": "object"
       },
+      "Paged_ErasureOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ErasureOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass as `cursor` to get the next page",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Paged[ErasureOut]",
+        "type": "object"
+      },
       "Paged_JobOut_": {
         "properties": {
           "items": {
@@ -759,7 +955,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/LabelOut"
+              "$ref": "#/components/schemas/corvus_services__api__schemas__LabelOut"
             },
             "title": "Items",
             "type": "array"
@@ -1185,6 +1381,257 @@
         "title": "ProtocolRange",
         "type": "object"
       },
+      "ScoreHistoryOut": {
+        "properties": {
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
+          "game_context": {
+            "title": "Game Context",
+            "type": "string"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          },
+          "model_version": {
+            "title": "Model Version",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "scored_at": {
+            "format": "date-time",
+            "title": "Scored At",
+            "type": "string"
+          },
+          "segment": {
+            "title": "Segment",
+            "type": "integer"
+          },
+          "session_id": {
+            "description": "32 hex characters",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "smoothed": {
+            "title": "Smoothed",
+            "type": "number"
+          },
+          "stage": {
+            "enum": [
+              "shadow",
+              "canary",
+              "enforce"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
+          "window_end_offset_nanos": {
+            "title": "Window End Offset Nanos",
+            "type": "integer"
+          },
+          "window_start_offset_nanos": {
+            "title": "Window Start Offset Nanos",
+            "type": "integer"
+          },
+          "windows": {
+            "title": "Windows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id",
+          "segment",
+          "game_context",
+          "domain",
+          "model_name",
+          "model_version",
+          "stage",
+          "score",
+          "smoothed",
+          "windows",
+          "window_start_offset_nanos",
+          "window_end_offset_nanos",
+          "scored_at"
+        ],
+        "title": "ScoreHistoryOut",
+        "type": "object"
+      },
+      "ScoreLatestOut": {
+        "properties": {
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
+          "game_context": {
+            "title": "Game Context",
+            "type": "string"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          },
+          "model_version": {
+            "title": "Model Version",
+            "type": "string"
+          },
+          "score": {
+            "description": "Window score in [0, 1]; higher = more likely cheating",
+            "title": "Score",
+            "type": "number"
+          },
+          "smoothed": {
+            "description": "Exponential moving average over the segment's windows",
+            "title": "Smoothed",
+            "type": "number"
+          },
+          "stage": {
+            "enum": [
+              "shadow",
+              "canary",
+              "enforce"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "windows": {
+            "description": "Number of windows behind `smoothed`",
+            "title": "Windows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "game_context",
+          "domain",
+          "model_name",
+          "model_version",
+          "stage",
+          "score",
+          "smoothed",
+          "windows",
+          "updated_at"
+        ],
+        "title": "ScoreLatestOut",
+        "type": "object"
+      },
+      "SegmentOut": {
+        "properties": {
+          "game_context": {
+            "title": "Game Context",
+            "type": "string"
+          },
+          "segment": {
+            "title": "Segment",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "segment",
+          "game_context"
+        ],
+        "title": "SegmentOut",
+        "type": "object"
+      },
+      "SessionOut": {
+        "properties": {
+          "erased": {
+            "description": "The player was erased; always false with exclude_erased",
+            "title": "Erased",
+            "type": "boolean"
+          },
+          "labels": {
+            "description": "Labels applicable to the session at its start",
+            "items": {
+              "$ref": "#/components/schemas/corvus_services__api__routes__snapshot_data__LabelOut"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "pseudonym": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "64 hex characters; null if the session is gone",
+            "title": "Pseudonym"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/SegmentOut"
+            },
+            "title": "Segments",
+            "type": "array"
+          },
+          "session_id": {
+            "description": "32 hex characters",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          }
+        },
+        "required": [
+          "session_id",
+          "pseudonym",
+          "started_at",
+          "segments",
+          "labels",
+          "erased"
+        ],
+        "title": "SessionOut",
+        "type": "object"
+      },
+      "SessionsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass as `cursor`: the last session id of this page",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "SessionsOut",
+        "type": "object"
+      },
       "SnapshotOut": {
         "properties": {
           "created_at": {
@@ -1277,6 +1724,73 @@
           "stage"
         ],
         "title": "StageIn",
+        "type": "object"
+      },
+      "SummaryOut": {
+        "properties": {
+          "jobs_by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Every job status, zero when absent",
+            "title": "Jobs By Status",
+            "type": "object"
+          },
+          "labels_by_label": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Every label value, zero when absent",
+            "title": "Labels By Label",
+            "type": "object"
+          },
+          "models_by_stage": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Every model stage, zero when absent",
+            "title": "Models By Stage",
+            "type": "object"
+          },
+          "pending_erasures": {
+            "description": "Erasure requests whose compaction is pending",
+            "title": "Pending Erasures",
+            "type": "integer"
+          },
+          "pools": {
+            "title": "Pools",
+            "type": "integer"
+          },
+          "recent_erasures": {
+            "items": {
+              "$ref": "#/components/schemas/ErasureBriefOut"
+            },
+            "title": "Recent Erasures",
+            "type": "array"
+          },
+          "recent_jobs": {
+            "items": {
+              "$ref": "#/components/schemas/JobBriefOut"
+            },
+            "title": "Recent Jobs",
+            "type": "array"
+          },
+          "snapshots": {
+            "title": "Snapshots",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pools",
+          "snapshots",
+          "jobs_by_status",
+          "models_by_stage",
+          "labels_by_label",
+          "pending_erasures",
+          "recent_jobs",
+          "recent_erasures"
+        ],
+        "title": "SummaryOut",
         "type": "object"
       },
       "TransitionOut": {
@@ -1376,6 +1890,140 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "corvus_services__api__routes__snapshot_data__LabelOut": {
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid To"
+          }
+        },
+        "required": [
+          "label",
+          "source",
+          "confidence",
+          "valid_from",
+          "valid_to"
+        ],
+        "title": "LabelOut",
+        "type": "object"
+      },
+      "corvus_services__api__schemas__LabelOut": {
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "subject_type": {
+            "enum": [
+              "pseudonym",
+              "session"
+            ],
+            "title": "Subject Type",
+            "type": "string"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid To"
+          }
+        },
+        "required": [
+          "id",
+          "subject_type",
+          "subject",
+          "label",
+          "source",
+          "confidence",
+          "valid_from",
+          "valid_to",
+          "note",
+          "created_by",
+          "created_at"
+        ],
+        "title": "LabelOut",
         "type": "object"
       }
     },
@@ -1646,6 +2294,98 @@
         ]
       }
     },
+    "/api/v1/erasure-requests": {
+      "get": {
+        "operationId": "list_erasure_requests_api_v1_erasure_requests_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "completed",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Page size (server maximum applies)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (server maximum applies)",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque cursor from `next_cursor`",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from `next_cursor`",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paged_ErasureOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List erasure requests, newest first (admin)",
+        "tags": [
+          "players"
+        ]
+      }
+    },
     "/api/v1/jobs": {
       "get": {
         "operationId": "list_jobs_api_v1_jobs_get",
@@ -1787,6 +2527,22 @@
               "title": "Job Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-Corvus-Job-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Corvus-Job-Id"
+            }
           }
         ],
         "responses": {
@@ -1820,6 +2576,88 @@
           }
         ],
         "summary": "Get a job; a running job's status is refreshed from the runner",
+        "tags": [
+          "jobs"
+        ]
+      },
+      "patch": {
+        "description": "Called by the job process with its machine token (`CORVUS_API_URL`, `CORVUS_API_TOKEN`). A job token may only update its own job: the header `X-Corvus-Job-Id` (the job's `CORVUS_JOB_ID`) must equal the id in the path. `succeeded` and `failed` are final; repeating the identical report is accepted.",
+        "operationId": "report_job_status_api_v1_jobs__job_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Corvus-Job-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Corvus-Job-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobReportIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "A job token needs `X-Corvus-Job-Id` equal to the path id"
+          },
+          "404": {
+            "description": "Job not found"
+          },
+          "409": {
+            "description": "The job already finished with a different status"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Report status, message and result of a job",
         "tags": [
           "jobs"
         ]
@@ -1954,7 +2792,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LabelOut"
+                  "$ref": "#/components/schemas/corvus_services__api__schemas__LabelOut"
                 }
               }
             },
@@ -2019,10 +2857,105 @@
         ]
       }
     },
+    "/api/v1/me": {
+      "get": {
+        "description": "Any valid OIDC token or the dev token; machine job tokens are refused.",
+        "operationId": "me_api_v1_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The caller: subject, display name and roles",
+        "tags": [
+          "me"
+        ]
+      }
+    },
     "/api/v1/models": {
       "get": {
         "operationId": "list_models_api_v1_models_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version"
+            }
+          },
+          {
+            "in": "query",
+            "name": "game_context",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Game Context"
+            }
+          },
+          {
+            "in": "query",
+            "name": "domain",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Domain"
+            }
+          },
           {
             "in": "query",
             "name": "stage",
@@ -2325,6 +3258,65 @@
         ]
       }
     },
+    "/api/v1/models/{name}/{version}": {
+      "get": {
+        "operationId": "get_model_by_version_api_v1_models__name___version__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "title": "Version",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Model not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get a model by name and version",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/api/v1/players/erasure": {
       "post": {
         "description": "In one transaction: deletes the player's key (crypto-shredding), sets `players.erased_at`, blocklists the pseudonym and records an audit row. Compaction of `events` files is a later job; `compaction_pending` stays true until then.",
@@ -2610,6 +3602,53 @@
           }
         ],
         "summary": "Create a pool",
+        "tags": [
+          "pools"
+        ]
+      }
+    },
+    "/api/v1/pools/preview": {
+      "post": {
+        "description": "The body is a pool `filter`, validated like on create. Nothing is stored.",
+        "operationId": "preview_filter_api_v1_pools_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PoolFilter"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Counts for a pool filter that is not saved (live preview)",
         "tags": [
           "pools"
         ]
@@ -2952,6 +3991,132 @@
         ]
       }
     },
+    "/api/v1/scores/players/{pseudonym}": {
+      "get": {
+        "description": "The latest score per game context, domain and model, including `shadow` models (which are never published on the score stream). A player without scores yields an empty list. Scores are informational: Corvus never sanctions players.",
+        "operationId": "latest_scores_api_v1_scores_players__pseudonym__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pseudonym",
+            "required": true,
+            "schema": {
+              "title": "Pseudonym",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Items_ScoreLatestOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Latest scores of a player (staff)",
+        "tags": [
+          "scores"
+        ]
+      }
+    },
+    "/api/v1/scores/players/{pseudonym}/history": {
+      "get": {
+        "description": "Newest first; the history is bounded by the retention of `corvus-housekeeping` (`CORVUS_SCORE_HISTORY_RETENTION_DAYS`, default 14 days).",
+        "operationId": "score_history_api_v1_scores_players__pseudonym__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pseudonym",
+            "required": true,
+            "schema": {
+              "title": "Pseudonym",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "game_context",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Game Context"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Items_ScoreHistoryOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Score history of a player (staff)",
+        "tags": [
+          "scores"
+        ]
+      }
+    },
     "/api/v1/snapshots": {
       "get": {
         "operationId": "list_snapshots_api_v1_snapshots_get",
@@ -3075,6 +4240,181 @@
         "summary": "Get a snapshot including its manifest",
         "tags": [
           "pools"
+        ]
+      }
+    },
+    "/api/v1/snapshots/{snapshot_id}/files": {
+      "get": {
+        "operationId": "snapshot_files_api_v1_snapshots__snapshot_id__files_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Snapshot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Snapshot not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Live events files of a snapshot (follows compaction replacements)",
+        "tags": [
+          "snapshots"
+        ]
+      }
+    },
+    "/api/v1/snapshots/{snapshot_id}/sessions": {
+      "get": {
+        "description": "Pages through the manifest's sessions with pseudonym, start, segments and labels. With `exclude_erased=true` the sessions of erased players are left out; jobs must use this when they read a snapshot because the manifest itself is immutable. `cursor` is the `next_cursor` of the previous page (the last session id of that page).",
+        "operationId": "snapshot_sessions_api_v1_snapshots__snapshot_id__sessions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Snapshot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exclude_erased",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Exclude Erased",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "`next_cursor` of the previous page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`next_cursor` of the previous page",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Snapshot not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Sessions of a snapshot, ascending, optionally without erased players",
+        "tags": [
+          "snapshots"
+        ]
+      }
+    },
+    "/api/v1/summary": {
+      "get": {
+        "description": "Pools, snapshots, jobs by status, models by stage, labels by label and pending erasures, plus the 10 newest jobs and erasure requests (pseudonym prefix only).",
+        "operationId": "summary_api_v1_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SummaryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Counts and recent activity for the dashboard (viewer)",
+        "tags": [
+          "me"
         ]
       }
     },

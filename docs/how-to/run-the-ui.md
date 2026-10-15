@@ -28,6 +28,7 @@ pnpm dev          # http://localhost:3000, reads public/config.json
 pnpm lint
 pnpm typecheck
 pnpm test         # vitest, 2 workers
+pnpm generate     # static build, as in the container image
 ```
 
 For `pnpm dev` the API must be reachable from the browser: either point `apiBaseUrl` in `public/config.json` at an API with CORS
@@ -95,18 +96,24 @@ Styles allow `unsafe-inline` because Vuetify injects its theme styles at runtime
 `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`. `config.json` is served with `no-store`,
 `/_nuxt/` assets are immutable, every other path falls back to `index.html`.
 
-## What the API offers for the UI
+## How the UI uses the API
 
-These endpoints exist so the UI does not have to work around the API (see
-[control-plane-api.md](../reference/control-plane-api.md)); the UI still uses the workarounds it was built with until it
-is switched over:
+The UI works against the extended control-plane API ([control-plane-api.md](../reference/control-plane-api.md)) and
+does not work around missing endpoints any more:
 
-- **Live preview of an unsaved filter:** `POST /pools/preview` with the pool filter as body.
-- **Aggregates and recent items:** `GET /summary` (counts, jobs by status, models by stage, labels, pending erasures,
-  the 10 newest jobs and erasure requests).
-- **Erasure request list:** `GET /erasure-requests` (admin, paginated, `status` filter).
-- **Model lookup:** `GET /models` filters on `name`, `version`, `game_context`, `domain` and `stage`;
-  `GET /models/{name}/{version}` returns one model.
-- **Identity:** `GET /me` returns the subject, display name and mapped roles.
+- **Roles:** after the login the UI calls `GET /me` and shows what the API reports (roles after the API's role
+  mapping, display name). The roles read from the token claim (`auth.rolesClaim`, `auth.roleMapping`) are only the
+  fallback if `/me` fails.
+- **Dashboard:** one request, `GET /summary`, for the counts, the models per stage, the 10 newest jobs and the
+  10 newest erasure requests.
+- **Erasure requests:** the Players page lists `GET /erasure-requests` (admin, paginated) with the compaction
+  status (`compaction_pending`, `compacted_at`). The UI no longer keeps request ids in the browser.
+- **Models:** the registry filters (`name`, `version`, `game_context`, `domain`, `stage`) run on the server and need
+  an exact match; the detail page loads `GET /models/{name}/{version}`.
+- **Pool preview:** while a pool is edited, the UI previews the unsaved filter with `POST /pools/preview`. Requests
+  are debounced (500 ms); a newer request aborts the one in flight.
+- **Scores:** the Scores page (roles `staff` and `admin`) shows the latest scores of a pseudonym per model and game
+  context and the score history as a chart, from `GET /scores/players/{pseudonym}` and `/history`. Scores are
+  decision aids; Corvus never sanctions players. The page can be opened with `/scores?pseudonym=<64 hex>`.
 - **CORS:** `CORVUS_API_CORS_ORIGINS` lists the browser origins that may call the API (credentials stay off); the
   same-origin proxy (`CORVUS_UI_API_UPSTREAM`) still avoids the need for it.

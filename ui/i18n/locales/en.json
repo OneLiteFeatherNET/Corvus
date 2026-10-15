@@ -9,7 +9,7 @@
   },
   "nav": {
     "dashboard": "Dashboard", "pools": "Pools", "snapshots": "Snapshots", "jobs": "Jobs", "models": "Models",
-    "labels": "Labels", "players": "Players", "blocklist": "Blocklist"
+    "labels": "Labels", "scores": "Scores", "players": "Players", "blocklist": "Blocklist"
   },
   "roles": { "admin": "Admin", "data_scientist": "Data scientist", "staff": "Staff", "viewer": "Viewer" },
   "auth": {
@@ -29,10 +29,11 @@
   "dashboard": {
     "title": "Dashboard", "subtitle": "State of pools, jobs and models",
     "pools": "Pools", "snapshots": "Snapshots", "runningJobs": "Running jobs", "models": "Models",
-    "modelsPerStage": "Models per stage", "recentJobs": "Recent jobs", "recentErasures": "Recent erasures"
+    "modelsPerStage": "Models per stage", "recentJobs": "Recent jobs", "recentErasures": "Recent erasures", "pendingErasures": "Pending compactions",
+    "compactionPending": "Compaction pending", "compacted": "Compacted"
   },
   "pools": {
-    "title": "Pools", "new": "New pool", "edit": "Edit pool", "saveAndPreview": "Save and preview",
+    "title": "Pools", "new": "New pool", "edit": "Edit pool",
     "createSnapshot": "Create snapshot", "snapshotCreated": "Snapshot created:", "noFilter": "No conditions: all sessions match",
     "rawFilter": "Filter as JSON", "deleteTitle": "Delete pool?",
     "deleteText": "Pool \"{name}\" will be deleted. Its snapshots are kept.",
@@ -46,8 +47,8 @@
       "retentionHint": "For retention jobs; does not change the selection", "excludeOrphans": "Exclude orphan sessions"
     },
     "preview": {
-      "title": "Preview", "refresh": "Refresh preview", "stale": "The filter changed since the last save. The preview shows the saved pool.",
-      "none": "No preview yet.", "savedOnly": "The API previews the saved pool. Save to update the numbers.",
+      "title": "Preview", "refresh": "Refresh preview", "live": "The preview shows the filter as you edit it. Nothing is saved.",
+      "none": "No preview yet.", "invalid": "The preview needs a valid filter.",
       "sessions": "Sessions", "segments": "Segments", "distinctPlayers": "Players", "eventsFiles": "Event files",
       "framesEstimate": "Frames (estimate)", "labelDistribution": "Label distribution"
     },
@@ -78,7 +79,7 @@
     "stageLabel": "Stage", "compare": "Compare", "compareHint": "Select two models in the table to compare them.",
     "compareTitle": "Compare models", "compareA": "Model A", "compareB": "Model B", "comparePick": "Choose two models.",
     "better": "Better value", "metricsTitle": "Metrics", "details": "Details", "history": "Stage history", "from": "From",
-    "to": "To", "actor": "Actor", "reason": "Reason", "notFound": "Model not found",
+    "to": "To", "actor": "Actor", "reason": "Reason", "filterHint": "Filters run on the server; name, version, game context and domain must match exactly.", "notFound": "Model not found",
     "metrics": {
       "recallAtFpr": "Recall at FPR 0.1 %", "prAuc": "PR-AUC", "rocAuc": "ROC-AUC", "ece": "ECE", "p50": "Latency p50",
       "p99": "Latency p99", "rss": "Memory (RSS)"
@@ -109,8 +110,8 @@
     "title": "Players", "subtitle": "Pseudonym lookup and erasure (admin)", "pseudonym": "Pseudonym", "keyId": "Key id",
     "known": "Known in catalog", "firstSeen": "First seen", "lastSeen": "Last seen", "erasedAt": "Erased at",
     "byPseudonym": "Erase by pseudonym", "invalidPseudonym": "64 hex characters", "requests": "Erasure requests",
-    "localLogHint": "The API has no list of erasure requests. This list shows the requests made from this browser.",
     "requestedAt": "Requested", "requestedBy": "By", "status": "Status", "keyDeleted": "Key deleted", "compactionPending": "Compaction pending",
+    "compactedAt": "Compacted at", "compaction": "Compaction", "compactionDone": "Done", "openScores": "View scores",
     "lookup": {
       "title": "UUID to pseudonym", "privacy": "The UUID is sent in a POST body, never in a URL, and is not stored by the interface.",
       "uuid": "Minecraft UUID", "invalid": "Not a valid UUID", "submit": "Look up"
@@ -125,5 +126,21 @@
     "title": "Blocklist", "kind": "Kind", "add": "Add entry", "source": "Source", "reason": "Reason",
     "permanent": "Entries created by an erasure are permanent",
     "kinds": { "block": "Block", "allow": "Allow" }, "sources": { "manual": "Manual", "erasure": "Erasure" }
+  },
+  "scores": {
+    "title": "Player scores", "subtitle": "Model scores for a pseudonym (staff)",
+    "disclaimer": "Scores are decision aids. Corvus never sanctions anyone itself: the team decides on any action.",
+    "pseudonym": "Pseudonym", "invalidPseudonym": "64 hex characters", "submit": "Load scores",
+    "latest": "Latest scores", "model": "Model", "gameContext": "Game context", "domain": "Domain", "stage": "Stage",
+    "score": "Score", "smoothed": "Smoothed", "windows": "Windows", "updatedAt": "Updated",
+    "stageHint": "The API only returns scores of models in the shadow, canary and enforce stages.",
+    "empty": "There are no scores for this pseudonym.", "historyEmpty": "No history available.",
+    "history": "History", "historyContext": "Game context of the history", "historyLimit": "Number of windows",
+    "retention": "The history is kept for a limited time only.",
+    "chart": {
+      "title": "Score history", "desc": "Line chart of the smoothed scores (0 to 1) over time, one line per model.",
+      "time": "Time", "smoothed": "Smoothed", "raw": "Raw value", "dataTable": "Values as table",
+      "summary": "{series} models, {points} data points"
+    }
   }
 }
