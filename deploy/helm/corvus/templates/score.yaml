@@ -1,0 +1,110 @@
+{{- if .Values.score.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "corvus.fullname" . }}-score
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "score") | nindent 4 }}
+spec:
+  # replicas and CORVUS_SCORE_REPLICAS below come from the same value on purpose: replica i of n owns
+  # the partitions p with p mod n == i, so the two must never differ.
+  replicas: {{ .Values.score.replicas }}
+  serviceName: {{ include "corvus.fullname" . }}-score
+  # Every replica owns its own partitions; there is no ordering between pods.
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "corvus.componentSelectorLabels" (dict "root" . "component" "score") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "corvus.podLabels" (dict "root" . "component" "score") | nindent 8 }}
+      annotations:
+        # A changed replica count changes the partition assignment of every pod.
+        corvus.onelitefeather.net/score-replicas: {{ .Values.score.replicas | quote }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "corvus.serviceAccountName" (dict "root" . "component" "score") }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.score.terminationGracePeriodSeconds }}
+      {{- include "corvus.podCommon" . | nindent 6 }}
+      containers:
+        - name: score
+          image: {{ include "corvus.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["corvus-score"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            {{- include "corvus.natsEnv" . | nindent 12 }}
+            {{- include "corvus.pgEnv" . | nindent 12 }}
+            {{- include "corvus.s3Env" . | nindent 12 }}
+            - name: CORVUS_METRICS_PORT
+              value: {{ .Values.score.metricsPort | quote }}
+            - name: CORVUS_SCORE_REPLICAS
+              value: {{ .Values.score.replicas | quote }}
+            # The StatefulSet ordinal, exposed by Kubernetes as a pod label (1.28+).
+            - name: CORVUS_SCORE_REPLICA_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
+            {{- include "corvus.extraEnv" .Values.score.env | nindent 12 }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.score.metricsPort }}
+              protocol: TCP
+          startupProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.score.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "corvus.tmpMount" . | nindent 12 }}
+      volumes:
+        {{- include "corvus.tmpVolume" . | nindent 8 }}
+---
+# Headless: stable per-pod identity and the metrics target of every replica.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "corvus.fullname" . }}-score
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "score") | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "corvus.componentSelectorLabels" (dict "root" . "component" "score") | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.score.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+{{- if .Values.score.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "corvus.fullname" . }}-score
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "score") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.score.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "corvus.componentSelectorLabels" (dict "root" . "component" "score") | nindent 6 }}
+{{- end }}
+{{- end }}

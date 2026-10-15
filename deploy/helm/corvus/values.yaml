@@ -1,0 +1,246 @@
+# Corvus chart values. No secret value belongs in this file: credentials are read from existing
+# Secrets that are referenced by name (see docs/how-to/deploy-with-helm.md for the full list).
+# NATS JetStream, PostgreSQL and the S3 bucket are external dependencies and are not deployed here.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Image of the Python services (ingest, api, score, housekeeping, migrate). The tag defaults to the
+# chart's appVersion, which release-please keeps in lockstep with the published image.
+image:
+  repository: harbor.onelitefeather.dev/onelitefeather/corvus-services
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Image of the management UI (static nginx). Same version scheme as the services image.
+uiImage:
+  repository: harbor.onelitefeather.dev/onelitefeather/corvus-ui
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Labels / annotations added to every pod (for example a log-routing label).
+podLabels: {}
+podAnnotations: {}
+
+# Hardened defaults for every workload. The root filesystem is read-only; /tmp and the cache dirs
+# are emptyDir volumes.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# Size limit of the per-pod /tmp emptyDir (parquet staging and caches).
+tmpSizeLimit: 1Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+# ---- external dependencies ---------------------------------------------------------------------
+
+nats:
+  url: nats://nats.nats.svc:4222
+  stream: CORVUS_CAPTURE
+
+database:
+  # Secret holding the full libpq DSN (including user and password). With CloudNativePG use the
+  # app secret and its `uri` key.
+  existingSecret: corvus-database
+  dsnKey: uri
+
+s3:
+  endpointUrl: ""
+  bucket: corvus-lake
+  region: us-east-1
+  # Secret with the object store credentials.
+  existingSecret: corvus-s3
+  accessKeyKey: access-key
+  secretKeyKey: secret-key
+
+# Key encryption key (base64, 32 bytes) wrapping every player data key. Losing it makes all raw
+# payloads unreadable. Needed by ingest only.
+kek:
+  existingSecret: corvus-kek
+  key: kek
+  id: kek-1
+
+# Pseudonym key, identical to the one the proxies use (base64, at least 16 bytes). Needed by the
+# api only; without it lookup and erasure by UUID answer 503.
+pseudonym:
+  enabled: true
+  existingSecret: corvus-pseudonym
+  key: key
+  keyId: k1
+
+# ---- components --------------------------------------------------------------------------------
+
+# One-shot schema migration, run as a Helm pre-install/pre-upgrade hook.
+migrate:
+  enabled: true
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+
+ingest:
+  enabled: true
+  replicas: 2
+  # CORVUS_WORKERS; empty lets the service derive it from the CPU limit.
+  workers: ""
+  metricsPort: 9464
+  # Additional CORVUS_* settings as plain values.
+  env: {}
+  resources:
+    requests: {cpu: "1", memory: 512Mi}
+    limits: {cpu: "4", memory: 1Gi}
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+  terminationGracePeriodSeconds: 120
+
+api:
+  enabled: true
+  replicas: 2
+  port: 8080
+  env: {}
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+  oidc:
+    issuer: ""
+    audience: ""
+    jwksUrl: ""
+    rolesClaim: roles
+    # JSON object mapping external role names to admin/data_scientist/staff/viewer.
+    roleMapping: ""
+  # Optional Secret with CORVUS_API_PLUGIN_TOKENS (comma separated proxy tokens) and further
+  # CORVUS_API_* credentials. Every key of the Secret becomes an environment variable.
+  extraSecret: ""
+  # Training / evaluation jobs started by the API.
+  jobs:
+    # kubernetes: the API creates batch/v1 Jobs in its own namespace (RBAC is created).
+    # local: subprocesses inside the API pod (single-host setups only).
+    runner: kubernetes
+    image:
+      repository: harbor.onelitefeather.dev/onelitefeather/corvus-ml
+      tag: ""
+    serviceAccount: ""
+    # Secret exposed as environment to the job pods (S3/DB credentials).
+    envSecret: ""
+    cpuRequest: "1"
+    cpuLimit: "4"
+    memoryRequest: 2Gi
+    memoryLimit: 8Gi
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: corvus-api.example.invalid
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+# Online scoring. A StatefulSet: replica i of n owns the partitions p with p mod n == i, so the
+# pod ordinal is the replica index and CORVUS_SCORE_REPLICAS must equal the replica count. Scale by
+# changing `score.replicas` only (never with kubectl scale or an HPA); the value feeds both.
+score:
+  enabled: true
+  replicas: 2
+  metricsPort: 9464
+  env: {}
+  resources:
+    requests: {cpu: "1", memory: 512Mi}
+    limits: {cpu: "4", memory: 1Gi}
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+  terminationGracePeriodSeconds: 60
+
+# Retention cleanup (raw payloads, orphans, staging, batch log).
+housekeeping:
+  enabled: true
+  schedule: "17 3 * * *"
+  startingDeadlineSeconds: 600
+  activeDeadlineSeconds: 3600
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 1
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  env: {}
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+
+ui:
+  enabled: false
+  replicas: 2
+  port: 8080
+  # Rendered as /usr/share/nginx/html/config.json (runtime configuration of the SPA).
+  config:
+    apiBaseUrl: ""
+    oidc:
+      authority: ""
+      clientId: ""
+      scope: openid profile
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 128Mi}
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: corvus.example.invalid
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+# ---- cross-cutting -----------------------------------------------------------------------------
+
+serviceAccount:
+  # One ServiceAccount per component (ingest, api, score, housekeeping, ui) named
+  # <fullname>-<component>; none of them mounts a token except the api with the kubernetes runner.
+  create: true
+  annotations: {}
+
+networkPolicy:
+  enabled: false
+  # Namespace labels allowed to scrape metrics (empty: any pod in the same namespace).
+  metricsNamespaceSelector: {}
+  # Peers allowed to reach the api / ui (empty: from anywhere, as an ingress controller needs).
+  apiFrom: []
+  uiFrom: []
+  # Egress ports to external dependencies: NATS, PostgreSQL, HTTP(S) for S3/OIDC/Kubernetes API.
+  egressPorts: [4222, 5432, 80, 443, 6443, 9000]
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  labels: {}

@@ -1,0 +1,50 @@
+{{- if .Values.housekeeping.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "corvus.fullname" . }}-housekeeping
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "housekeeping") | nindent 4 }}
+spec:
+  schedule: {{ .Values.housekeeping.schedule | quote }}
+  # Two runs deleting the same objects would race; skip a run while the previous one is still going.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ .Values.housekeeping.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ .Values.housekeeping.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.housekeeping.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.housekeeping.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.housekeeping.activeDeadlineSeconds }}
+      ttlSecondsAfterFinished: {{ .Values.housekeeping.ttlSecondsAfterFinished }}
+      template:
+        metadata:
+          labels:
+            {{- include "corvus.podLabels" (dict "root" . "component" "housekeeping") | nindent 12 }}
+          {{- with .Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "corvus.serviceAccountName" (dict "root" . "component" "housekeeping") }}
+          automountServiceAccountToken: false
+          {{- include "corvus.podCommon" . | nindent 10 }}
+          containers:
+            - name: housekeeping
+              image: {{ include "corvus.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["corvus-housekeeping"]
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              env:
+                {{- include "corvus.pgEnv" . | nindent 16 }}
+                {{- include "corvus.s3Env" . | nindent 16 }}
+                {{- include "corvus.extraEnv" .Values.housekeeping.env | nindent 16 }}
+              resources:
+                {{- toYaml .Values.housekeeping.resources | nindent 16 }}
+              volumeMounts:
+                {{- include "corvus.tmpMount" . | nindent 16 }}
+          volumes:
+            {{- include "corvus.tmpVolume" . | nindent 12 }}
+{{- end }}

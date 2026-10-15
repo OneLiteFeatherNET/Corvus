@@ -1,0 +1,58 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $metricsPeer := dict }}
+{{- if .Values.networkPolicy.metricsNamespaceSelector }}
+{{- $metricsPeer = dict "namespaceSelector" .Values.networkPolicy.metricsNamespaceSelector }}
+{{- else }}
+{{- $metricsPeer = dict "podSelector" dict }}
+{{- end }}
+{{- /* component -> (enabled, ingress port, extra peers) */}}
+{{- $components := dict
+  "ingest" (dict "enabled" .Values.ingest.enabled "port" .Values.ingest.metricsPort "from" (list $metricsPeer))
+  "score" (dict "enabled" .Values.score.enabled "port" .Values.score.metricsPort "from" (list $metricsPeer))
+  "api" (dict "enabled" .Values.api.enabled "port" .Values.api.port "from" (concat .Values.networkPolicy.apiFrom (list $metricsPeer)) "open" (empty .Values.networkPolicy.apiFrom))
+  "ui" (dict "enabled" .Values.ui.enabled "port" .Values.ui.port "from" .Values.networkPolicy.uiFrom "open" (empty .Values.networkPolicy.uiFrom))
+  "housekeeping" (dict "enabled" .Values.housekeeping.enabled)
+  "migrate" (dict "enabled" .Values.migrate.enabled)
+}}
+{{- range $component, $cfg := $components }}
+{{- if $cfg.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "corvus.fullname" $ }}-{{ $component }}
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" $ "component" $component) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "corvus.componentSelectorLabels" (dict "root" $ "component" $component) | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  {{- if $cfg.port }}
+  ingress:
+    - ports:
+        - port: {{ $cfg.port }}
+          protocol: TCP
+      {{- if not $cfg.open }}
+      from:
+        {{- toYaml $cfg.from | nindent 8 }}
+      {{- end }}
+  {{- else }}
+  ingress: []
+  {{- end }}
+  egress:
+    # DNS
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # NATS, PostgreSQL, object store, OIDC provider and (api) the Kubernetes API.
+    - ports:
+        {{- range $.Values.networkPolicy.egressPorts }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

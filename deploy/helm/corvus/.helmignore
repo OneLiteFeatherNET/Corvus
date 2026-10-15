@@ -1,0 +1,4 @@
+tests/
+ci/
+.git
+*.swp

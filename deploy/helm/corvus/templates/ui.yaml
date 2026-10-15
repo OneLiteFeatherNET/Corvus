@@ -1,0 +1,114 @@
+{{- if .Values.ui.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "corvus.fullname" . }}-ui
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "ui") | nindent 4 }}
+data:
+  config.json: |
+    {{- .Values.ui.config | toPrettyJson | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "corvus.fullname" . }}-ui
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "ui") | nindent 4 }}
+spec:
+  replicas: {{ .Values.ui.replicas }}
+  selector:
+    matchLabels:
+      {{- include "corvus.componentSelectorLabels" (dict "root" . "component" "ui") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "corvus.podLabels" (dict "root" . "component" "ui") | nindent 8 }}
+      annotations:
+        checksum/config: {{ .Values.ui.config | toJson | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "corvus.serviceAccountName" (dict "root" . "component" "ui") }}
+      automountServiceAccountToken: false
+      {{- include "corvus.podCommon" . | nindent 6 }}
+      containers:
+        - name: ui
+          image: {{ include "corvus.uiImage" . }}
+          imagePullPolicy: {{ .Values.uiImage.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.ui.port }}
+              protocol: TCP
+          readinessProbe:
+            httpGet: {path: /, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /, port: http}
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.ui.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /usr/share/nginx/html/config.json
+              subPath: config.json
+              readOnly: true
+            {{- include "corvus.tmpMount" . | nindent 12 }}
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "corvus.fullname" . }}-ui
+        {{- include "corvus.tmpVolume" . | nindent 8 }}
+        - name: nginx-cache
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "corvus.fullname" . }}-ui
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "ui") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "corvus.componentSelectorLabels" (dict "root" . "component" "ui") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.ui.port }}
+      targetPort: http
+      protocol: TCP
+{{- if .Values.ui.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "corvus.fullname" . }}-ui
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "ui") | nindent 4 }}
+  {{- with .Values.ui.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- include "corvus.ingressSpec" (dict "cfg" .Values.ui.ingress "svc" (printf "%s-ui" (include "corvus.fullname" .)) "port" .Values.ui.port) | nindent 2 }}
+{{- end }}
+{{- if .Values.ui.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "corvus.fullname" . }}-ui
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "ui") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.ui.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "corvus.componentSelectorLabels" (dict "root" . "component" "ui") | nindent 6 }}
+{{- end }}
+{{- end }}

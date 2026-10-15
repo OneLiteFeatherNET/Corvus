@@ -1,0 +1,45 @@
+{{- if .Values.migrate.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "corvus.fullname" . }}-migrate
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "migrate") | nindent 4 }}
+  annotations:
+    # Runs before the new ingest/api/score pods roll out. The Job is recreated on every release.
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrate.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrate.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ .Values.migrate.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "corvus.podLabels" (dict "root" . "component" "migrate") | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      restartPolicy: Never
+      # The ServiceAccounts of the chart do not exist yet at pre-install; the Job needs no API access.
+      automountServiceAccountToken: false
+      {{- include "corvus.podCommon" . | nindent 6 }}
+      containers:
+        - name: migrate
+          image: {{ include "corvus.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["corvus-migrate"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            {{- include "corvus.pgEnv" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "corvus.tmpMount" . | nindent 12 }}
+      volumes:
+        {{- include "corvus.tmpVolume" . | nindent 8 }}
+{{- end }}

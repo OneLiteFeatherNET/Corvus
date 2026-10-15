@@ -1,0 +1,18 @@
+apiVersion: v2
+name: corvus
+description: Corvus ML anticheat backend -- ingest, control-plane API, online scoring, housekeeping and the management UI
+type: application
+# Both markers are rewritten by release-please (generic updater), so the chart version and the
+# image tag it deploys by default always come from the same release.
+version: "0.0.0" # x-release-please-version
+appVersion: "0.0.0" # x-release-please-version
+home: https://github.com/OneLiteFeatherNET/Corvus
+sources:
+  - https://github.com/OneLiteFeatherNET/Corvus
+maintainers:
+  - name: OneLiteFeather
+    url: https://onelitefeather.net
+keywords:
+  - anticheat
+  - machine-learning
+  - minecraft

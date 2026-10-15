@@ -1,0 +1,70 @@
+# Switches on every optional component; used by CI (helm lint / template / kubeconform).
+# Contains placeholder names only, never secret values.
+podLabels:
+  logs.onelitefeather.net/env: prod
+podAnnotations:
+  example.invalid/annotation: "true"
+imagePullSecrets:
+  - name: harbor-pull
+nodeSelector:
+  kubernetes.io/os: linux
+s3:
+  endpointUrl: http://s3.example.invalid:80
+ingest:
+  workers: "2"
+  env:
+    CORVUS_FLUSH_MAX_AGE_S: "30"
+  autoscaling:
+    enabled: true
+api:
+  oidc:
+    issuer: https://idp.example.invalid/realms/olf
+    audience: corvus
+    jwksUrl: https://idp.example.invalid/realms/olf/protocol/openid-connect/certs
+    rolesClaim: realm_access.roles
+    roleMapping: '{"corvus-admin": "admin"}'
+  extraSecret: corvus-api-extra
+  jobs:
+    serviceAccount: corvus-jobs
+    envSecret: corvus-job-env
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt
+    tls:
+      - secretName: corvus-api-tls
+        hosts: [corvus-api.example.invalid]
+score:
+  replicas: 3
+ui:
+  enabled: true
+  config:
+    apiBaseUrl: https://corvus-api.example.invalid/api/v1
+    oidc:
+      authority: https://idp.example.invalid/realms/olf
+      clientId: corvus-ui
+      scope: openid profile
+  ingress:
+    enabled: true
+    className: nginx
+    tls:
+      - secretName: corvus-ui-tls
+        hosts: [corvus.example.invalid]
+networkPolicy:
+  enabled: true
+  apiFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+  uiFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+  metricsNamespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: monitoring
+serviceMonitor:
+  enabled: true
+  labels:
+    release: kube-prometheus-stack
