@@ -37,6 +37,13 @@ class S3Store:
         )
         return cls(client, s.s3_bucket)
 
+    async def get(self, key: str) -> bytes:
+        return await asyncio.to_thread(self._get_sync, key)
+
+    def _get_sync(self, key: str) -> bytes:
+        body: bytes = self._c.get_object(Bucket=self._bucket, Key=key)["Body"].read()
+        return body
+
     async def put(self, key: str, data: bytes) -> None:
         await asyncio.to_thread(self._c.put_object, Bucket=self._bucket, Key=key, Body=data)
 

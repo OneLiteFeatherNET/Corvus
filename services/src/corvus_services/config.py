@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     orphan_grace_s: int = 3600
     staging_max_age_s: int = 3600
     batch_log_retention_days: int = Field(default=3, ge=1)
+    score_history_retention_days: int = Field(default=14, ge=1)
 
     @field_validator("kek")
     @classmethod

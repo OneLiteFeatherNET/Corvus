@@ -38,6 +38,7 @@ class FakeHkCatalog:
         self.cutoff: date | None = None
         self.marked: list[int] = []
         self.pruned_before: datetime | None = None
+        self.scores_pruned_before: datetime | None = None
 
     async def known_keys(self, keys: list[str]) -> set[str]:
         return self.known & set(keys)
@@ -52,6 +53,10 @@ class FakeHkCatalog:
     async def prune_batches(self, before: datetime) -> int:
         self.pruned_before = before
         return 7
+
+    async def prune_score_history(self, before: datetime) -> int:
+        self.scores_pruned_before = before
+        return 5
 
 
 class Store:
@@ -99,6 +104,17 @@ async def test_run_deletes_orphans_staging_and_expired_raw():
     assert catalog.cutoff == date(2026, 9, 24)
     assert catalog.pruned_before == T0 - timedelta(days=3)
     assert report.batches_pruned == 7
+
+
+async def test_run_prunes_score_history_after_its_retention():
+    catalog = FakeHkCatalog(known=set(), raw=[])
+
+    report = await run_housekeeping(
+        make_settings(score_history_retention_days=10), catalog, Store([]), FakeClock()
+    )
+
+    assert catalog.scores_pruned_before == T0 - timedelta(days=10)
+    assert report.scores_pruned == 5
 
 
 async def test_catalog_row_is_not_marked_when_object_delete_fails():

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate the capture protobuf bindings into src/corvus_services/_gen (gitignored).
+# Generate the capture and score protobuf bindings into src/corvus_services/_gen (gitignored).
 # Needs the "proto" dependency group (grpcio-tools): uv run --group proto scripts/gen_proto.sh
 set -euo pipefail
 
@@ -12,5 +12,6 @@ mkdir -p "$out"
 python -m grpc_tools.protoc \
   --proto_path="$proto_root" \
   --python_out="$out" \
-  "$proto_root/corvus/capture/v1/capture.proto"
-echo "generated $out/corvus/capture/v1/capture_pb2.py"
+  "$proto_root/corvus/capture/v1/capture.proto" \
+  "$proto_root/corvus/score/v1/score.proto"
+echo "generated $out/corvus/capture/v1/capture_pb2.py and $out/corvus/score/v1/score_pb2.py"
