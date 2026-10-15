@@ -1,0 +1,19 @@
+# Corvus plugin configuration for the pilot.
+# The key names are a best-effort match for the plugin's config contract; align
+# them with the plugin's default config.toml once it is merged.
+
+[pseudonym]
+# The HMAC key itself comes from the CORVUS_PSEUDONYM_KEY environment variable.
+key_id = "pilot-1"
+
+[capture]
+output_dir = "captures"
+# Keep payload bytes during the pilot so bytes/s reflect real frame sizes.
+include_payload = true
+
+[game_context]
+default = "unknown"
+
+[game_context.servers]
+lobby = "lobby"
+pvp = "pvp"

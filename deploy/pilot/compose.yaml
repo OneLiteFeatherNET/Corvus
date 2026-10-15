@@ -1,0 +1,117 @@
+# Corvus pilot stack: Velocity (PacketEvents, ViaVersion, ViaBackwards, Corvus)
+# in front of two Paper backends. See docs/pilot.md.
+#
+# Requires: deploy/pilot/.env (copy .env.example) and the plugin jar built with
+#   ./gradlew :plugin:shadowJar
+
+name: corvus-pilot
+
+x-paper: &paper
+  image: itzg/minecraft-server:2026.10.0-java25
+  restart: "no"
+  # Keep the stack from hogging the developer machine.
+  cpus: 1.5
+  mem_limit: 2g
+  pids_limit: 512
+  environment: &paper-env
+    EULA: ${EULA:-FALSE}
+    TYPE: PAPER
+    VERSION: "26.2"
+    PAPER_BUILD: "134"
+    # Authentication happens on the proxy; backends trust modern forwarding.
+    ONLINE_MODE: "FALSE"
+    ENABLE_RCON: "FALSE"
+    MEMORY: 1536M
+    VIEW_DISTANCE: "6"
+    SIMULATION_DISTANCE: "4"
+    REPLACE_ENV_DURING_SYNC: "true"
+    SYNC_SKIP_NEWER_IN_DESTINATION: "false"
+    CFG_VELOCITY_FORWARDING_SECRET: ${VELOCITY_FORWARDING_SECRET:?set VELOCITY_FORWARDING_SECRET in .env}
+  volumes:
+    - ./paper/paper-global.yml:/config/config/paper-global.yml:ro
+
+services:
+  stage-corvus:
+    # One-shot: copies exactly one corvus-velocity-*.jar (no -sources/-plain/-javadoc)
+    # into a volume that the proxy mounts as /plugins.
+    image: alpine:3.22
+    restart: "no"
+    cpus: 0.25
+    mem_limit: 64m
+    volumes:
+      - ../../plugin/build/libs:/src:ro
+      - corvus-plugin:/dst
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        rm -f /dst/*.jar
+        n=0
+        for f in /src/corvus-velocity-*.jar; do
+          [ -e "$$f" ] || break
+          case "$$f" in *-sources.jar|*-plain.jar|*-javadoc.jar) continue ;; esac
+          cp "$$f" /dst/
+          n=$$((n + 1))
+        done
+        if [ "$$n" -ne 1 ]; then
+          echo "expected exactly one corvus-velocity-*.jar in plugin/build/libs, found $$n; run ./gradlew :plugin:shadowJar" >&2
+          exit 1
+        fi
+        echo "staged corvus plugin jar"
+
+  proxy:
+    image: itzg/mc-proxy:2026.10.0-java25
+    restart: "no"
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 512
+    depends_on:
+      stage-corvus:
+        condition: service_completed_successfully
+      lobby:
+        condition: service_healthy
+      pvp:
+        condition: service_healthy
+    environment:
+      TYPE: VELOCITY
+      VELOCITY_VERSION: 3.5.1
+      VELOCITY_BUILD_ID: "615"
+      MEMORY: 512M
+      # Pinned, immutable Modrinth CDN URLs (version id is part of the path).
+      # PacketEvents 2.14.0, ViaVersion 5.12.1, ViaBackwards 5.12.1; see docs/pilot.md.
+      PLUGINS: "https://cdn.modrinth.com/data/HYKaKraK/versions/p0asH9aC/packetevents-velocity-2.14.0.jar,https://cdn.modrinth.com/data/P1OZGk5p/versions/5WgnasGG/ViaVersion-5.12.1.jar,https://cdn.modrinth.com/data/NpvuJQoq/versions/dWw67APC/ViaBackwards-5.12.1.jar"
+      VELOCITY_FORWARDING_SECRET: ${VELOCITY_FORWARDING_SECRET:?set VELOCITY_FORWARDING_SECRET in .env}
+      CORVUS_PSEUDONYM_KEY: ${CORVUS_PSEUDONYM_KEY:?set CORVUS_PSEUDONYM_KEY in .env}
+    ports:
+      - "${PROXY_BIND:-127.0.0.1}:${PROXY_PORT:-25565}:25577"
+    volumes:
+      - proxy-server:/server
+      - corvus-plugin:/plugins:ro
+      - ./proxy/velocity.toml:/config/velocity.toml:ro
+      - ./proxy/corvus-config.toml:/server/plugins/corvus/config.toml:ro
+      - ./data/captures:/server/plugins/corvus/captures
+
+  lobby:
+    <<: *paper
+    environment:
+      <<: *paper-env
+      PVP: "false"
+    volumes:
+      - lobby-data:/data
+      - ./paper/paper-global.yml:/config/config/paper-global.yml:ro
+
+  pvp:
+    <<: *paper
+    environment:
+      <<: *paper-env
+      PVP: "true"
+    volumes:
+      - pvp-data:/data
+      - ./paper/paper-global.yml:/config/config/paper-global.yml:ro
+
+volumes:
+  corvus-plugin:
+  proxy-server:
+  lobby-data:
+  pvp-data:
