@@ -24,6 +24,7 @@ from corvus_ml.features.reader import EventFiles
 from corvus_ml.features.schema import SESSION_ID_TYPE
 from corvus_ml.features.segments import SegmentMap
 from corvus_ml.jobs import layout
+from corvus_ml.jobs.artifacts import check_needs_rebuild, register_prefix
 from corvus_ml.jobs.context import JobContext
 from corvus_ml.jobs.lifecycle import JobEnv, JobError, JobOutcome
 from corvus_ml.jobs.params import Params
@@ -154,6 +155,7 @@ def build_features(ctx: JobContext, env: JobEnv) -> JobOutcome:
         return raw_job.build_raw(ctx, env, kind)
     p = Params(ctx.params)
     p.string("kind")
+    strict = p.boolean("strict", False)
     contexts = p.game_contexts()
     cfg = FeatureConfig(
         window=p.integer("window", 256, 1, 100_000),
@@ -168,6 +170,7 @@ def build_features(ctx: JobContext, env: JobEnv) -> JobOutcome:
     p.done()
 
     snapshot = env.api.get_snapshot(ctx.snapshot_id)
+    check_needs_rebuild(snapshot, strict=strict)
     manifest = snapshot.get("manifest") or {}
     keys = [f["key"] for f in (manifest.get("files") or {}).get("events") or []]
     if not keys:
@@ -209,6 +212,9 @@ def build_features(ctx: JobContext, env: JobEnv) -> JobOutcome:
         f"{prefix}/{layout.BUILD_FILE}",
         json.dumps({**result, "job_id": ctx.job_id, "built_at": env.clock().isoformat()}).encode(),
     )
+    for name, kind_name in (("windows", "window_features"), ("window_tokens", "window_tokens")):
+        if env.store.list_keys(f"{prefix}/{name}"):
+            register_prefix(ctx, env, kind_name, f"{prefix}/{name}", contains_raw=False)
     return JobOutcome(
         f"built {result['windows']} windows from {result['sessions']} sessions", result
     )
