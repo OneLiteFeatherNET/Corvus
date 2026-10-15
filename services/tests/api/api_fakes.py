@@ -399,19 +399,30 @@ class FakeScoreRepo:
     def history_rows(self) -> dict[bytes, list[ScoreHistoryRecord]]:
         return self._store.history_rows
 
-    async def latest(self, pseudonym: bytes) -> list[ScoreLatestRecord]:
+    async def latest(
+        self, pseudonym: bytes, include_shadow: bool = False
+    ) -> list[ScoreLatestRecord]:
         return sorted(
-            self.latest_rows.get(pseudonym, []),
+            (
+                r
+                for r in self.latest_rows.get(pseudonym, [])
+                if include_shadow or r.stage != "shadow"
+            ),
             key=lambda r: (r.game_context, r.domain, r.model_name),
         )
 
     async def history(
-        self, pseudonym: bytes, game_context: str | None, limit: int
+        self,
+        pseudonym: bytes,
+        game_context: str | None,
+        limit: int,
+        include_shadow: bool = False,
     ) -> list[ScoreHistoryRecord]:
         rows = [
             r
             for r in self.history_rows.get(pseudonym, [])
-            if game_context is None or r.game_context == game_context
+            if (game_context is None or r.game_context == game_context)
+            and (include_shadow or r.stage != "shadow")
         ]
         return sorted(rows, key=lambda r: (r.scored_at, r.id), reverse=True)[:limit]
 

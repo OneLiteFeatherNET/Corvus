@@ -850,18 +850,25 @@ class PgScoreRepo:
     def __init__(self, pool: Pool) -> None:
         self._pool = pool
 
-    async def latest(self, pseudonym: bytes) -> list[ScoreLatestRecord]:
+    async def latest(
+        self, pseudonym: bytes, include_shadow: bool = False
+    ) -> list[ScoreLatestRecord]:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT game_context, domain, model_name, model_version, stage, score, smoothed,"
                 " windows, updated_at FROM corvus.scores_latest WHERE pseudonym = %s"
+                " AND (%s OR stage <> 'shadow')"
                 " ORDER BY game_context, domain, model_name",
-                (pseudonym,),
+                (pseudonym, include_shadow),
             )
             return [ScoreLatestRecord(*r) for r in await cur.fetchall()]
 
     async def history(
-        self, pseudonym: bytes, game_context: str | None, limit: int
+        self,
+        pseudonym: bytes,
+        game_context: str | None,
+        limit: int,
+        include_shadow: bool = False,
     ) -> list[ScoreHistoryRecord]:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
@@ -869,8 +876,9 @@ class PgScoreRepo:
                 " stage, score, smoothed, windows, window_start_offset_nanos,"
                 " window_end_offset_nanos, scored_at FROM corvus.score_history"
                 " WHERE pseudonym = %s AND (%s::text IS NULL OR game_context = %s)"
+                " AND (%s OR stage <> 'shadow')"
                 " ORDER BY scored_at DESC, id DESC LIMIT %s",
-                (pseudonym, game_context, game_context, limit),
+                (pseudonym, game_context, game_context, include_shadow, limit),
             )
             return [ScoreHistoryRecord(r[0], bytes(r[1]), *r[2:]) for r in await cur.fetchall()]
 

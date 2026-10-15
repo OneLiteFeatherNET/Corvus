@@ -107,6 +107,14 @@ def test_every_api_operation_declares_its_security(env: Env):
                 assert op.get("security"), f"{method.upper()} {path} is not protected"
 
 
+def test_openapi_schema_names_are_unique_per_model(env: Env):
+    doc = env.client.get("/openapi.json").json()
+
+    names = list(doc["components"]["schemas"])
+    clashes = [n for n in names if "__" in n]
+    assert clashes == [], f"two models share a class name: {clashes}"
+
+
 def test_defaults_are_safe():
     s = ApiSettings()
 

@@ -347,14 +347,20 @@ class ScoreHistoryRecord:
 
 
 class ScoreRepo(Protocol):
-    async def latest(self, pseudonym: bytes) -> list[ScoreLatestRecord]:
-        """Ordered by game context, domain, model name."""
+    async def latest(
+        self, pseudonym: bytes, include_shadow: bool = False
+    ) -> list[ScoreLatestRecord]:
+        """Ordered by game context, domain, model name; ``shadow`` rows only on request."""
         ...
 
     async def history(
-        self, pseudonym: bytes, game_context: str | None, limit: int
+        self,
+        pseudonym: bytes,
+        game_context: str | None,
+        limit: int,
+        include_shadow: bool = False,
     ) -> list[ScoreHistoryRecord]:
-        """Newest first, at most ``limit`` rows."""
+        """Newest first, at most ``limit`` rows (``shadow`` rows are filtered before the limit)."""
         ...
 
 
