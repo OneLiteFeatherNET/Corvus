@@ -12,6 +12,7 @@
   "api" (dict "enabled" .Values.api.enabled "port" .Values.api.port "from" (concat .Values.networkPolicy.apiFrom (list $metricsPeer)) "open" (empty .Values.networkPolicy.apiFrom))
   "ui" (dict "enabled" .Values.ui.enabled "port" .Values.ui.port "from" .Values.networkPolicy.uiFrom "open" (empty .Values.networkPolicy.uiFrom))
   "housekeeping" (dict "enabled" .Values.housekeeping.enabled)
+  "compact" (dict "enabled" .Values.compact.enabled)
   "migrate" (dict "enabled" .Values.migrate.enabled)
 }}
 {{- range $component, $cfg := $components }}

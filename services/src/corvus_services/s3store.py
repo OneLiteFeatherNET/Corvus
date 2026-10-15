@@ -7,6 +7,7 @@ aiobotocore to exact botocore versions, which makes dependency updates painful.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 import boto3
@@ -46,6 +47,13 @@ class S3Store:
 
     async def put(self, key: str, data: bytes) -> None:
         await asyncio.to_thread(self._c.put_object, Bucket=self._bucket, Key=key, Body=data)
+
+    async def download(self, key: str, path: Path) -> None:
+        """Stream an object to a local file (bounded memory)."""
+        await asyncio.to_thread(self._c.download_file, self._bucket, key, str(path))
+
+    async def upload(self, path: Path, key: str) -> None:
+        await asyncio.to_thread(self._c.upload_file, str(path), self._bucket, key)
 
     async def copy(self, src: str, dst: str) -> None:
         await asyncio.to_thread(

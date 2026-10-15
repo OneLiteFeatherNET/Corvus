@@ -231,6 +231,23 @@
         "resources": {"$ref": "#/definitions/resources"}
       }
     },
+    "compact": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "schedule": {"type": "string", "minLength": 9},
+        "startingDeadlineSeconds": {"type": "integer", "minimum": 1},
+        "activeDeadlineSeconds": {"type": "integer", "minimum": 1},
+        "ttlSecondsAfterFinished": {"type": "integer", "minimum": 0},
+        "backoffLimit": {"type": "integer", "minimum": 0},
+        "successfulJobsHistoryLimit": {"type": "integer", "minimum": 0},
+        "failedJobsHistoryLimit": {"type": "integer", "minimum": 0},
+        "batchRows": {"type": "integer", "minimum": 1},
+        "graceSeconds": {"type": "integer", "minimum": 0},
+        "env": {"type": "object"},
+        "resources": {"$ref": "#/definitions/resources"}
+      }
+    },
     "ui": {
       "type": "object",
       "properties": {

@@ -1,0 +1,54 @@
+{{- if .Values.compact.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "corvus.fullname" . }}-compact
+  labels:
+    {{- include "corvus.componentLabels" (dict "root" . "component" "compact") | nindent 4 }}
+spec:
+  schedule: {{ .Values.compact.schedule | quote }}
+  # Per-file advisory locks make overlapping runs safe, but there is no point in them; skip instead.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ .Values.compact.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ .Values.compact.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.compact.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.compact.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.compact.activeDeadlineSeconds }}
+      ttlSecondsAfterFinished: {{ .Values.compact.ttlSecondsAfterFinished }}
+      template:
+        metadata:
+          labels:
+            {{- include "corvus.podLabels" (dict "root" . "component" "compact") | nindent 12 }}
+          {{- with .Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "corvus.serviceAccountName" (dict "root" . "component" "compact") }}
+          automountServiceAccountToken: false
+          {{- include "corvus.podCommon" . | nindent 10 }}
+          containers:
+            - name: compact
+              image: {{ include "corvus.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["corvus-compact"]
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              env:
+                {{- include "corvus.pgEnv" . | nindent 16 }}
+                {{- include "corvus.s3Env" . | nindent 16 }}
+                - name: CORVUS_COMPACT_BATCH_ROWS
+                  value: {{ .Values.compact.batchRows | quote }}
+                - name: CORVUS_COMPACT_GRACE_S
+                  value: {{ .Values.compact.graceSeconds | quote }}
+                {{- include "corvus.extraEnv" .Values.compact.env | nindent 16 }}
+              resources:
+                {{- toYaml .Values.compact.resources | nindent 16 }}
+              volumeMounts:
+                {{- include "corvus.tmpMount" . | nindent 16 }}
+          volumes:
+            {{- include "corvus.tmpVolume" . | nindent 12 }}
+{{- end }}

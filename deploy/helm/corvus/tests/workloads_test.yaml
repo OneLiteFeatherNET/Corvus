@@ -5,6 +5,7 @@ templates:
   - api.yaml
   - score.yaml
   - housekeeping.yaml
+  - compact.yaml
   - ui.yaml
 tests:
   - it: runs the migration as a pre-install and pre-upgrade hook
@@ -145,3 +146,37 @@ tests:
       - equal:
           path: spec.template.spec.automountServiceAccountToken
           value: false
+
+  - it: runs compaction hourly as a non-overlapping, hardened cronjob
+    template: compact.yaml
+    asserts:
+      - isKind:
+          of: CronJob
+      - equal:
+          path: spec.schedule
+          value: "7 * * * *"
+      - equal:
+          path: spec.concurrencyPolicy
+          value: Forbid
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].command
+          value: ["corvus-compact"]
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.automountServiceAccountToken
+          value: false
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_COMPACT_BATCH_ROWS
+            value: "65536"
+
+  - it: renders no compaction cronjob when disabled
+    template: compact.yaml
+    set:
+      compact.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
