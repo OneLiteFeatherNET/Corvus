@@ -1,0 +1,260 @@
+"""Records and repository ports of the control plane. Postgres adapters live in ``pg.py``; tests use fakes."""
+
+from __future__ import annotations
+
+from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Literal, Protocol
+from uuid import UUID
+
+from .pagination import Page, PageRequest
+from .pools import PoolFilter, RawPreview
+from .snapshots import LakeFileRef
+
+
+class DuplicateError(Exception):
+    """A unique constraint is violated."""
+
+
+class StaleError(Exception):
+    """The row changed since it was read (optimistic concurrency)."""
+
+
+@dataclass(frozen=True)
+class PoolRecord:
+    id: UUID
+    name: str
+    description: str
+    filter: PoolFilter
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class SnapshotRecord:
+    id: UUID
+    pool_id: UUID
+    pool_name: str
+    manifest: dict[str, Any]
+    sha256: str
+    session_count: int
+    file_count: int
+    created_by: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class LabelRecord:
+    id: UUID
+    subject_type: Literal["pseudonym", "session"]
+    subject: str  # hex
+    label: str
+    source: str
+    confidence: float
+    valid_from: datetime | None
+    valid_to: datetime | None
+    note: str
+    created_by: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class PlayerInfo:
+    pseudonym: bytes
+    key_id: str
+    first_seen: datetime
+    last_seen: datetime
+    erased_at: datetime | None
+
+
+@dataclass(frozen=True)
+class BlockEntry:
+    pseudonym: bytes
+    kind: Literal["block", "allow"]
+    source: Literal["manual", "erasure"]
+    reason: str
+    created_by: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class ErasureRequest:
+    id: UUID
+    pseudonym: bytes
+    requested_by: str
+    requested_at: datetime
+    status: str
+    player_known: bool
+    key_deleted: bool
+    compaction_pending: bool
+
+
+@dataclass(frozen=True)
+class ModelRecord:
+    id: UUID
+    name: str
+    version: str
+    candidate_type: str
+    game_context: str
+    domain: str
+    snapshot_id: UUID
+    metrics: dict[str, Any]
+    onnx_key: str
+    stage: str
+    created_by: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class TransitionRecord:
+    id: UUID
+    model_id: UUID
+    from_stage: str
+    to_stage: str
+    actor: str
+    reason: str
+    gate: dict[str, Any] | None
+    at: datetime
+
+
+@dataclass(frozen=True)
+class JobRecord:
+    id: UUID
+    type: str
+    snapshot_id: UUID
+    params: dict[str, Any]
+    status: str
+    runner: str
+    runner_ref: str | None
+    message: str
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class SnapshotMaterial:
+    session_ids: list[bytes]
+    files: list[LakeFileRef]
+
+
+class PoolRepo(Protocol):
+    async def create(self, pool: PoolRecord) -> None: ...
+    async def get(self, pool_id: UUID) -> PoolRecord | None: ...
+    async def list_page(self, req: PageRequest) -> Page[PoolRecord]: ...
+    async def update(self, pool: PoolRecord) -> bool: ...
+    async def delete(self, pool_id: UUID) -> bool: ...
+
+
+class PoolCatalog(Protocol):
+    """Read-only SQL over the ingest catalog for a pool filter."""
+
+    async def preview(self, pool_filter: PoolFilter) -> RawPreview: ...
+    async def snapshot_material(self, pool_filter: PoolFilter) -> SnapshotMaterial: ...
+
+
+class SnapshotRepo(Protocol):
+    async def insert(self, snapshot: SnapshotRecord) -> None: ...
+    async def get(self, snapshot_id: UUID) -> SnapshotRecord | None: ...
+    async def list_page(self, req: PageRequest, pool_id: UUID | None) -> Page[SnapshotRecord]: ...
+
+
+class LabelRepo(Protocol):
+    async def add_many(self, labels: list[LabelRecord]) -> None:
+        """All or nothing."""
+        ...
+
+    async def list_page(
+        self, req: PageRequest, subject_type: str | None, subject: bytes | None
+    ) -> Page[LabelRecord]: ...
+
+
+class PlayerRepo(Protocol):
+    async def get(self, pseudonym: bytes) -> PlayerInfo | None: ...
+
+
+class ErasureTx(Protocol):
+    """The steps of an erasure; all run in one database transaction."""
+
+    async def lock_player(self, pseudonym: bytes) -> PlayerInfo | None: ...
+    async def delete_player_key(self, pseudonym: bytes) -> bool: ...
+    async def mark_erased(self, pseudonym: bytes, at: datetime) -> None: ...
+    async def block(self, entry: BlockEntry) -> None: ...
+    async def record_request(self, request: ErasureRequest) -> None: ...
+
+
+class ErasureStore(Protocol):
+    def transaction(self) -> AbstractAsyncContextManager[ErasureTx]:
+        """Commits when the block ends normally, rolls back when it raises."""
+        ...
+
+    async def get_request(self, request_id: UUID) -> ErasureRequest | None: ...
+
+
+class BlocklistRepo(Protocol):
+    async def get(self, pseudonym: bytes) -> BlockEntry | None: ...
+    async def list_page(self, req: PageRequest, kind: str | None) -> Page[BlockEntry]: ...
+    async def put(self, entry: BlockEntry) -> None:
+        """Insert or replace by pseudonym."""
+        ...
+
+    async def delete(self, pseudonym: bytes) -> bool: ...
+    async def all_pseudonyms(self) -> tuple[list[bytes], list[bytes]]:
+        """(blocked, allowed), each sorted."""
+        ...
+
+
+class ModelRepo(Protocol):
+    async def create(self, model: ModelRecord) -> None: ...
+    async def get(self, model_id: UUID) -> ModelRecord | None: ...
+    async def list_page(self, req: PageRequest, stage: str | None) -> Page[ModelRecord]: ...
+    async def enforced_in_scope(
+        self, snapshot_id: UUID, game_context: str, exclude: UUID
+    ) -> list[ModelRecord]: ...
+
+    async def apply_transition(
+        self, model_id: UUID, expected_stage: str, transitions: list[TransitionRecord]
+    ) -> ModelRecord:
+        """Atomically apply ``transitions`` (the first one is for ``model_id`` and must start at
+        ``expected_stage``; others archive replaced models). Raises ``StaleError`` otherwise."""
+        ...
+
+    async def transitions(self, model_id: UUID) -> list[TransitionRecord]: ...
+
+
+class JobRepo(Protocol):
+    async def create(self, job: JobRecord) -> None: ...
+    async def get(self, job_id: UUID) -> JobRecord | None: ...
+    async def list_page(self, req: PageRequest, status: str | None) -> Page[JobRecord]: ...
+    async def update(
+        self,
+        job_id: UUID,
+        *,
+        status: str,
+        runner_ref: str | None,
+        message: str,
+        now: datetime,
+        finished: bool,
+    ) -> JobRecord: ...
+
+
+class Database(Protocol):
+    async def ping(self) -> None: ...
+
+
+@dataclass
+class Repos:
+    pools: PoolRepo
+    catalog: PoolCatalog
+    snapshots: SnapshotRepo
+    labels: LabelRepo
+    players: PlayerRepo
+    erasure: ErasureStore
+    blocklist: BlocklistRepo
+    models: ModelRepo
+    jobs: JobRepo
+    db: Database
+    closers: list[Any] = field(default_factory=list)

@@ -33,11 +33,43 @@ Clean up housekeeping candidates once with:
 docker compose run --rm ingest corvus-housekeeping
 ```
 
+## Run the control-plane API locally
+
+The `api` service of the same stack serves the management API on <http://localhost:8080> (reference:
+[control-plane-api.md](../reference/control-plane-api.md)). It starts after `migrate`, which also creates its tables.
+
+1. Create its environment file. It is read by the `api` service only and is optional for the other services:
+
+   ```sh
+   cd deploy/dev
+   cp .env.api.example .env.api
+   ```
+
+2. For a quick local try-out set a development token in `.env.api` (never do this on a shared host), for example with
+   `openssl rand -hex 24`. For anything else configure the OIDC issuer, audience and JWKS URL instead. Set
+   `CORVUS_PSEUDONYM_KEY` (the key the proxies use) if you want player lookup and erasure by UUID.
+
+   ```sh
+   CORVUS_API_DEV_TOKEN=<generated value>
+   ```
+
+3. Start the service and call it:
+
+   ```sh
+   docker compose up --build api
+   curl -s localhost:8080/readyz
+   curl -s -H "Authorization: Bearer $CORVUS_API_DEV_TOKEN" localhost:8080/api/v1/pools
+   ```
+
+   The interactive OpenAPI documentation is at <http://localhost:8080/docs>. Without the `docker compose` stack, run
+   `uv run corvus-api` in `services/` with `CORVUS_PG_DSN` set; jobs then start local subprocesses
+   (`CORVUS_API_JOB_RUNNER=local`).
+
 ## Unit and integration tests
 
 ```sh
 cd services
 uv sync --group proto --group dev
 uv run pytest                 # unit tests, no Docker needed
-uv run pytest -m integration  # needs the compose stack above (ports on localhost)
+uv run pytest -m integration  # needs the compose stack above (ports on localhost), includes the API SQL
 ```
