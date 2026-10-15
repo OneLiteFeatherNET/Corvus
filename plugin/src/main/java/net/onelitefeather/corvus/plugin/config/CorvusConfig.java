@@ -28,7 +28,8 @@ public record CorvusConfig(
         String defaultGameContext,
         Map<String, String> serverContexts,
         SinkType sinkType,
-        Nats nats) {
+        Nats nats,
+        Scores scores) {
 
     public enum ListMode { ALL, ALLOWLIST }
 
@@ -50,6 +51,12 @@ public record CorvusConfig(
         public Nats {
             urls = List.copyOf(urls);
         }
+    }
+
+    /** Settings of the online score subscription; connection settings come from {@link Nats}. */
+    public record Scores(boolean enabled, String subject, int listenerThreads, int listenerQueueSize) {
+
+        public static final String DEFAULT_SUBJECT = "corvus.score.v1.>";
     }
 
     public static final String DEFAULT_TOML = """
@@ -105,6 +112,16 @@ public record CorvusConfig(
             # Bytes jnats buffers while reconnecting; beyond this publishes fail.
             reconnect_buffer_bytes = 8388608
 
+            [scores]
+            # Subscribe to the scores of the scoring service and expose them through the corvus-api. Defaults to
+            # true when sink.type = "nats" and false otherwise; set it explicitly to override. Needs [nats] url
+            # and the pseudonym key (scores are mapped to online players through their pseudonym).
+            # enabled = true
+            subject = "corvus.score.v1.>"
+            # Worker threads and queue size (updates) for score listeners of other plugins; a full queue drops updates.
+            listener_threads = 2
+            listener_queue = 1024
+
             [game_context]
             default = "unknown"
 
@@ -157,7 +174,20 @@ public record CorvusConfig(
                 toml.getString("game_context.default", "unknown"),
                 contexts,
                 sinkType,
-                parseNats(toml, sinkType));
+                parseNats(toml, sinkType),
+                parseScores(toml, sinkType));
+    }
+
+    private static Scores parseScores(Toml toml, SinkType sinkType) {
+        Toml scores = toml.getTable("scores");
+        Object rawEnabled = scores == null ? null : scores.toMap().get("enabled");
+        boolean enabled = rawEnabled instanceof Boolean b ? b : sinkType == SinkType.NATS;
+        String subject = toml.getString("scores.subject", Scores.DEFAULT_SUBJECT).trim();
+        return new Scores(
+                enabled,
+                subject.isEmpty() ? Scores.DEFAULT_SUBJECT : subject,
+                (int) Math.min(16L, Math.max(1L, toml.getLong("scores.listener_threads", 2L))),
+                (int) Math.min(1_000_000L, Math.max(1L, toml.getLong("scores.listener_queue", 1024L))));
     }
 
     private static Nats parseNats(Toml toml, SinkType sinkType) {
@@ -172,8 +202,11 @@ public record CorvusConfig(
             urls.add(String.valueOf(rawUrl).trim());
         }
         urls.removeIf(String::isEmpty);
-        if (urls.isEmpty() && sinkType == SinkType.NATS) {
-            throw new IllegalArgumentException("sink.type = \"nats\" requires nats.url (one URL or a list)");
+        Object rawScores = toml.getTable("scores") == null ? null : toml.getTable("scores").toMap().get("enabled");
+        boolean scoresOn = rawScores instanceof Boolean b && b;
+        if (urls.isEmpty() && (sinkType == SinkType.NATS || scoresOn)) {
+            throw new IllegalArgumentException(
+                    "sink.type = \"nats\" or scores.enabled = true requires nats.url (one URL or a list)");
         }
         String prefix = toml.getString("nats.subject_prefix", Nats.DEFAULT_SUBJECT_PREFIX).trim();
         return new Nats(

@@ -141,4 +141,35 @@ class CorvusConfigTest {
         assertEquals(64, CorvusConfig.parse("[nats]\npartitions = 64\n").nats().partitions());
         assertEquals(1, CorvusConfig.parse("[nats]\npartitions = 0\n").nats().partitions());
     }
+
+    @Test
+    void scoresAreOffForTheFileSinkAndOnForTheNatsSink() {
+        assertEquals(false, CorvusConfig.parse("").scores().enabled());
+        assertEquals(true, CorvusConfig.parse("[sink]\ntype = \"nats\"\n[nats]\nurl = \"nats://a:4222\"\n")
+                .scores().enabled());
+    }
+
+    @Test
+    void explicitScoresEnabledOverridesTheSinkDefault() {
+        CorvusConfig on = CorvusConfig.parse("[scores]\nenabled = true\n[nats]\nurl = \"nats://a:4222\"\n");
+        CorvusConfig off = CorvusConfig.parse(
+                "[sink]\ntype = \"nats\"\n[scores]\nenabled = false\n[nats]\nurl = \"nats://a:4222\"\n");
+
+        assertEquals(true, on.scores().enabled());
+        assertEquals(false, off.scores().enabled());
+    }
+
+    @Test
+    void scoresEnabledWithoutNatsUrlIsAConfigError() {
+        assertThrows(IllegalArgumentException.class, () -> CorvusConfig.parse("[scores]\nenabled = true\n"));
+    }
+
+    @Test
+    void scoresDefaultsAreDocumented() {
+        CorvusConfig.Scores scores = CorvusConfig.parse("").scores();
+
+        assertEquals("corvus.score.v1.>", scores.subject());
+        assertEquals(2, scores.listenerThreads());
+        assertEquals(1024, scores.listenerQueueSize());
+    }
 }

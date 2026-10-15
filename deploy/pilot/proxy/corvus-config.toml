@@ -42,6 +42,16 @@ flush_interval_seconds = 5
 #   reconnect_buffer_bytes = 8388608        # bytes buffered while reconnecting
 type = "file"
 
+[scores]
+# Online scores for other plugins (corvus-api, docs/reference/plugin-api.md). Off here because the pilot uses the
+# file sink. With sink.type = "nats" this defaults to on and subscribes to corvus.score.v1.> (core NATS, needs the
+# [nats] url and the pseudonym key). To enable it without the nats sink, uncomment:
+#   enabled = true
+# Scores are decision aids; only ENFORCE scores are meant for automated actions, Corvus never sanctions players.
+subject = "corvus.score.v1.>"
+listener_threads = 2
+listener_queue = 1024
+
 [game_context]
 default = "unknown"
 

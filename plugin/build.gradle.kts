@@ -25,6 +25,8 @@ sourceSets.main {
 
 dependencies {
     implementation(project(":proto-java"))
+    // Public API for other plugins: shaded into the plugin jar unrelocated (see shadowJar below).
+    implementation(project(":api"))
     implementation("io.nats:jnats:2.26.4")
     implementation("com.moandjiezana.toml:toml4j:0.7.2") {
         exclude(group = "com.google.code.gson")
@@ -69,6 +71,7 @@ tasks.shadowJar {
     relocate("io.nats", "net.onelitefeather.corvus.shaded.nats")
     relocate("org.bouncycastle", "net.onelitefeather.corvus.shaded.bouncycastle")
     relocate("org.jspecify", "net.onelitefeather.corvus.shaded.jspecify")
+    // net.onelitefeather.corvus.api is deliberately NOT relocated: other plugins compile against it.
 }
 
 tasks.build { dependsOn(tasks.shadowJar) }
