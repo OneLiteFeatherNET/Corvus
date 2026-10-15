@@ -1,0 +1,66 @@
+name: Services
+
+on:
+  pull_request:
+    paths:
+      - "services/**"
+      - "proto/**"
+      - ".github/workflows/services.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: services-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint and test (services)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services
+    steps:
+      - uses: actions/checkout@v7
+
+      # The services project may not exist on a branch yet; skip the remaining steps until it does.
+      - name: Detect services project
+        id: detect
+        working-directory: .
+        run: |
+          if [ -f services/pyproject.toml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::services/ not found, nothing to check"
+          fi
+
+      - name: Set up uv
+        if: steps.detect.outputs.present == 'true'
+        uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: services/uv.lock
+
+      - name: Sync dependencies
+        if: steps.detect.outputs.present == 'true'
+        run: uv sync --locked --group proto
+
+      - name: Ruff lint
+        if: steps.detect.outputs.present == 'true'
+        run: uv run ruff check .
+
+      - name: Ruff format
+        if: steps.detect.outputs.present == 'true'
+        run: uv run ruff format --check .
+
+      - name: Mypy
+        if: steps.detect.outputs.present == 'true'
+        run: uv run mypy src
+
+      # The protobuf bindings are generated from ../proto on first import (grpcio-tools, group "proto").
+      - name: Pytest
+        if: steps.detect.outputs.present == 'true'
+        run: uv run pytest -q
