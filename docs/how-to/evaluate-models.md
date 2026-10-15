@@ -13,7 +13,8 @@ with `<candidate>.calibration.json` and `<candidate>.raw.onnx` (the graph withou
 torch models also get `.int8.onnx`). `ml/eval.synthetic.toml` is a ready-to-run smoke config.
 
 The control plane runs the same harness as the `evaluate` and `train` jobs; see
-[ml-jobs.md](../reference/ml-jobs.md).
+[ml-jobs.md](../reference/ml-jobs.md). Models on raw packet bytes (`raw_hier_classifier`,
+`raw_hier_anomaly`) and the Optuna search (`corvus-eval tune`) are covered in sections 6 and 7.
 
 ## 1. Inputs
 
@@ -94,7 +95,8 @@ quantize = true          # int8 dynamic quantisation variant of the torch models
 ```
 
 Unknown keys are errors. Candidate names: `isolation_forest`, `gradient_boosting`,
-`gru_autoencoder`, `cnn1d`.
+`gru_autoencoder`, `cnn1d`, and the raw-byte models `raw_hier_classifier` and `raw_hier_anomaly`
+(section 6; they need a `[raw]` table and cannot share a run with the others).
 
 Candidates train on different subsets: supervised ones (`gradient_boosting`, `cnn1d`) on labelled
 windows and are skipped when the training split lacks one of the classes; unsupervised ones
@@ -159,6 +161,93 @@ real players**, and reports made from it carry a banner saying so.
 ## 5. Adding a candidate
 
 Subclass `corvus_ml.eval.candidates.base.Candidate`, set `name`, `supervised`, `input_kind`
-(`"agg"` or `"seq"`), implement `fit`, `score`, `export_onnx`, `n_params` (and `onnx_to_score` if
+(`"agg"`, `"seq"` or `"raw_bytes"`), implement `fit`, `score`, `export_onnx`, `n_params` (and `onnx_to_score` if
 the graph does not output the score first), decorate with `@register`, and import the module in
 `candidates/__init__.py`. Config, split, metrics, ONNX parity, benchmark and report pick it up.
+
+Optional class attributes: `tunable = True` makes the candidate searchable by `corvus-eval tune`
+(its `fit` must pass `self.on_epoch` to the training loop and `corvus_ml.eval.tune.DEFAULT_SPACES` needs
+an entry), `pretrains = True` hands `fit` the unlabelled windows of the training players as `pool`, and
+`parity_rows` limits the number of test windows used for the ONNX parity check.
+
+## 6. Raw-byte models
+
+`raw_hier_classifier` (supervised) and `raw_hier_anomaly` (self-supervised, masked-prediction score)
+read tokenised raw packet bytes instead of windows and token features; the format and the model are in
+[raw-byte-tokenizer.md](../reference/raw-byte-tokenizer.md). A run uses either these candidates or the
+others, because they cut their own time windows:
+
+```toml
+[raw]
+dir = "lake/raw"          # features/<snapshot>/raw as built by build_features kind=raw_bytes
+# or: [raw.synthetic] (below)
+window_seconds = 10.0     # any window key overrides what the build recorded
+stride_seconds = 5.0
+max_packets = 1024
+overflow = "recent"       # or "uniform"
+min_packets = 8
+# macro_window_seconds = 60.0   # second-level model over consecutive windows (stride == window)
+max_windows = 100000      # random cap on the number of windows (memory)
+
+[raw.tokenizer]           # only for [raw.synthetic]: the tokenizer is trained on the synthetic packets
+vocab_size = 1024
+[raw.packet]
+max_tokens_per_packet = 48
+
+[candidates.raw_hier_classifier]
+epochs = 10
+lr = "auto"
+d_model = 64
+layers = 2
+pretrain_epochs = 5       # masked pretraining on all windows of the training players first
+# init_from = "pretrain/pvp.pt"   # or start from a checkpoint (corvus-eval pretrain)
+[candidates.raw_hier_anomaly]
+epochs = 10
+
+[benchmark]
+raw_packets = [128, 512, 1024]    # extra single-window latency table at these packet counts
+```
+
+Without `[raw]` the labels come from `[data] labels`; with `dir` the build's `sessions.parquet`
+(`session_id`, `pseudonym`, `started_at`, `client_protocol`) and `labels.parquet` are used. The report
+states the tokenizer hash and the window configuration. Each exported model directory
+(`onnx/<context>/`) holds `feature_spec.json` (version 2, `raw_bytes` section) and `tokenizer.json`
+next to the graphs.
+
+Pretraining on its own: `uv run corvus-eval pretrain --config eval.toml --out reports/pre` writes
+`reports/pre/pretrain/<game_context>.pt`; finetune with `init_from`. The model shape comes from the
+parameters of the first candidate in the config.
+
+`ml/eval.synthetic-raw.toml` is a smoke config on synthetic packets with plausible movement layouts
+(protocol differences, three cheat variants). Like every synthetic run it proves the code runs and says
+nothing about real players. The anomaly model in particular does not separate the toy cheaters, which
+are more regular than the toy legit players; a reconstruction loss does not see regularity.
+
+## 7. Hyper-parameter search (`corvus-eval tune`)
+
+```
+uv run corvus-eval tune --config eval.toml --out reports/tuned [--trials 30]
+```
+
+For every game context and every tunable candidate (the raw-byte models, `gru_autoencoder`, `cnn1d`) an
+Optuna study searches learning rate, weight decay and the size parameters (for the raw-byte models also
+`d_model`, `layers`, `dropout`, `window_seconds` and `max_packets`) with a TPE sampler and a median pruner
+and the seed `run.seed`. The objective is the best validation loss, so the search never sees the test
+split. The candidate is then evaluated with the best parameters; the report gets a "Hyper-parameter
+search" section with every trial, and `report.json` the same under `contexts.<ctx>.tune`.
+
+```toml
+[tune]
+trials = 20               # trials per study
+timeout_s = 600           # optional
+storage = ""              # "" = CORVUS_OPTUNA_STORAGE, else sqlite file <out>/tune/optuna.db; or "memory", or a URL
+tune_windows = true       # raw-byte models: also search the window (rebuilds the windows per trial)
+[tune.space]              # optional: narrow or replace a range
+lr = [0.0005, 0.005]      # [low, high] keeps the kind (log / int / float) of the default
+d_model = [32, 64]        # any other list is a set of choices
+```
+
+Set small `epochs` in the candidate tables while searching; each trial is a full fit. With a persistent
+storage an existing study is resumed until it holds `trials` trials. In a job, pass `"tune": true` or the
+object above as a parameter of `evaluate` / `train` ([ml-jobs.md](../reference/ml-jobs.md); the API has no
+separate job type).
