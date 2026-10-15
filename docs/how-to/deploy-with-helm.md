@@ -41,6 +41,21 @@ Operator or SealedSecrets) and point the values at them:
 | `api.extraSecret` (optional) | none | every key becomes an env var, e.g. `CORVUS_API_PLUGIN_TOKENS` (comma separated proxy tokens) | api |
 | `api.jobs.envSecret` (optional) | none | S3 / database credentials exposed to training job pods | jobs started by the api |
 
+**Database, object store and NATS variants.**
+
+- *CloudNativePG with separate keys:* set `database.host` (for example `corvus-db-rw`), `database.name`,
+  `database.port` and `database.passwordKey` (plus `database.userKey`, or a plain `database.user`). The password is
+  read from `database.existingSecret` and reaches psycopg as `PGPASSWORD` (user and host as `PGUSER` and `PGHOST`);
+  `database.dsnKey` is then ignored.
+- *Rook-Ceph ObjectBucketClaim:* the claim's Secret uses the keys `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, so set
+  `s3.existingSecret`, `s3.accessKeyKey: AWS_ACCESS_KEY_ID` and `s3.secretKeyKey: AWS_SECRET_ACCESS_KEY`. Its ConfigMap
+  (`BUCKET_NAME`, `BUCKET_HOST`, `BUCKET_PORT`) can replace `s3.bucket` and the endpoint: set `s3.bucketConfigMap` to its
+  name. `s3.endpointUrl` still wins when set (for example an in-cluster service URL).
+- *NATS:* `nats.streamReplicas` (default 1; 3 on a three-node cluster) sets the replicas of the JetStream stream, and an
+  existing stream with fewer replicas is updated. `nats.creds.existingSecret` holds one `.creds` file per component
+  (`nats.creds.ingestKey`, `nats.creds.scoreKey`, because ingest and score are different NATS users); each pod mounts only
+  its own key read-only and gets `CORVUS_NATS_CREDS_FILE`. This needs a services image that supports those settings.
+
 Losing the KEK makes every stored player key, and with it all raw payloads, unreadable. Back it up.
 
 ## Install
@@ -89,7 +104,21 @@ off (non-root, read-only root filesystem, no capabilities, `RuntimeDefault` secc
 
 ## Optional parts
 
-- `ui.enabled: true` deploys the UI; `ui.config` is rendered as `/usr/share/nginx/html/config.json`.
+- `ui.enabled: true` deploys the UI. `ui.config` is rendered as `/usr/share/nginx/html/config.json` and uses the keys
+  the UI reads (`apiBaseUrl`, `auth.mode`, `auth.rolesClaim`, `auth.roleMapping`, `oidc.issuer`, `oidc.clientId`,
+  `oidc.scopes`, see [run-the-ui.md](run-the-ui.md)); the schema rejects other keys. `basePath` comes from
+  `ui.basePath`, which also sets `CORVUS_UI_BASE_PATH`. The container always listens on 8080 (`ui.port` is only the
+  Service port) and runs as uid 101 (`ui.podSecurityContext`), the user of the nginx-unprivileged image.
+  - **Same origin (default).** `ui.proxyApi: true` makes nginx proxy `/api/` to the in-cluster api Service
+    (`CORVUS_UI_API_UPSTREAM`), so `ui.config.apiBaseUrl: /api/v1` needs neither CORS nor an extra CSP entry. With
+    `networkPolicy.enabled` the chart lets the UI pods reach the api pods. Set `ui.apiUpstream` to proxy elsewhere.
+  - **Separate origin.** Put the absolute URL into `ui.config.apiBaseUrl`, set `ui.proxyApi: false` and list the UI's
+    origin in `api.cors.origins` (`CORVUS_API_CORS_ORIGINS`). The origins for the Content-Security-Policy are derived
+    from `apiBaseUrl` and `oidc.issuer`; override them with `ui.apiOrigin`, `ui.oidcOrigin` and `ui.extraConnect`.
+- `api.jobTokens.existingSecret` (key `api.jobTokens.key`, default `job-tokens`) provides `CORVUS_API_JOB_TOKENS`, the
+  comma separated `<sha256 hex of the token>:<job name>` entries of the ML jobs (see
+  [control-plane-api.md](../reference/control-plane-api.md)). The jobs themselves need `CORVUS_API_URL` and the plain
+  `CORVUS_API_TOKEN`: put both into the Secret named by `api.jobs.envSecret`.
 - `networkPolicy.enabled: true` restricts every component to DNS plus the ports in `networkPolicy.egressPorts`
   (NATS 4222, PostgreSQL 5432, HTTP(S), Kubernetes API) and to ingress on its own port.
 - `serviceMonitor.enabled: true` creates Prometheus Operator ServiceMonitors for ingest, score and api.

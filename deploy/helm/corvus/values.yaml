@@ -52,21 +52,45 @@ topologySpreadConstraints: []
 nats:
   url: nats://nats.nats.svc:4222
   stream: CORVUS_CAPTURE
+  # Replicas of the JetStream stream (CORVUS_NATS_STREAM_REPLICAS); an existing stream with fewer
+  # replicas is updated. Use 3 on a three-node NATS cluster.
+  streamReplicas: 1
+  # Optional NATS credentials (.creds files) from one Secret, one key per component because ingest
+  # and score are different NATS users. Only the component's own key is mounted, read-only, and
+  # passed as CORVUS_NATS_CREDS_FILE.
+  creds:
+    existingSecret: ""
+    ingestKey: ingest.creds
+    scoreKey: score.creds
 
 database:
   # Secret holding the full libpq DSN (including user and password). With CloudNativePG use the
   # app secret and its `uri` key.
   existingSecret: corvus-database
   dsnKey: uri
+  # Alternative: separate libpq settings. When `host` is set, dsnKey is ignored; the password (and
+  # optionally the user, userKey) is read from existingSecret and handed to psycopg via PGPASSWORD
+  # (PGUSER). With CloudNativePG: host <cluster>-rw, name app, userKey username, passwordKey password.
+  host: ""
+  port: 5432
+  name: ""
+  user: ""
+  userKey: ""
+  passwordKey: ""
 
 s3:
   endpointUrl: ""
   bucket: corvus-lake
   region: us-east-1
-  # Secret with the object store credentials.
+  # Secret with the object store credentials. For a Rook-Ceph ObjectBucketClaim the keys are
+  # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
   existingSecret: corvus-s3
   accessKeyKey: access-key
   secretKeyKey: secret-key
+  # Optional: name of the ConfigMap an ObjectBucketClaim creates (BUCKET_NAME, BUCKET_HOST,
+  # BUCKET_PORT). The bucket name is then read from it instead of `bucket`; the endpoint too,
+  # unless `endpointUrl` is set (then that wins, for example an in-cluster service URL).
+  bucketConfigMap: ""
 
 # Key encryption key (base64, 32 bytes) wrapping every player data key. Losing it makes all raw
 # payloads unreadable. Needed by ingest only.
@@ -137,6 +161,15 @@ api:
   # Optional Secret with CORVUS_API_PLUGIN_TOKENS (comma separated proxy tokens) and further
   # CORVUS_API_* credentials. Every key of the Secret becomes an environment variable.
   extraSecret: ""
+  # Browser origins allowed by CORS (CORVUS_API_CORS_ORIGINS). Leave empty when the UI proxies /api/
+  # on its own origin (ui.proxyApi); set it when the UI calls the API on another origin.
+  cors:
+    origins: []
+  # Machine tokens of ML jobs (CORVUS_API_JOB_TOKENS: comma separated "<sha256 hex of token>:<job
+  # name>"). Only hashes are configured; the plain token goes to the job pods, see api.jobs.envSecret.
+  jobTokens:
+    existingSecret: ""
+    key: job-tokens
   # Training / evaluation jobs started by the API.
   jobs:
     # kubernetes: the API creates batch/v1 Jobs in its own namespace (RBAC is created).
@@ -146,7 +179,9 @@ api:
       repository: harbor.onelitefeather.dev/onelitefeather/corvus-ml
       tag: ""
     serviceAccount: ""
-    # Secret exposed as environment to the job pods (S3/DB credentials).
+    # Secret exposed as environment to the job pods: S3/DB credentials plus CORVUS_API_URL (for example
+    # http://<release>-corvus-api:8080) and CORVUS_API_TOKEN, the plain token whose SHA-256 is listed
+    # in api.jobTokens.
     envSecret: ""
     cpuRequest: "1"
     cpuLimit: "4"
@@ -217,14 +252,40 @@ compact:
 ui:
   enabled: false
   replicas: 2
+  # Port of the Service. The container always listens on 8080 (nginx-unprivileged image).
   port: 8080
-  # Rendered as /usr/share/nginx/html/config.json (runtime configuration of the SPA).
+  # CORVUS_UI_BASE_PATH and config.basePath: the path the UI is served under. Set it when the ingress
+  # publishes the UI under a prefix and forwards the path unchanged, for example /corvus/.
+  basePath: /
+  # nginx proxies /api/ to the in-cluster api Service on the UI's own origin, so no CORS is needed
+  # (apiBaseUrl is then the path /api/v1). Set apiUpstream to proxy to another upstream instead.
+  proxyApi: true
+  apiUpstream: ""
+  # Origins added to the CSP connect-src. By default they are derived: the origin of an absolute
+  # config.apiBaseUrl and of config.oidc.issuer. Set these when the derived value is not right (for
+  # example when the token endpoint is on another host).
+  apiOrigin: ""
+  oidcOrigin: ""
+  extraConnect: []
+  # Rendered as /usr/share/nginx/html/config.json (runtime configuration of the SPA, see
+  # docs/how-to/run-the-ui.md). basePath is taken from ui.basePath.
   config:
-    apiBaseUrl: ""
+    # Control-plane API root: an absolute path behind the proxy, or an absolute URL (needs api.cors).
+    apiBaseUrl: /api/v1
+    auth:
+      # oidc: Authorization Code with PKCE. token: paste a bearer token (development only).
+      mode: oidc
+      rolesClaim: roles
+      roleMapping: {}
     oidc:
-      authority: ""
+      issuer: ""
       clientId: ""
-      scope: openid profile
+      scopes: openid profile
+  # The nginx-unprivileged image runs as uid 101; this overrides the global podSecurityContext.
+  podSecurityContext:
+    runAsUser: 101
+    runAsGroup: 101
+    fsGroup: 101
   resources:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {cpu: 500m, memory: 128Mi}

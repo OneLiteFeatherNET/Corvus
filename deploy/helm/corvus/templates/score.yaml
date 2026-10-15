@@ -40,7 +40,7 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           env:
-            {{- include "corvus.natsEnv" . | nindent 12 }}
+            {{- include "corvus.natsEnv" (dict "root" . "credsKey" .Values.nats.creds.scoreKey) | nindent 12 }}
             {{- include "corvus.pgEnv" . | nindent 12 }}
             {{- include "corvus.s3Env" . | nindent 12 }}
             - name: CORVUS_METRICS_PORT
@@ -73,8 +73,10 @@ spec:
             {{- toYaml .Values.score.resources | nindent 12 }}
           volumeMounts:
             {{- include "corvus.tmpMount" . | nindent 12 }}
+            {{- include "corvus.natsCredsMount" . | nindent 12 }}
       volumes:
         {{- include "corvus.tmpVolume" . | nindent 8 }}
+        {{- include "corvus.natsCredsVolume" (dict "root" . "credsKey" .Values.nats.creds.scoreKey) | nindent 8 }}
 ---
 # Headless: stable per-pod identity and the metrics target of every replica.
 apiVersion: v1

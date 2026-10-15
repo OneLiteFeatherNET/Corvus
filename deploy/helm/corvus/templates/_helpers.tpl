@@ -119,28 +119,120 @@ topologySpreadConstraints:
       key: {{ .key }}
 {{- end }}
 
+{{/* Either one Secret key with the full DSN, or separate libpq settings (CloudNativePG style). */}}
 {{- define "corvus.pgEnv" -}}
-{{ include "corvus.secretEnv" (dict "name" "CORVUS_PG_DSN" "secret" .Values.database.existingSecret "key" .Values.database.dsnKey) }}
+{{- $db := .Values.database }}
+{{- if $db.host }}
+- name: CORVUS_PG_DSN
+  value: "postgresql://"
+- name: PGHOST
+  value: {{ $db.host | quote }}
+- name: PGPORT
+  value: {{ $db.port | quote }}
+- name: PGDATABASE
+  value: {{ required "database.name is required with database.host" $db.name | quote }}
+{{- if $db.userKey }}
+{{ include "corvus.secretEnv" (dict "name" "PGUSER" "secret" $db.existingSecret "key" $db.userKey) }}
+{{- else }}
+- name: PGUSER
+  value: {{ required "database.user or database.userKey is required with database.host" $db.user | quote }}
+{{- end }}
+{{ include "corvus.secretEnv" (dict "name" "PGPASSWORD" "secret" $db.existingSecret "key" (required "database.passwordKey is required with database.host" $db.passwordKey)) }}
+{{- else }}
+{{ include "corvus.secretEnv" (dict "name" "CORVUS_PG_DSN" "secret" $db.existingSecret "key" $db.dsnKey) }}
+{{- end }}
 {{- end }}
 
+{{/* Bucket (and endpoint) from values, or from the ConfigMap an ObjectBucketClaim creates. */}}
 {{- define "corvus.s3Env" -}}
+{{- $cm := .Values.s3.bucketConfigMap }}
+{{- if $cm }}
+- name: CORVUS_S3_BUCKET
+  valueFrom:
+    configMapKeyRef:
+      name: {{ $cm }}
+      key: BUCKET_NAME
+{{- if not .Values.s3.endpointUrl }}
+- name: CORVUS_S3_HOST
+  valueFrom:
+    configMapKeyRef:
+      name: {{ $cm }}
+      key: BUCKET_HOST
+- name: CORVUS_S3_PORT
+  valueFrom:
+    configMapKeyRef:
+      name: {{ $cm }}
+      key: BUCKET_PORT
+- name: CORVUS_S3_ENDPOINT_URL
+  value: "http://$(CORVUS_S3_HOST):$(CORVUS_S3_PORT)"
+{{- end }}
+{{- else }}
 - name: CORVUS_S3_BUCKET
   value: {{ .Values.s3.bucket | quote }}
-- name: CORVUS_S3_REGION
-  value: {{ .Values.s3.region | quote }}
+{{- end }}
 {{- with .Values.s3.endpointUrl }}
 - name: CORVUS_S3_ENDPOINT_URL
   value: {{ . | quote }}
 {{- end }}
+- name: CORVUS_S3_REGION
+  value: {{ .Values.s3.region | quote }}
 {{ include "corvus.secretEnv" (dict "name" "CORVUS_S3_ACCESS_KEY" "secret" .Values.s3.existingSecret "key" .Values.s3.accessKeyKey) }}
 {{ include "corvus.secretEnv" (dict "name" "CORVUS_S3_SECRET_KEY" "secret" .Values.s3.existingSecret "key" .Values.s3.secretKeyKey) }}
 {{- end }}
 
+{{/* Call with (dict "root" $ "credsKey" <key in nats.creds.existingSecret>). */}}
 {{- define "corvus.natsEnv" -}}
 - name: CORVUS_NATS_URL
-  value: {{ .Values.nats.url | quote }}
+  value: {{ .root.Values.nats.url | quote }}
 - name: CORVUS_NATS_STREAM
-  value: {{ .Values.nats.stream | quote }}
+  value: {{ .root.Values.nats.stream | quote }}
+- name: CORVUS_NATS_STREAM_REPLICAS
+  value: {{ .root.Values.nats.streamReplicas | quote }}
+{{- if .root.Values.nats.creds.existingSecret }}
+- name: CORVUS_NATS_CREDS_FILE
+  value: /etc/corvus/nats/nats.creds
+{{- end }}
+{{- end }}
+
+{{/* Read-only mount and volume of one component's NATS credentials file (when nats.creds is set). */}}
+{{- define "corvus.natsCredsMount" -}}
+{{- if .Values.nats.creds.existingSecret }}
+- name: nats-creds
+  mountPath: /etc/corvus/nats
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{/* Call with (dict "root" $ "credsKey" ...): only this component's key is mounted. */}}
+{{- define "corvus.natsCredsVolume" -}}
+{{- if .root.Values.nats.creds.existingSecret }}
+- name: nats-creds
+  secret:
+    secretName: {{ .root.Values.nats.creds.existingSecret }}
+    defaultMode: 0440
+    items:
+      - key: {{ .credsKey }}
+        path: nats.creds
+{{- end }}
+{{- end }}
+
+{{/* Origin (scheme://host[:port]) of an absolute URL; empty for anything else. */}}
+{{- define "corvus.origin" -}}
+{{- regexFind "^https?://[^/?#]+" (toString .) -}}
+{{- end }}
+
+{{/* Upstream the UI proxies /api/ to: ui.apiUpstream, else the in-cluster api Service. */}}
+{{- define "corvus.uiApiUpstream" -}}
+{{- if .Values.ui.apiUpstream -}}
+{{- .Values.ui.apiUpstream -}}
+{{- else if and .Values.ui.proxyApi .Values.api.enabled -}}
+{{- printf "http://%s-api:%v" (include "corvus.fullname" .) .Values.api.port -}}
+{{- end -}}
+{{- end }}
+
+{{/* The UI's config.json: ui.config with basePath taken from ui.basePath. */}}
+{{- define "corvus.uiConfig" -}}
+{{- mustMergeOverwrite (deepCopy .Values.ui.config) (dict "basePath" .Values.ui.basePath) | toPrettyJson -}}
 {{- end }}
 
 {{/* Plain extra env map. Call with the map. */}}

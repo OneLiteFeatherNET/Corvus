@@ -1,0 +1,290 @@
+suite: ui and its wiring to the api
+templates:
+  - ui.yaml
+  - api.yaml
+  - networkpolicy.yaml
+tests:
+  - it: renders the config.json keys the ui reads
+    template: ui.yaml
+    documentSelector:
+      path: kind
+      value: ConfigMap
+    set:
+      ui.enabled: true
+      ui.config.oidc.issuer: https://sso.example.invalid/realms/olf
+      ui.config.oidc.clientId: corvus-ui
+    asserts:
+      - matchRegex:
+          path: data["config.json"]
+          pattern: '"apiBaseUrl": "/api/v1"'
+      - matchRegex:
+          path: data["config.json"]
+          pattern: '"basePath": "/"'
+      - matchRegex:
+          path: data["config.json"]
+          pattern: '"issuer": "https://sso.example.invalid/realms/olf"'
+      - matchRegex:
+          path: data["config.json"]
+          pattern: '"scopes": "openid profile"'
+      - matchRegex:
+          path: data["config.json"]
+          pattern: '"mode": "oidc"'
+      - notMatchRegex:
+          path: data["config.json"]
+          pattern: authority
+
+  - it: takes basePath from ui.basePath for both config.json and the container
+    template: ui.yaml
+    set:
+      ui.enabled: true
+      ui.basePath: /corvus/
+    asserts:
+      - matchRegex:
+          path: data["config.json"]
+          pattern: '"basePath": "/corvus/"'
+        documentSelector:
+          path: kind
+          value: ConfigMap
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_UI_BASE_PATH
+            value: /corvus/
+        documentSelector:
+          path: kind
+          value: Deployment
+
+  - it: proxies /api/ to the in-cluster api service by default
+    template: ui.yaml
+    documentSelector:
+      path: kind
+      value: Deployment
+    release:
+      name: corvus
+    set:
+      ui.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_UI_API_UPSTREAM
+            value: http://corvus-api:8080
+
+  - it: does not proxy when proxyApi is off
+    template: ui.yaml
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      ui.enabled: true
+      ui.proxyApi: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_UI_API_UPSTREAM
+            value: http://RELEASE-NAME-corvus-api:8080
+
+  - it: derives the csp origins from an absolute api url and the oidc issuer
+    template: ui.yaml
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      ui.enabled: true
+      ui.config.apiBaseUrl: https://corvus-api.example.invalid/api/v1
+      ui.config.oidc.issuer: https://sso.example.invalid:8443/realms/olf
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_UI_API_ORIGIN
+            value: https://corvus-api.example.invalid
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_UI_OIDC_ORIGIN
+            value: https://sso.example.invalid:8443
+
+  - it: sets no api origin for a relative api path
+    template: ui.yaml
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      ui.enabled: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_UI_API_ORIGIN
+            value: ""
+
+  - it: passes extra connect origins space separated
+    template: ui.yaml
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      ui.enabled: true
+      ui.extraConnect: ["https://a.example.invalid", "wss://b.example.invalid"]
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_UI_EXTRA_CONNECT
+            value: https://a.example.invalid wss://b.example.invalid
+
+  - it: runs as the uid of the nginx-unprivileged image and listens on 8080
+    template: ui.yaml
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      ui.enabled: true
+      ui.port: 80
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 101
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 101
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].containerPort
+          value: 8080
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+
+  - it: keeps the service port configurable and pointing at the container port
+    template: ui.yaml
+    documentSelector:
+      path: kind
+      value: Service
+    set:
+      ui.enabled: true
+      ui.port: 80
+    asserts:
+      - equal:
+          path: spec.ports[0].port
+          value: 80
+      - equal:
+          path: spec.ports[0].targetPort
+          value: http
+
+  - it: makes the directories the nginx entrypoint writes writable and probes /healthz
+    template: ui.yaml
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      ui.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: nginx-conf
+            mountPath: /etc/nginx/conf.d
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: tmp
+            mountPath: /tmp
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /healthz
+
+  - it: rejects the config keys of the old chart
+    template: ui.yaml
+    set:
+      ui.enabled: true
+      ui.config.oidc.authority: https://sso.example.invalid
+    asserts:
+      - failedTemplate: {}
+
+  - it: sets cors origins on the api only when configured
+    template: api.yaml
+    documentIndex: 0
+    set:
+      api.cors.origins: ["https://corvus.example.invalid", "https://admin.example.invalid"]
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_API_CORS_ORIGINS
+            value: https://corvus.example.invalid,https://admin.example.invalid
+
+  - it: sets no cors variable by default
+    template: api.yaml
+    documentIndex: 0
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].env[?(@.name == "CORVUS_API_CORS_ORIGINS")]
+
+  - it: reads the job token hashes from a secret
+    template: api.yaml
+    documentIndex: 0
+    set:
+      api.jobTokens.existingSecret: corvus-job-tokens
+      api.jobTokens.key: hashes
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_API_JOB_TOKENS
+            valueFrom:
+              secretKeyRef:
+                name: corvus-job-tokens
+                key: hashes
+
+  - it: lets the ui pods reach the api pods when the network policy is on
+    template: networkpolicy.yaml
+    documentSelector:
+      path: metadata.name
+      value: RELEASE-NAME-corvus-api
+    set:
+      ui.enabled: true
+      networkPolicy.enabled: true
+      networkPolicy.apiFrom:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+    asserts:
+      - contains:
+          path: spec.ingress[0].from
+          content:
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/component: ui
+                app.kubernetes.io/instance: RELEASE-NAME
+                app.kubernetes.io/name: corvus
+
+  - it: lets the ui pods egress to the api port and ingress on 8080
+    template: networkpolicy.yaml
+    documentSelector:
+      path: metadata.name
+      value: RELEASE-NAME-corvus-ui
+    set:
+      ui.enabled: true
+      ui.port: 80
+      networkPolicy.enabled: true
+    asserts:
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 8080
+      - contains:
+          path: spec.egress
+          content:
+            to:
+              - podSelector:
+                  matchLabels:
+                    app.kubernetes.io/component: api
+                    app.kubernetes.io/instance: RELEASE-NAME
+                    app.kubernetes.io/name: corvus
+            ports:
+              - port: 8080
+                protocol: TCP

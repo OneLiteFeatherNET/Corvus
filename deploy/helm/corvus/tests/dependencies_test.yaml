@@ -1,0 +1,150 @@
+suite: external dependencies (database, s3, nats)
+templates:
+  - ingest.yaml
+tests:
+  - it: uses the full dsn secret key by default
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_PG_DSN
+            valueFrom:
+              secretKeyRef:
+                name: corvus-database
+                key: uri
+
+  - it: supports cloudnativepg style separate keys with PGPASSWORD
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      database.host: pg-rw
+      database.name: app
+      database.userKey: username
+      database.passwordKey: password
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PGHOST
+            value: pg-rw
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PGPASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: corvus-database
+                key: password
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PGUSER
+            valueFrom:
+              secretKeyRef:
+                name: corvus-database
+                key: username
+
+  - it: needs a password key with a database host
+    set:
+      database.host: pg-rw
+      database.name: app
+      database.user: corvus
+    asserts:
+      - failedTemplate: {}
+
+  - it: reads the s3 credentials from configurable secret keys
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      s3.existingSecret: obc
+      s3.accessKeyKey: AWS_ACCESS_KEY_ID
+      s3.secretKeyKey: AWS_SECRET_ACCESS_KEY
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_S3_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: obc
+                key: AWS_ACCESS_KEY_ID
+
+  - it: reads bucket and endpoint from an object bucket claim config map
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      s3.bucketConfigMap: corvus-lake
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_S3_BUCKET
+            valueFrom:
+              configMapKeyRef:
+                name: corvus-lake
+                key: BUCKET_NAME
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_S3_ENDPOINT_URL
+            value: http://$(CORVUS_S3_HOST):$(CORVUS_S3_PORT)
+
+  - it: mounts the nats credentials read-only and points the service at them
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      nats.creds.existingSecret: nats-creds-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_NATS_CREDS_FILE
+            value: /etc/corvus/nats/nats.creds
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: nats-creds
+            mountPath: /etc/corvus/nats
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: nats-creds
+            secret:
+              secretName: nats-creds-secret
+              defaultMode: 288
+              items:
+                - key: ingest.creds
+                  path: nats.creds
+
+  - it: mounts no nats credentials by default
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: nats-creds
+            mountPath: /etc/corvus/nats
+            readOnly: true
+
+  - it: passes the stream replicas to the service
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      nats.streamReplicas: 3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_NATS_STREAM_REPLICAS
+            value: "3"

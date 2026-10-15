@@ -5,12 +5,18 @@
 {{- else }}
 {{- $metricsPeer = dict "podSelector" dict }}
 {{- end }}
+{{- /* The UI pods proxy /api/ to the api pods, in-cluster only. */}}
+{{- $uiProxiesToApi := and .Values.ui.enabled .Values.api.enabled .Values.ui.proxyApi (not .Values.ui.apiUpstream) }}
+{{- $uiPeers := list }}
+{{- if $uiProxiesToApi }}
+{{- $uiPeers = list (dict "podSelector" (dict "matchLabels" (include "corvus.componentSelectorLabels" (dict "root" . "component" "ui") | fromYaml))) }}
+{{- end }}
 {{- /* component -> (enabled, ingress port, extra peers) */}}
 {{- $components := dict
   "ingest" (dict "enabled" .Values.ingest.enabled "port" .Values.ingest.metricsPort "from" (list $metricsPeer))
   "score" (dict "enabled" .Values.score.enabled "port" .Values.score.metricsPort "from" (list $metricsPeer))
-  "api" (dict "enabled" .Values.api.enabled "port" .Values.api.port "from" (concat .Values.networkPolicy.apiFrom (list $metricsPeer)) "open" (empty .Values.networkPolicy.apiFrom))
-  "ui" (dict "enabled" .Values.ui.enabled "port" .Values.ui.port "from" .Values.networkPolicy.uiFrom "open" (empty .Values.networkPolicy.uiFrom))
+  "api" (dict "enabled" .Values.api.enabled "port" .Values.api.port "from" (concat .Values.networkPolicy.apiFrom (list $metricsPeer) $uiPeers) "open" (empty .Values.networkPolicy.apiFrom))
+  "ui" (dict "enabled" .Values.ui.enabled "port" 8080 "from" .Values.networkPolicy.uiFrom "open" (empty .Values.networkPolicy.uiFrom))
   "housekeeping" (dict "enabled" .Values.housekeeping.enabled)
   "compact" (dict "enabled" .Values.compact.enabled)
   "migrate" (dict "enabled" .Values.migrate.enabled)
@@ -54,6 +60,16 @@ spec:
         - port: {{ . }}
           protocol: TCP
         {{- end }}
+    {{- if and (eq $component "ui") $uiProxiesToApi }}
+    # The same-origin proxy to the api pods.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "corvus.componentSelectorLabels" (dict "root" $ "component" "api") | nindent 14 }}
+      ports:
+        - port: {{ $.Values.api.port }}
+          protocol: TCP
+    {{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
