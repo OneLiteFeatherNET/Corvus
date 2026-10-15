@@ -1,0 +1,45 @@
+name: ML
+
+on:
+  pull_request:
+    paths:
+      - "ml/**"
+      - "proto/**"
+      - ".github/workflows/ml.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ml-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint and test (ml)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ml
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: ml/uv.lock
+
+      - name: Sync dependencies
+        run: uv sync --locked
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+      # The protobuf bindings are generated from ../proto on first import (grpcio-tools).
+      - name: Pytest
+        run: uv run pytest -q
