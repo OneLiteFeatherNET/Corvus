@@ -1,0 +1,29 @@
+# Build context is the repository root (the proto sources live in ./proto):
+#   docker build -f services/Dockerfile -t corvus-services .
+FROM ghcr.io/astral-sh/uv:0.12.24 AS uv
+
+FROM python:3.13-slim AS build
+COPY --from=uv /uv /usr/local/bin/uv
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
+WORKDIR /build/services
+COPY services/pyproject.toml services/uv.lock services/README.md ./
+# Dependencies plus protoc (proto group) first, for layer caching.
+RUN uv sync --frozen --no-dev --group proto --no-install-project
+COPY proto /build/proto
+COPY services/scripts scripts
+COPY services/src src
+# Generate the protobuf bindings at build time, then install the project without the proto group.
+RUN PATH="/build/services/.venv/bin:$PATH" scripts/gen_proto.sh \
+ && uv sync --frozen --no-dev --no-editable
+
+FROM python:3.13-slim
+RUN groupadd --system --gid 10001 corvus \
+ && useradd --system --uid 10001 --gid corvus --no-create-home corvus
+COPY --from=build /build/services/.venv /opt/venv
+COPY services/migrations /app/migrations
+ENV PATH="/opt/venv/bin:$PATH" \
+    CORVUS_MIGRATIONS_DIR=/app/migrations \
+    PYTHONUNBUFFERED=1
+USER 10001:10001
+EXPOSE 9464
+CMD ["corvus-ingest"]
