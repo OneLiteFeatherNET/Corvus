@@ -187,3 +187,38 @@ def test_untouched_files_are_returned_as_they_are(env: Env, ds):
     items = env.client.get(f"/api/v1/snapshots/{SNAP}/files", headers=ds).json()["items"]
 
     assert [(i["manifest_file_id"], i["id"]) for i in items] == [(1, 1), (2, 2)]
+
+
+JOB_TOKEN = "job-secret-token"
+
+
+@pytest.fixture
+def job_headers(env: Env, jwks_source, clock) -> dict[str, str]:
+    from api_support import make_verifier
+
+    from corvus_services.api.auth import Authenticator, token_digest
+
+    _add_snapshot(env)
+    env.parts["snapshots"].lake_files = {
+        1: ("lake/events/a", None, False),
+        2: ("lake/events/b", None, False),
+    }
+    env.deps.authenticator = Authenticator(
+        make_verifier(jwks_source, clock), job_tokens=[(token_digest(JOB_TOKEN), "train")]
+    )
+    return {"Authorization": f"Bearer {JOB_TOKEN}"}
+
+
+@pytest.mark.parametrize("path", ["sessions?exclude_erased=true", "files"])
+def test_a_job_token_may_read_sessions_and_files(env: Env, job_headers, path):
+    resp = env.client.get(f"/api/v1/snapshots/{SNAP}/{path}", headers=job_headers)
+
+    assert resp.status_code == 200
+
+
+def test_a_wrong_job_token_is_unauthorized(env: Env, job_headers):
+    resp = env.client.get(
+        f"/api/v1/snapshots/{SNAP}/sessions", headers={"Authorization": "Bearer nope"}
+    )
+
+    assert resp.status_code == 401

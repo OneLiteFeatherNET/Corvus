@@ -124,6 +124,7 @@ class ErasureOut(BaseModel):
     player_known: bool
     key_deleted: bool
     compaction_pending: bool
+    compacted_at: datetime | None = None
 
     @classmethod
     def of(cls, r: ErasureRequest) -> ErasureOut:
@@ -131,6 +132,7 @@ class ErasureOut(BaseModel):
             id=r.id, pseudonym=r.pseudonym.hex(), requested_by=r.requested_by,
             requested_at=r.requested_at, status=r.status, player_known=r.player_known,
             key_deleted=r.key_deleted, compaction_pending=r.compaction_pending,
+            compacted_at=r.compacted_at,
         )  # fmt: skip
 
 

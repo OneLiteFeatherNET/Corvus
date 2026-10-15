@@ -19,7 +19,7 @@ from ..ports import SnapshotSession
 from ..problems import ProblemError
 
 router = APIRouter(tags=["snapshots"])
-_DS = Depends(require(Role.DATA_SCIENTIST))
+_DS = Depends(require(Role.DATA_SCIENTIST, allow_jobs=True))
 _NOT_FOUND: dict[int | str, dict[str, Any]] = {404: {"description": "Snapshot not found"}}
 
 

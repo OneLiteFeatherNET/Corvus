@@ -89,6 +89,7 @@ class ErasureRequest:
     player_known: bool
     key_deleted: bool
     compaction_pending: bool
+    compacted_at: datetime | None = None
 
 
 @dataclass(frozen=True)
