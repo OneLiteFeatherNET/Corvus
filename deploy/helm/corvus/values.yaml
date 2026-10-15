@@ -52,21 +52,43 @@ topologySpreadConstraints: []
 nats:
   url: nats://nats.nats.svc:4222
   stream: CORVUS_CAPTURE
+  # Optional Secret with a NATS credentials file (.creds), mounted read-only into ingest and score
+  # and passed as CORVUS_NATS_CREDS_FILE. Needs a services image with that setting.
+  credsSecret: ""
+  credsKey: nats.creds
 
 database:
   # Secret holding the full libpq DSN (including user and password). With CloudNativePG use the
   # app secret and its `uri` key.
   existingSecret: corvus-database
   dsnKey: uri
+  # Alternative: separate libpq settings. When `host` is set, dsnKey is ignored; the password (and
+  # optionally the user, userKey) is read from existingSecret and handed to psycopg via PGPASSWORD
+  # (PGUSER). With CloudNativePG: host <cluster>-rw, name app, userKey username, passwordKey password.
+  host: ""
+  port: 5432
+  name: ""
+  user: ""
+  userKey: ""
+  passwordKey: ""
 
 s3:
   endpointUrl: ""
   bucket: corvus-lake
   region: us-east-1
-  # Secret with the object store credentials.
+  # Secret with the object store credentials. For a Rook-Ceph ObjectBucketClaim the keys are
+  # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
   existingSecret: corvus-s3
   accessKeyKey: access-key
   secretKeyKey: secret-key
+  # Optional: read bucket and endpoint from the ConfigMap an ObjectBucketClaim creates (BUCKET_NAME,
+  # BUCKET_HOST, BUCKET_PORT) instead of `bucket` and `endpointUrl`.
+  bucketConfigMap:
+    name: ""
+    bucketKey: BUCKET_NAME
+    hostKey: BUCKET_HOST
+    portKey: BUCKET_PORT
+    scheme: http
 
 # Key encryption key (base64, 32 bytes) wrapping every player data key. Losing it makes all raw
 # payloads unreadable. Needed by ingest only.

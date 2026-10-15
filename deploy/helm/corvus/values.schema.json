@@ -95,16 +95,27 @@
       "required": ["url", "stream"],
       "properties": {
         "url": {"type": "string", "pattern": "^(nats|tls|ws|wss)://"},
-        "stream": {"type": "string", "minLength": 1}
+        "stream": {"type": "string", "minLength": 1},
+        "credsSecret": {"type": "string"},
+        "credsKey": {"type": "string", "minLength": 1}
       }
     },
     "database": {
       "type": "object",
-      "required": ["existingSecret", "dsnKey"],
+      "required": ["existingSecret"],
       "properties": {
         "existingSecret": {"type": "string", "minLength": 1},
-        "dsnKey": {"type": "string", "minLength": 1}
-      }
+        "dsnKey": {"type": "string"},
+        "host": {"type": "string"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "name": {"type": "string"},
+        "user": {"type": "string"},
+        "userKey": {"type": "string"},
+        "passwordKey": {"type": "string"}
+      },
+      "if": {"properties": {"host": {"minLength": 1}}, "required": ["host"]},
+      "then": {"required": ["name", "passwordKey"]},
+      "else": {"required": ["dsnKey"], "properties": {"dsnKey": {"minLength": 1}}}
     },
     "s3": {
       "type": "object",
@@ -115,7 +126,18 @@
         "region": {"type": "string"},
         "existingSecret": {"type": "string", "minLength": 1},
         "accessKeyKey": {"type": "string", "minLength": 1},
-        "secretKeyKey": {"type": "string", "minLength": 1}
+        "secretKeyKey": {"type": "string", "minLength": 1},
+        "bucketConfigMap": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {"type": "string"},
+            "bucketKey": {"type": "string", "minLength": 1},
+            "hostKey": {"type": "string", "minLength": 1},
+            "portKey": {"type": "string", "minLength": 1},
+            "scheme": {"enum": ["http", "https"]}
+          }
+        }
       }
     },
     "kek": {

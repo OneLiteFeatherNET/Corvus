@@ -119,19 +119,61 @@ topologySpreadConstraints:
       key: {{ .key }}
 {{- end }}
 
+{{/* Either one Secret key with the full DSN, or separate libpq settings (CloudNativePG style). */}}
 {{- define "corvus.pgEnv" -}}
-{{ include "corvus.secretEnv" (dict "name" "CORVUS_PG_DSN" "secret" .Values.database.existingSecret "key" .Values.database.dsnKey) }}
+{{- $db := .Values.database }}
+{{- if $db.host }}
+- name: CORVUS_PG_DSN
+  value: "postgresql://"
+- name: PGHOST
+  value: {{ $db.host | quote }}
+- name: PGPORT
+  value: {{ $db.port | quote }}
+- name: PGDATABASE
+  value: {{ required "database.name is required with database.host" $db.name | quote }}
+{{- if $db.userKey }}
+{{ include "corvus.secretEnv" (dict "name" "PGUSER" "secret" $db.existingSecret "key" $db.userKey) }}
+{{- else }}
+- name: PGUSER
+  value: {{ required "database.user or database.userKey is required with database.host" $db.user | quote }}
+{{- end }}
+{{ include "corvus.secretEnv" (dict "name" "PGPASSWORD" "secret" $db.existingSecret "key" (required "database.passwordKey is required with database.host" $db.passwordKey)) }}
+{{- else }}
+{{ include "corvus.secretEnv" (dict "name" "CORVUS_PG_DSN" "secret" $db.existingSecret "key" $db.dsnKey) }}
+{{- end }}
 {{- end }}
 
+{{/* Bucket and endpoint from values, or from the ConfigMap an ObjectBucketClaim creates. */}}
 {{- define "corvus.s3Env" -}}
+{{- $cm := .Values.s3.bucketConfigMap }}
+{{- if $cm.name }}
+- name: CORVUS_S3_BUCKET
+  valueFrom:
+    configMapKeyRef:
+      name: {{ $cm.name }}
+      key: {{ $cm.bucketKey }}
+- name: CORVUS_S3_HOST
+  valueFrom:
+    configMapKeyRef:
+      name: {{ $cm.name }}
+      key: {{ $cm.hostKey }}
+- name: CORVUS_S3_PORT
+  valueFrom:
+    configMapKeyRef:
+      name: {{ $cm.name }}
+      key: {{ $cm.portKey }}
+- name: CORVUS_S3_ENDPOINT_URL
+  value: {{ printf "%s://$(CORVUS_S3_HOST):$(CORVUS_S3_PORT)" $cm.scheme | quote }}
+{{- else }}
 - name: CORVUS_S3_BUCKET
   value: {{ .Values.s3.bucket | quote }}
-- name: CORVUS_S3_REGION
-  value: {{ .Values.s3.region | quote }}
 {{- with .Values.s3.endpointUrl }}
 - name: CORVUS_S3_ENDPOINT_URL
   value: {{ . | quote }}
 {{- end }}
+{{- end }}
+- name: CORVUS_S3_REGION
+  value: {{ .Values.s3.region | quote }}
 {{ include "corvus.secretEnv" (dict "name" "CORVUS_S3_ACCESS_KEY" "secret" .Values.s3.existingSecret "key" .Values.s3.accessKeyKey) }}
 {{ include "corvus.secretEnv" (dict "name" "CORVUS_S3_SECRET_KEY" "secret" .Values.s3.existingSecret "key" .Values.s3.secretKeyKey) }}
 {{- end }}
@@ -141,6 +183,28 @@ topologySpreadConstraints:
   value: {{ .Values.nats.url | quote }}
 - name: CORVUS_NATS_STREAM
   value: {{ .Values.nats.stream | quote }}
+{{- if .Values.nats.credsSecret }}
+- name: CORVUS_NATS_CREDS_FILE
+  value: /etc/corvus/nats/{{ .Values.nats.credsKey }}
+{{- end }}
+{{- end }}
+
+{{/* Read-only mount and volume of the NATS credentials file (only when nats.credsSecret is set). */}}
+{{- define "corvus.natsCredsMount" -}}
+{{- if .Values.nats.credsSecret }}
+- name: nats-creds
+  mountPath: /etc/corvus/nats
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{- define "corvus.natsCredsVolume" -}}
+{{- if .Values.nats.credsSecret }}
+- name: nats-creds
+  secret:
+    secretName: {{ .Values.nats.credsSecret }}
+    defaultMode: 0440
+{{- end }}
 {{- end }}
 
 {{/* Origin (scheme://host[:port]) of an absolute URL; empty for anything else. */}}

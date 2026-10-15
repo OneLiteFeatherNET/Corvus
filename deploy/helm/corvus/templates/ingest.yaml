@@ -67,8 +67,10 @@ spec:
             {{- toYaml .Values.ingest.resources | nindent 12 }}
           volumeMounts:
             {{- include "corvus.tmpMount" . | nindent 12 }}
+            {{- include "corvus.natsCredsMount" . | nindent 12 }}
       volumes:
         {{- include "corvus.tmpVolume" . | nindent 8 }}
+        {{- include "corvus.natsCredsVolume" . | nindent 8 }}
 ---
 # Metrics endpoint (and ServiceMonitor target); ingest receives its work from NATS, not over HTTP.
 apiVersion: v1
