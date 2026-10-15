@@ -1,7 +1,7 @@
 [project]
 name = "corvus-ml"
 version = "0.1.0"
-description = "Corvus ML tooling: pilot capture analyzer"
+description = "Corvus ML tooling: pilot capture analyzer, feature stage, model evaluation"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -10,11 +10,20 @@ dependencies = [
     "grpcio-tools>=1.74",
     "pyarrow>=26.0.0",
     "numpy>=2.5.4",
+]
+
+[project.optional-dependencies]
+# Model evaluation harness (corvus-eval): training, ONNX export and benchmarking.
+eval = [
     "scikit-learn>=1.7",
     "torch>=2.8",
     "onnx>=1.19",
     "onnxruntime>=1.22",
     "skl2onnx>=1.19",
+]
+# Online scoring: ONNX Runtime on top of the core install (featurizer + model-input adapter).
+serve = [
+    "onnxruntime>=1.22",
 ]
 
 [project.scripts]
@@ -23,10 +32,16 @@ corvus-features = "corvus_ml.features.cli:main"
 corvus-eval = "corvus_ml.eval.cli:main"
 
 [dependency-groups]
+# `uv sync` installs the dev group by default, and the tests exercise the evaluation harness, so it
+# pulls the `eval` extra of this project (CI runs plain `uv sync --locked`).
 dev = [
     "pytest>=8.3",
     "ruff>=0.12",
+    "corvus-ml[eval]",
 ]
+
+[tool.uv]
+default-groups = ["dev"]
 
 [build-system]
 requires = ["hatchling"]
