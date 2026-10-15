@@ -212,6 +212,30 @@ public final class CaptureEngine {
         }
     }
 
+    /**
+     * Ends the session of every online player the filter no longer allows (the blocklist changed). Later frames of
+     * these players are ignored by the filter. Never throws.
+     *
+     * @return the number of sessions ended
+     */
+    public int endBlockedSessions() {
+        int ended = 0;
+        try {
+            for (UUID player : sessions.keySet()) {
+                if (!playerFilter.allows(player)) {
+                    SessionState session = sessions.remove(player);
+                    if (session != null) {
+                        endSession(session);
+                        ended++;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            metrics.listenerErrors.increment();
+        }
+        return ended;
+    }
+
     /** Stops capturing and ends all sessions. */
     public void shutdown() {
         shutdown = true;

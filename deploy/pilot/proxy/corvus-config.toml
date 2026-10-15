@@ -52,6 +52,17 @@ subject = "corvus.score.v1.>"
 listener_threads = 2
 listener_queue = 1024
 
+[blocklist_sync]
+# Periodically fetch the blocklist of the control plane (GET <url>/api/v1/plugin/blocklist, proxy API token from
+# CORVUS_API_PLUGIN_TOKENS) and never capture the listed pseudonyms; players blocked while online lose their
+# session. The token is read from CORVUS_PLUGIN_API_TOKEN or token_file (relative to plugins/corvus). A failed
+# sync keeps the last good list. Off in the pilot, which runs without the control plane.
+enabled = false
+url = ""
+token_file = ""
+interval_seconds = 300
+timeout_seconds = 10
+
 [game_context]
 default = "unknown"
 

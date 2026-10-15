@@ -16,6 +16,10 @@ import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import net.onelitefeather.corvus.api.CorvusProvider;
 import net.onelitefeather.corvus.plugin.BuildConstants;
+import net.onelitefeather.corvus.plugin.blocklist.HttpBlocklistClient;
+import net.onelitefeather.corvus.plugin.blocklist.JdkHttpTransport;
+import net.onelitefeather.corvus.plugin.blocklist.SyncedBlocklist;
+import net.onelitefeather.corvus.plugin.blocklist.TokenLoader;
 import net.onelitefeather.corvus.plugin.capture.ByteBoundedQueue;
 import net.onelitefeather.corvus.plugin.capture.CaptureEngine;
 import net.onelitefeather.corvus.plugin.capture.CaptureWriter;
@@ -50,6 +54,9 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.InstantSource;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -77,6 +84,8 @@ public final class CorvusPlugin {
     private ThreadPoolExecutor scoreExecutor;
     private PseudonymDirectory pseudonyms;
     private ScoreSubscriber scoreSubscriber;
+    private volatile SyncedBlocklist blocklist;
+    private ScheduledExecutorService blocklistExecutor;
 
     @Inject
     public CorvusPlugin(ProxyServer proxy, Logger logger, @DataDirectory Path dataDirectory) {
@@ -114,6 +123,14 @@ public final class CorvusPlugin {
                 config.keyId(), logger::warn);
 
         NanoClock nano = NanoClock.system();
+        if (key.isPresent()) {
+            Pseudonymizer pseudonymizer = new Pseudonymizer(key.get());
+            pseudonyms = new PseudonymDirectory(pseudonymizer::pseudonym);
+            for (Player online : proxy.getAllPlayers()) {
+                pseudonyms.add(online.getUniqueId());
+            }
+        }
+        startBlocklistSync(config, nano);
         Metrics metrics = new Metrics();
         ByteBoundedQueue queue = new ByteBoundedQueue(config.queueMaxBytes());
         SecureRandom random = new SecureRandom();
@@ -121,7 +138,7 @@ public final class CorvusPlugin {
                 new CaptureEngine.Settings(config.payloadMode(), config.maxPayloadBytes(), config.proxyId(),
                         BuildConstants.VERSION),
                 key.map(Pseudonymizer::new).orElse(null),
-                new PlayerFilter(config.listMode(), config.allowlist(), config.blocklist()),
+                new PlayerFilter(config.listMode(), config.allowlist(), config.blocklist(), this::syncedBlocked),
                 new GameContextMapper(config.serverContexts(), config.defaultGameContext()),
                 queue, nano, InstantSource.system(),
                 () -> {
@@ -136,7 +153,8 @@ public final class CorvusPlugin {
         StatsReporter commandStats = new StatsReporter(metrics, queue, engine, nano);
         CommandMeta meta = proxy.getCommandManager().metaBuilder("corvus").plugin(this).build();
         proxy.getCommandManager().register(meta,
-                new CorvusCommand(commandStats, proxy, scoreRegistry, scoreSubscriber != null));
+                new CorvusCommand(commandStats, proxy, scoreRegistry, scoreSubscriber != null,
+                        () -> blocklist == null ? "blocklist_sync=off" : blocklist.status()));
 
         if (!engine.isCapturing()) {
             logger.warn("Corvus is loaded but NOT capturing (no valid pseudonym key). Players are unaffected.");
@@ -188,15 +206,51 @@ public final class CorvusPlugin {
             logger.warn("scores.enabled but there is no pseudonym key: scores cannot be mapped to players");
             return;
         }
-        Pseudonymizer pseudonymizer = new Pseudonymizer(key.get());
-        pseudonyms = new PseudonymDirectory(pseudonymizer::pseudonym);
-        for (Player online : proxy.getAllPlayers()) {
-            pseudonyms.add(online.getUniqueId());
-        }
         ScoreProcessor processor = new ScoreProcessor(pseudonyms, scoreRegistry, InstantSource.system(), log);
         scoreSubscriber = new ScoreSubscriber(config.nats(), scores.subject(), processor::onMessage, logger::info,
                 logger::warn);
         logger.info("Corvus scores: subscribing to {} (connecting in the background)", scores.subject());
+    }
+
+    /** Cheap (cached pseudonym, one hash lookup); runs on Netty threads. */
+    private boolean syncedBlocked(UUID player) {
+        SyncedBlocklist current = blocklist;
+        PseudonymDirectory directory = pseudonyms;
+        return current != null && directory != null && current.size() > 0 && current.contains(directory.hexOf(player));
+    }
+
+    /** Periodic blocklist fetch on its own daemon thread, never on Netty or Velocity event threads. */
+    private void startBlocklistSync(CorvusConfig config, NanoClock nano) {
+        CorvusConfig.BlocklistSync sync = config.blocklistSync();
+        if (!sync.enabled()) {
+            return;
+        }
+        if (pseudonyms == null) {
+            logger.warn("blocklist_sync.enabled but there is no pseudonym key: pseudonyms cannot be matched. "
+                    + "Blocklist sync is DISABLED.");
+            return;
+        }
+        Optional<String> token = TokenLoader.load(System::getenv, sync.tokenFile(), dataDirectory, logger::warn);
+        if (token.isEmpty()) {
+            return;
+        }
+        Duration timeout = Duration.ofSeconds(sync.timeoutSeconds());
+        RateLimitedLog log = new RateLimitedLog(nano, logger::warn, RateLimitedLog.DEFAULT_INTERVAL_NANOS);
+        blocklist = new SyncedBlocklist(
+                new HttpBlocklistClient(sync.url(), token.get(), timeout, new JdkHttpTransport(timeout)),
+                InstantSource.system(), log, () -> {
+                    CaptureEngine current = engine;
+                    int ended = current == null ? 0 : current.endBlockedSessions();
+                    logger.info("Blocklist changed, {} session(s) ended", ended);
+                });
+        blocklistExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread t = new Thread(runnable, "corvus-blocklist-sync");
+            t.setDaemon(true);
+            return t;
+        });
+        SyncedBlocklist target = blocklist;
+        blocklistExecutor.scheduleWithFixedDelay(target::syncOnce, 0L, sync.intervalSeconds(), TimeUnit.SECONDS);
+        logger.info("Corvus blocklist sync: {} every {} s", sync.url(), sync.intervalSeconds());
     }
 
     /** PacketEvents initialises itself in its own ProxyInitializeEvent handler; wait until it is ready. */
@@ -265,6 +319,9 @@ public final class CorvusPlugin {
 
     @Subscribe
     public void onProxyShutdown(ProxyShutdownEvent event) {
+        if (blocklistExecutor != null) {
+            blocklistExecutor.shutdownNow();
+        }
         if (scoreSubscriber != null) {
             scoreSubscriber.close(Duration.ofSeconds(2));
         }

@@ -11,6 +11,12 @@ import net.onelitefeather.corvus.plugin.vocab.CorvusPacket;
 import net.onelitefeather.corvus.proto.capture.v1.Frame;
 import org.junit.jupiter.api.Test;
 
+import net.onelitefeather.corvus.plugin.blocklist.SyncedBlocklist;
+import net.onelitefeather.corvus.plugin.privacy.Pseudonymizer;
+import net.onelitefeather.corvus.plugin.score.PseudonymDirectory;
+import net.onelitefeather.corvus.plugin.score.RateLimitedLog;
+
+import java.util.HexFormat;
 import java.util.Set;
 import java.util.UUID;
 
@@ -316,5 +322,68 @@ class CaptureEngineTest {
         f.engine.onPacket(new FakePacketView().channel("backend-channel"));
 
         assertEquals(1, f.metrics.sessionsWithMultipleChannels.sum(), "reported once per session");
+    }
+
+    /** Real pseudonym directory and synced blocklist, fake feed; the engine is notified like in the plugin. */
+    private final class SyncedSetup {
+        final RecordingSink sink = new RecordingSink();
+        final PseudonymDirectory directory = new PseudonymDirectory(new Pseudonymizer(EngineFixture.KEY)::pseudonym);
+        Set<String> feed = Set.of();
+        EngineFixture fixture;
+        final SyncedBlocklist blocklist = new SyncedBlocklist(() -> feed, java.time.InstantSource.system(),
+                new RateLimitedLog(() -> 0L, m -> { }, 1L), () -> fixture.engine.endBlockedSessions());
+
+        SyncedSetup() {
+            PlayerFilter filter = new PlayerFilter(CorvusConfig.ListMode.ALL, Set.of(), Set.of(),
+                    uuid -> blocklist.contains(directory.hexOf(uuid)));
+            fixture = new EngineFixture().build(sink, EngineFixture.KEY, PayloadMode.SERVERBOUND, 2048, filter);
+        }
+
+        String hexOf(UUID uuid) {
+            return HexFormat.of().formatHex(new Pseudonymizer(EngineFixture.KEY).pseudonym(uuid));
+        }
+    }
+
+    @Test
+    void pseudonymOnTheSyncedBlocklistIsNeverCaptured() {
+        SyncedSetup setup = new SyncedSetup();
+        setup.feed = Set.of(setup.hexOf(OTHER));
+        setup.blocklist.syncOnce();
+
+        setup.fixture.engine.onPacket(new FakePacketView().player(OTHER));
+
+        assertEquals(0, setup.sink.frames.size());
+        assertEquals(0, setup.sink.controls.size(), "no SessionStart for a blocked pseudonym");
+        assertEquals(0, setup.fixture.engine.activeSessions());
+    }
+
+    @Test
+    void onlinePlayerBecomingBlockedEndsTheSessionAndFurtherFramesAreIgnored() {
+        SyncedSetup setup = new SyncedSetup();
+        setup.fixture.engine.onPacket(new FakePacketView());
+        setup.fixture.engine.onPacket(new FakePacketView().player(OTHER));
+        assertEquals(2, setup.fixture.engine.activeSessions());
+
+        setup.feed = Set.of(setup.hexOf(FakePacketView.PLAYER));
+        setup.blocklist.syncOnce();
+        setup.fixture.engine.onPacket(new FakePacketView());
+
+        assertEquals(1, setup.fixture.engine.activeSessions(), "only the unblocked player keeps a session");
+        assertEquals(2, setup.sink.frames.size(), "no frame after the block");
+        assertEquals(1, setup.sink.controls.stream().filter(c -> c instanceof WriteItem.End).count(),
+                "the blocked player's session gets a SessionEnd");
+    }
+
+    @Test
+    void playerStaysCapturedWhenTheFeedOnlyListsOthers() {
+        SyncedSetup setup = new SyncedSetup();
+        setup.fixture.engine.onPacket(new FakePacketView());
+
+        setup.feed = Set.of(setup.hexOf(OTHER));
+        setup.blocklist.syncOnce();
+        setup.fixture.engine.onPacket(new FakePacketView());
+
+        assertEquals(1, setup.fixture.engine.activeSessions());
+        assertEquals(2, setup.sink.frames.size());
     }
 }

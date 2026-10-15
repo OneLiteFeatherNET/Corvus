@@ -90,6 +90,22 @@ With `sink.type = "nats"` (or `scores.enabled = true`) the plugin also subscribe
 the scores of online players to other plugins through `corvus-api`, and through `/corvus score <player>`
 (permission `corvus.admin`). Details and the decision-aid rules: [`docs/reference/plugin-api.md`](reference/plugin-api.md).
 
+### Blocklist sync (`[blocklist_sync]`)
+
+Optional and off by default. With `blocklist_sync.enabled = true` the plugin fetches
+`GET <blocklist_sync.url>/api/v1/plugin/blocklist` (see
+[`docs/reference/control-plane-api.md`](reference/control-plane-api.md)) every `interval_seconds` (default 300,
+request timeout `timeout_seconds`, default 10) and never captures a player whose pseudonym is in `blocked`, in
+addition to the UUID lists of `[players]`. The request carries `Authorization: Bearer <token>`; the token is one of
+`CORVUS_API_PLUGIN_TOKENS` of the API and is read from the environment variable `CORVUS_PLUGIN_API_TOKEN` or from
+`blocklist_sync.token_file` (relative to `plugins/corvus`). It needs the pseudonym key.
+
+- The fetch runs on its own daemon thread, never on Netty or Velocity event threads.
+- A player who becomes blocked while online gets a `SessionEnd` and their further frames are ignored.
+- A failed sync (network, HTTP status, bad body) keeps the last good list and logs at most once a minute. Until the
+  first success only the config lists apply.
+- `/corvus stats` shows `blocklist_size`, `blocklist_last_sync` and `blocklist_last_result`.
+
 ### Raw payload policy (`capture.raw_payloads`)
 
 Clientbound packets such as scoreboard, teams, titles, spawn player, boss bars contain names and UUIDs
