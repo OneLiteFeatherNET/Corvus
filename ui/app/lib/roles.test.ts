@@ -47,7 +47,20 @@ describe('navigation gating', () => {
   })
 
   it('shows everything to admin', () => {
-    expect(titles(['admin'])).toHaveLength(8)
+    expect(titles(['admin'])).toHaveLength(9)
+  })
+
+  it('shows the score view to staff and admin only', () => {
+    expect(titles(['staff'])).toContain('scores')
+    expect(titles(['admin'])).toContain('scores')
+    for (const r of ['viewer', 'data_scientist'] as Role[]) expect(titles([r])).not.toContain('scores')
+  })
+
+  it('guards the score route with the scores action', () => {
+    expect(requirementFor('/scores')).toBe('scores.read')
+    expect(can(['staff'], 'scores.read')).toBe(true)
+    expect(can(['viewer'], 'scores.read')).toBe(false)
+    expect(can(['data_scientist'], 'scores.read')).toBe(false)
   })
 
   it('maps nested routes to the action they need', () => {
