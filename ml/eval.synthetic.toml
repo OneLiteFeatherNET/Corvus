@@ -1,0 +1,47 @@
+# Smoke run on SYNTHETIC data: proves the pipeline runs end to end, says nothing about real
+# performance. Usage (from ml/):
+#   uv run corvus-eval run --config eval.synthetic.toml --out reports/synthetic-smoke
+# See docs/how-to/evaluate-models.md for every key.
+name = "synthetic-smoke"
+
+[run]
+seed = 7
+threads = 1
+seq_len = 64
+unlabelled = "exclude"
+fpr_targets = [0.01, 0.001]
+learning_curve = [0.1, 0.25, 0.5, 1.0]
+
+[synthetic]
+n_legit = 60
+n_cheat = 30
+n_unlabelled = 6
+sessions_per_player = 3
+windows_per_session = 12
+frames_per_window = 64
+contexts = ["pvp", "survival"]
+cheat_strength = 0.6
+cheat_window_frac = 0.7
+
+[candidates.isolation_forest]
+n_estimators = 200
+
+[candidates.gradient_boosting]
+max_iter = 100
+
+[candidates.gru_autoencoder]
+epochs = 15
+batch_size = 32
+lr = "auto"
+
+[candidates.cnn1d]
+epochs = 15
+batch_size = 32
+lr = 0.003
+
+[benchmark]
+warmup = 20
+iters = 200
+batch = 64
+isolated = true
+quantize = true
