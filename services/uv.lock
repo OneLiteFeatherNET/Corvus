@@ -541,7 +541,6 @@ name = "corvus-ml"
 version = "0.1.0"
 source = { directory = "../ml" }
 dependencies = [
-    { name = "grpcio-tools" },
     { name = "numpy" },
     { name = "protobuf" },
     { name = "pyarrow" },
@@ -554,7 +553,6 @@ serve = [
 
 [package.metadata]
 requires-dist = [
-    { name = "grpcio-tools", specifier = ">=1.74" },
     { name = "numpy", specifier = ">=2.5.4" },
     { name = "onnx", marker = "extra == 'eval'", specifier = ">=1.19" },
     { name = "onnxruntime", marker = "extra == 'eval'", specifier = ">=1.22" },
@@ -570,9 +568,11 @@ provides-extras = ["eval", "serve"]
 [package.metadata.requires-dev]
 dev = [
     { name = "corvus-ml", extras = ["eval"] },
+    { name = "grpcio-tools", specifier = ">=1.74" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "ruff", specifier = ">=0.12" },
 ]
+proto = [{ name = "grpcio-tools", specifier = ">=1.74" }]
 
 [[package]]
 name = "corvus-services"
