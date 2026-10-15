@@ -40,6 +40,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/erasure-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List erasure requests, newest first (admin) */
+        get: operations["list_erasure_requests_api_v1_erasure_requests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs": {
         parameters: {
             query?: never;
@@ -72,7 +89,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Report status, message and result of a job
+         * @description Called by the job process with its machine token (`CORVUS_API_URL`, `CORVUS_API_TOKEN`). A job token may only update its own job: the header `X-Corvus-Job-Id` (the job's `CORVUS_JOB_ID`) must equal the id in the path. `succeeded` and `failed` are final; repeating the identical report is accepted.
+         */
+        patch: operations["report_job_status_api_v1_jobs__job_id__patch"];
         trace?: never;
     };
     "/api/v1/labels": {
@@ -104,6 +125,26 @@ export interface paths {
         put?: never;
         /** Bulk import labels from CSV (data_scientist); all rows or none */
         post: operations["import_labels_api_v1_labels_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller: subject, display name and roles
+         * @description Any valid OIDC token or the dev token; machine job tokens are refused.
+         */
+        get: operations["me_api_v1_me_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -174,6 +215,23 @@ export interface paths {
         };
         /** Audit trail of stage transitions */
         get: operations["model_transitions_api_v1_models__model_id__transitions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/models/{name}/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a model by name and version */
+        get: operations["get_model_by_version_api_v1_models__name___version__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -274,6 +332,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pools/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Counts for a pool filter that is not saved (live preview)
+         * @description The body is a pool `filter`, validated like on create. Nothing is stored.
+         */
+        post: operations["preview_filter_api_v1_pools_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pools/{pool_id}": {
         parameters: {
             query?: never;
@@ -328,6 +406,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/scores/players/{pseudonym}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Latest scores of a player (staff)
+         * @description The latest score per game context, domain and model, including `shadow` models (which are never published on the score stream). A player without scores yields an empty list. Scores are informational: Corvus never sanctions players.
+         */
+        get: operations["latest_scores_api_v1_scores_players__pseudonym__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scores/players/{pseudonym}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Score history of a player (staff)
+         * @description Newest first; the history is bounded by the retention of `corvus-housekeeping` (`CORVUS_SCORE_HISTORY_RETENTION_DAYS`, default 14 days).
+         */
+        get: operations["score_history_api_v1_scores_players__pseudonym__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/snapshots": {
         parameters: {
             query?: never;
@@ -354,6 +472,63 @@ export interface paths {
         };
         /** Get a snapshot including its manifest */
         get: operations["get_snapshot_api_v1_snapshots__snapshot_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/snapshots/{snapshot_id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Live events files of a snapshot (follows compaction replacements) */
+        get: operations["snapshot_files_api_v1_snapshots__snapshot_id__files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/snapshots/{snapshot_id}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sessions of a snapshot, ascending, optionally without erased players
+         * @description Pages through the manifest's sessions with pseudonym, start, segments and labels. With `exclude_erased=true` the sessions of erased players are left out; jobs must use this when they read a snapshot because the manifest itself is immutable. `cursor` is the `next_cursor` of the previous page (the last session id of that page).
+         */
+        get: operations["snapshot_sessions_api_v1_snapshots__snapshot_id__sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Counts and recent activity for the dashboard (viewer)
+         * @description Pools, snapshots, jobs by status, models by stage, labels by label and pending erasures, plus the 10 newest jobs and erasure requests (pseudonym prefix only).
+         */
+        get: operations["summary_api_v1_summary_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -461,6 +636,15 @@ export interface components {
             /** Include */
             include?: string[];
         };
+        /** CurrentFileOut */
+        CurrentFileOut: {
+            /** Id */
+            id: number;
+            /** Key */
+            key: string;
+            /** Manifest File Id */
+            manifest_file_id: number;
+        };
         /**
          * DateRange
          * @description Inclusive UTC calendar dates of the session start.
@@ -470,6 +654,28 @@ export interface components {
             end?: string | null;
             /** Start */
             start?: string | null;
+        };
+        /** ErasureBriefOut */
+        ErasureBriefOut: {
+            /** Compaction Pending */
+            compaction_pending: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Pseudonym Prefix
+             * @description First 12 hex characters of the pseudonym
+             */
+            pseudonym_prefix: string;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /** Status */
+            status: string;
         };
         /** ErasureIn */
         ErasureIn: {
@@ -486,6 +692,8 @@ export interface components {
         };
         /** ErasureOut */
         ErasureOut: {
+            /** Compacted At */
+            compacted_at?: string | null;
             /** Compaction Pending */
             compaction_pending: boolean;
             /**
@@ -509,10 +717,54 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** FilesOut */
+        FilesOut: {
+            /** Items */
+            items: components["schemas"]["CurrentFileOut"][];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** Items[ScoreHistoryOut] */
+        Items_ScoreHistoryOut_: {
+            /** Items */
+            items: components["schemas"]["ScoreHistoryOut"][];
+        };
+        /** Items[ScoreLatestOut] */
+        Items_ScoreLatestOut_: {
+            /** Items */
+            items: components["schemas"]["ScoreLatestOut"][];
+        };
+        /** JobBriefOut */
+        JobBriefOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Snapshot Id
+             * Format: uuid
+             */
+            snapshot_id: string;
+            /** Status */
+            status: string;
+            /** Type */
+            type: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /** JobIn */
         JobIn: {
@@ -552,6 +804,13 @@ export interface components {
             params: {
                 [key: string]: unknown;
             };
+            /**
+             * Result
+             * @description Result document reported by the job when it finished
+             */
+            result?: {
+                [key: string]: unknown;
+            } | null;
             /** Runner */
             runner: string;
             /**
@@ -568,6 +827,22 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** JobReportIn */
+        JobReportIn: {
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /**
+             * Result
+             * @description Result document (metrics, artefact keys); must not contain secrets
+             */
+            result?: {
+                [key: string]: unknown;
+            } | null;
+            status: components["schemas"]["JobState"];
         };
         /**
          * JobState
@@ -631,40 +906,6 @@ export interface components {
             /** Valid To */
             valid_to?: string | null;
         };
-        /** LabelOut */
-        LabelOut: {
-            /** Confidence */
-            confidence: number;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Created By */
-            created_by: string;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Label */
-            label: string;
-            /** Note */
-            note: string;
-            /** Source */
-            source: string;
-            /** Subject */
-            subject: string;
-            /**
-             * Subject Type
-             * @enum {string}
-             */
-            subject_type: "pseudonym" | "session";
-            /** Valid From */
-            valid_from: string | null;
-            /** Valid To */
-            valid_to: string | null;
-        };
         /** LookupIn */
         LookupIn: {
             /**
@@ -673,6 +914,21 @@ export interface components {
              * @description Minecraft UUID; used in memory only, never stored or logged
              */
             uuid: string;
+        };
+        /** MeOut */
+        MeOut: {
+            /**
+             * Display Name
+             * @description From the token, if it carries one
+             */
+            display_name?: string | null;
+            /**
+             * Roles
+             * @description Corvus roles after `CORVUS_API_ROLE_MAPPING`
+             */
+            roles: string[];
+            /** Subject */
+            subject: string;
         };
         /** ModelIn */
         ModelIn: {
@@ -749,6 +1005,16 @@ export interface components {
              */
             next_cursor?: string | null;
         };
+        /** Paged[ErasureOut] */
+        Paged_ErasureOut_: {
+            /** Items */
+            items: components["schemas"]["ErasureOut"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` to get the next page
+             */
+            next_cursor?: string | null;
+        };
         /** Paged[JobOut] */
         Paged_JobOut_: {
             /** Items */
@@ -762,7 +1028,7 @@ export interface components {
         /** Paged[LabelOut] */
         Paged_LabelOut_: {
             /** Items */
-            items: components["schemas"]["LabelOut"][];
+            items: components["schemas"]["corvus_services__api__schemas__LabelOut"][];
             /**
              * Next Cursor
              * @description Pass as `cursor` to get the next page
@@ -914,6 +1180,124 @@ export interface components {
             /** Min */
             min?: number | null;
         };
+        /** ScoreHistoryOut */
+        ScoreHistoryOut: {
+            /** Domain */
+            domain: string;
+            /** Game Context */
+            game_context: string;
+            /** Model Name */
+            model_name: string;
+            /** Model Version */
+            model_version: string;
+            /** Score */
+            score: number;
+            /**
+             * Scored At
+             * Format: date-time
+             */
+            scored_at: string;
+            /** Segment */
+            segment: number;
+            /**
+             * Session Id
+             * @description 32 hex characters
+             */
+            session_id: string;
+            /** Smoothed */
+            smoothed: number;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "shadow" | "canary" | "enforce";
+            /** Window End Offset Nanos */
+            window_end_offset_nanos: number;
+            /** Window Start Offset Nanos */
+            window_start_offset_nanos: number;
+            /** Windows */
+            windows: number;
+        };
+        /** ScoreLatestOut */
+        ScoreLatestOut: {
+            /** Domain */
+            domain: string;
+            /** Game Context */
+            game_context: string;
+            /** Model Name */
+            model_name: string;
+            /** Model Version */
+            model_version: string;
+            /**
+             * Score
+             * @description Window score in [0, 1]; higher = more likely cheating
+             */
+            score: number;
+            /**
+             * Smoothed
+             * @description Exponential moving average over the segment's windows
+             */
+            smoothed: number;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "shadow" | "canary" | "enforce";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Windows
+             * @description Number of windows behind `smoothed`
+             */
+            windows: number;
+        };
+        /** SegmentOut */
+        SegmentOut: {
+            /** Game Context */
+            game_context: string;
+            /** Segment */
+            segment: number;
+        };
+        /** SessionOut */
+        SessionOut: {
+            /**
+             * Erased
+             * @description The player was erased; always false with exclude_erased
+             */
+            erased: boolean;
+            /**
+             * Labels
+             * @description Labels applicable to the session at its start
+             */
+            labels: components["schemas"]["corvus_services__api__routes__snapshot_data__LabelOut"][];
+            /**
+             * Pseudonym
+             * @description 64 hex characters; null if the session is gone
+             */
+            pseudonym: string | null;
+            /** Segments */
+            segments: components["schemas"]["SegmentOut"][];
+            /**
+             * Session Id
+             * @description 32 hex characters
+             */
+            session_id: string;
+            /** Started At */
+            started_at: string | null;
+        };
+        /** SessionsOut */
+        SessionsOut: {
+            /** Items */
+            items: components["schemas"]["SessionOut"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor`: the last session id of this page
+             */
+            next_cursor?: string | null;
+        };
         /** SnapshotOut */
         SnapshotOut: {
             /**
@@ -963,6 +1347,43 @@ export interface components {
             reason: string;
             stage: components["schemas"]["Stage"];
         };
+        /** SummaryOut */
+        SummaryOut: {
+            /**
+             * Jobs By Status
+             * @description Every job status, zero when absent
+             */
+            jobs_by_status: {
+                [key: string]: number;
+            };
+            /**
+             * Labels By Label
+             * @description Every label value, zero when absent
+             */
+            labels_by_label: {
+                [key: string]: number;
+            };
+            /**
+             * Models By Stage
+             * @description Every model stage, zero when absent
+             */
+            models_by_stage: {
+                [key: string]: number;
+            };
+            /**
+             * Pending Erasures
+             * @description Erasure requests whose compaction is pending
+             */
+            pending_erasures: number;
+            /** Pools */
+            pools: number;
+            /** Recent Erasures */
+            recent_erasures: components["schemas"]["ErasureBriefOut"][];
+            /** Recent Jobs */
+            recent_jobs: components["schemas"]["JobBriefOut"][];
+            /** Snapshots */
+            snapshots: number;
+        };
         /** TransitionOut */
         TransitionOut: {
             /** Actor */
@@ -1005,6 +1426,53 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** LabelOut */
+        corvus_services__api__routes__snapshot_data__LabelOut: {
+            /** Confidence */
+            confidence: number;
+            /** Label */
+            label: string;
+            /** Source */
+            source: string;
+            /** Valid From */
+            valid_from: string | null;
+            /** Valid To */
+            valid_to: string | null;
+        };
+        /** LabelOut */
+        corvus_services__api__schemas__LabelOut: {
+            /** Confidence */
+            confidence: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Label */
+            label: string;
+            /** Note */
+            note: string;
+            /** Source */
+            source: string;
+            /** Subject */
+            subject: string;
+            /**
+             * Subject Type
+             * @enum {string}
+             */
+            subject_type: "pseudonym" | "session";
+            /** Valid From */
+            valid_from: string | null;
+            /** Valid To */
+            valid_to: string | null;
         };
     };
     responses: never;
@@ -1173,6 +1641,41 @@ export interface operations {
             };
         };
     };
+    list_erasure_requests_api_v1_erasure_requests_get: {
+        parameters: {
+            query?: {
+                status?: "completed" | null;
+                /** @description Page size (server maximum applies) */
+                limit?: number | null;
+                /** @description Opaque cursor from `next_cursor` */
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Paged_ErasureOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_jobs_api_v1_jobs_get: {
         parameters: {
             query?: {
@@ -1242,7 +1745,9 @@ export interface operations {
     get_job_api_v1_jobs__job_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Corvus-Job-Id"?: string | null;
+            };
             path: {
                 job_id: string;
             };
@@ -1261,6 +1766,64 @@ export interface operations {
             };
             /** @description Job not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_job_status_api_v1_jobs__job_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Corvus-Job-Id"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobReportIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
+                };
+            };
+            /** @description A job token needs `X-Corvus-Job-Id` equal to the path id */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Job not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The job already finished with a different status */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1333,7 +1896,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LabelOut"];
+                    "application/json": components["schemas"]["corvus_services__api__schemas__LabelOut"];
                 };
             };
             /** @description Validation Error */
@@ -1372,9 +1935,33 @@ export interface operations {
             };
         };
     };
+    me_api_v1_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeOut"];
+                };
+            };
+        };
+    };
     list_models_api_v1_models_get: {
         parameters: {
             query?: {
+                name?: string | null;
+                version?: string | null;
+                game_context?: string | null;
+                domain?: string | null;
                 stage?: components["schemas"]["Stage"] | null;
                 /** @description Page size (server maximum applies) */
                 limit?: number | null;
@@ -1545,6 +2132,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TransitionOut"][];
+                };
+            };
+            /** @description Model not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_model_by_version_api_v1_models__name___version__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelOut"];
                 };
             };
             /** @description Model not found */
@@ -1743,6 +2369,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PoolOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_filter_api_v1_pools_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PoolFilter"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewOut"];
                 };
             };
             /** @description Validation Error */
@@ -1984,6 +2643,71 @@ export interface operations {
             };
         };
     };
+    latest_scores_api_v1_scores_players__pseudonym__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pseudonym: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Items_ScoreLatestOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    score_history_api_v1_scores_players__pseudonym__history_get: {
+        parameters: {
+            query?: {
+                game_context?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                pseudonym: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Items_ScoreHistoryOut_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_snapshots_api_v1_snapshots_get: {
         parameters: {
             query?: {
@@ -2052,6 +2776,107 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    snapshot_files_api_v1_snapshots__snapshot_id__files_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                snapshot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FilesOut"];
+                };
+            };
+            /** @description Snapshot not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    snapshot_sessions_api_v1_snapshots__snapshot_id__sessions_get: {
+        parameters: {
+            query?: {
+                exclude_erased?: boolean;
+                limit?: number | null;
+                /** @description `next_cursor` of the previous page */
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                snapshot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionsOut"];
+                };
+            };
+            /** @description Snapshot not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    summary_api_v1_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SummaryOut"];
                 };
             };
         };

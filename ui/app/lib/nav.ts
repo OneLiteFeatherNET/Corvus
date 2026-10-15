@@ -15,6 +15,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { key: 'jobs', to: '/jobs', icon: 'mdi-cog-play-outline', requires: 'jobs.read' },
   { key: 'models', to: '/models', icon: 'mdi-brain', requires: 'models.read' },
   { key: 'labels', to: '/labels', icon: 'mdi-tag-multiple-outline', requires: 'labels.read' },
+  { key: 'scores', to: '/scores', icon: 'mdi-chart-line', requires: 'scores.read' },
   { key: 'players', to: '/players', icon: 'mdi-account-search-outline', requires: 'players.manage' },
   { key: 'blocklist', to: '/blocklist', icon: 'mdi-account-cancel-outline', requires: 'blocklist.manage' },
 ]
@@ -26,6 +27,7 @@ export const ROUTE_REQUIREMENTS: ReadonlyArray<readonly [string, Action]> = [
   ['/jobs', 'jobs.read'],
   ['/models', 'models.read'],
   ['/labels', 'labels.read'],
+  ['/scores', 'scores.read'],
   ['/players', 'players.manage'],
   ['/blocklist', 'blocklist.manage'],
 ]

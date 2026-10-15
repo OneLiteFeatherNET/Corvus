@@ -16,9 +16,6 @@
     </v-card-title>
     <v-card-text>
       <AppProblem :error="error" />
-      <v-alert v-if="stale" type="info" variant="tonal" density="compact" class="mb-3">
-        {{ $t('pools.preview.stale') }}
-      </v-alert>
       <p v-if="!preview && !error && !loading" class="text-on-surface-variant">{{ $t('pools.preview.none') }}</p>
       <v-progress-linear v-if="loading" indeterminate class="mb-3" :aria-label="$t('common.loading')" />
       <dl v-if="preview" class="preview-grid">
@@ -47,7 +44,6 @@ const props = defineProps<{
   preview: Preview | null
   loading?: boolean
   error?: Error | null
-  stale?: boolean
   disabled?: boolean
 }>()
 defineEmits<{ refresh: [] }>()

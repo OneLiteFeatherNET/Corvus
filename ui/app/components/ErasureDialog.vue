@@ -34,7 +34,6 @@
 
 <script setup lang="ts">
 import { buildErasureRequest, ERASE_WORD, isErasureConfirmed, shortPseudonym } from '~/lib/erasure'
-import { rememberErasureId } from '~/lib/erasure-log'
 import type { Erasure } from '~/types'
 
 const props = defineProps<{ modelValue: boolean, pseudonym: string }>()
@@ -49,7 +48,6 @@ const action = useAction(async () => {
   const body = buildErasureRequest(props.pseudonym, typed.value)
   if (!body) return
   const result = await players.erase(body)
-  rememberErasureId(localStorage, result.id)
   emit('erased', result)
   emit('update:modelValue', false)
 })

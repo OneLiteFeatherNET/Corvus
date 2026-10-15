@@ -9,7 +9,7 @@
   },
   "nav": {
     "dashboard": "Übersicht", "pools": "Pools", "snapshots": "Snapshots", "jobs": "Jobs", "models": "Modelle",
-    "labels": "Labels", "players": "Spieler", "blocklist": "Sperrliste"
+    "labels": "Labels", "scores": "Scores", "players": "Spieler", "blocklist": "Sperrliste"
   },
   "roles": { "admin": "Admin", "data_scientist": "Data Scientist", "staff": "Team", "viewer": "Betrachter" },
   "auth": {
@@ -29,10 +29,11 @@
   "dashboard": {
     "title": "Übersicht", "subtitle": "Stand von Pools, Jobs und Modellen",
     "pools": "Pools", "snapshots": "Snapshots", "runningJobs": "Laufende Jobs", "models": "Modelle",
-    "modelsPerStage": "Modelle pro Stufe", "recentJobs": "Letzte Jobs", "recentErasures": "Letzte Löschungen"
+    "modelsPerStage": "Modelle pro Stufe", "recentJobs": "Letzte Jobs", "recentErasures": "Letzte Löschungen", "pendingErasures": "Offene Kompaktierungen",
+    "compactionPending": "Kompaktierung offen", "compacted": "Kompaktiert"
   },
   "pools": {
-    "title": "Pools", "new": "Neuer Pool", "edit": "Pool bearbeiten", "saveAndPreview": "Speichern und Vorschau",
+    "title": "Pools", "new": "Neuer Pool", "edit": "Pool bearbeiten",
     "createSnapshot": "Snapshot erstellen", "snapshotCreated": "Snapshot erstellt:", "noFilter": "Keine Bedingungen: alle Sessions passen",
     "rawFilter": "Filter als JSON", "deleteTitle": "Pool löschen?",
     "deleteText": "Der Pool \"{name}\" wird gelöscht. Seine Snapshots bleiben erhalten.",
@@ -46,8 +47,8 @@
       "retentionHint": "Für Retention-Jobs; ändert die Auswahl nicht", "excludeOrphans": "Verwaiste Sessions ausschließen"
     },
     "preview": {
-      "title": "Vorschau", "refresh": "Vorschau aktualisieren", "stale": "Der Filter wurde seit dem Speichern geändert. Die Vorschau zeigt den gespeicherten Pool.",
-      "none": "Noch keine Vorschau.", "savedOnly": "Die API zeigt die Vorschau des gespeicherten Pools. Speichere, um die Zahlen zu aktualisieren.",
+      "title": "Vorschau", "refresh": "Vorschau aktualisieren", "live": "Die Vorschau zeigt den Filter, wie du ihn gerade bearbeitest. Es wird nichts gespeichert.",
+      "none": "Noch keine Vorschau.", "invalid": "Die Vorschau braucht einen gültigen Filter.",
       "sessions": "Sessions", "segments": "Segmente", "distinctPlayers": "Spieler", "eventsFiles": "Event-Dateien",
       "framesEstimate": "Frames (Schätzung)", "labelDistribution": "Label-Verteilung"
     },
@@ -78,7 +79,7 @@
     "stageLabel": "Stufe", "compare": "Vergleichen", "compareHint": "Wähle zwei Modelle in der Tabelle, um sie zu vergleichen.",
     "compareTitle": "Modelle vergleichen", "compareA": "Modell A", "compareB": "Modell B", "comparePick": "Wähle zwei Modelle.",
     "better": "Besserer Wert", "metricsTitle": "Metriken", "details": "Details", "history": "Stufenverlauf", "from": "Von",
-    "to": "Nach", "actor": "Akteur", "reason": "Begründung", "notFound": "Modell nicht gefunden",
+    "to": "Nach", "actor": "Akteur", "reason": "Begründung", "filterHint": "Filter wirken auf dem Server; Name, Version, Spielkontext und Domain müssen exakt passen.", "notFound": "Modell nicht gefunden",
     "metrics": {
       "recallAtFpr": "Recall bei FPR 0,1 %", "prAuc": "PR-AUC", "rocAuc": "ROC-AUC", "ece": "ECE", "p50": "Latenz p50",
       "p99": "Latenz p99", "rss": "Speicher (RSS)"
@@ -109,8 +110,8 @@
     "title": "Spieler", "subtitle": "Pseudonym-Suche und Löschung (Admin)", "pseudonym": "Pseudonym", "keyId": "Schlüssel-ID",
     "known": "Im Katalog bekannt", "firstSeen": "Zuerst gesehen", "lastSeen": "Zuletzt gesehen", "erasedAt": "Gelöscht am",
     "byPseudonym": "Per Pseudonym löschen", "invalidPseudonym": "64 Hex-Zeichen", "requests": "Löschanfragen",
-    "localLogHint": "Die API hat keine Liste der Löschanfragen. Diese Liste zeigt die Anfragen, die in diesem Browser gestellt wurden.",
     "requestedAt": "Angefragt", "requestedBy": "Von", "status": "Status", "keyDeleted": "Schlüssel gelöscht", "compactionPending": "Kompaktierung offen",
+    "compactedAt": "Kompaktiert am", "compaction": "Kompaktierung", "compactionDone": "Abgeschlossen", "openScores": "Scores ansehen",
     "lookup": {
       "title": "UUID zu Pseudonym", "privacy": "Die UUID wird im POST-Body gesendet, nie in einer URL, und von der Oberfläche nicht gespeichert.",
       "uuid": "Minecraft-UUID", "invalid": "Keine gültige UUID", "submit": "Nachschlagen"
@@ -125,5 +126,21 @@
     "title": "Sperrliste", "kind": "Art", "add": "Eintrag hinzufügen", "source": "Quelle", "reason": "Grund",
     "permanent": "Einträge aus einer Löschung sind dauerhaft",
     "kinds": { "block": "Sperren", "allow": "Erlauben" }, "sources": { "manual": "Manuell", "erasure": "Löschung" }
+  },
+  "scores": {
+    "title": "Spieler-Scores", "subtitle": "Modell-Scores zu einem Pseudonym (Team)",
+    "disclaimer": "Scores sind Entscheidungshilfen. Corvus sanktioniert nie selbst: Über Maßnahmen entscheidet das Team.",
+    "pseudonym": "Pseudonym", "invalidPseudonym": "64 Hex-Zeichen", "submit": "Scores laden",
+    "latest": "Aktuelle Scores", "model": "Modell", "gameContext": "Spielkontext", "domain": "Domain", "stage": "Stufe",
+    "score": "Score", "smoothed": "Geglättet", "windows": "Fenster", "updatedAt": "Aktualisiert",
+    "stageHint": "Die API liefert nur Scores von Modellen in den Stufen Shadow, Canary und Enforce.",
+    "empty": "Zu diesem Pseudonym gibt es keine Scores.", "historyEmpty": "Kein Verlauf vorhanden.",
+    "history": "Verlauf", "historyContext": "Spielkontext des Verlaufs", "historyLimit": "Anzahl Fenster",
+    "retention": "Der Verlauf wird nur begrenzt aufbewahrt.",
+    "chart": {
+      "title": "Score-Verlauf", "desc": "Liniendiagramm der geglätteten Scores (0 bis 1) über die Zeit, eine Linie pro Modell.",
+      "time": "Zeit", "smoothed": "Geglättet", "raw": "Rohwert", "dataTable": "Werte als Tabelle",
+      "summary": "{series} Modelle, {points} Messpunkte"
+    }
   }
 }
