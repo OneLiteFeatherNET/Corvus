@@ -20,3 +20,7 @@ Corvus never sanctions players on its own; the score is a decision aid for staff
 | `deploy/` | Docker Compose (pilot/standalone), Helm |
 
 Requirements and architecture decisions (ADR-CORV-*) live in the OneLiteFeather Outline wiki.
+
+## License
+
+Apache License 2.0, see [LICENSE](LICENSE).
