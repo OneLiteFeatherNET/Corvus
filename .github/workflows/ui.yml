@@ -1,0 +1,72 @@
+name: UI
+
+on:
+  pull_request:
+    paths:
+      - "ui/**"
+      - ".github/workflows/ui.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint, typecheck and test (ui)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v7
+
+      # This workflow lands before the ui does; every later step is skipped until ui/package.json exists.
+      - name: Detect ui project
+        id: detect
+        # ui/ does not exist yet on a branch without the ui, so the default working directory is unusable here.
+        working-directory: .
+        run: |
+          if [ -f ui/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "ui/package.json not found, skipping"
+          fi
+
+      # The pnpm version comes from the packageManager field of ui/package.json.
+      - name: Set up pnpm
+        if: steps.detect.outputs.present == 'true'
+        uses: pnpm/action-setup@v6.1.0
+        with:
+          package_json_file: ui/package.json
+
+      - name: Set up Node
+        if: steps.detect.outputs.present == 'true'
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: ui/.nvmrc
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Install dependencies
+        if: steps.detect.outputs.present == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        if: steps.detect.outputs.present == 'true'
+        run: pnpm lint
+
+      - name: Typecheck
+        if: steps.detect.outputs.present == 'true'
+        run: pnpm typecheck
+
+      - name: Test
+        if: steps.detect.outputs.present == 'true'
+        run: pnpm exec vitest run --maxWorkers=2
+
+      - name: Generate static site
+        if: steps.detect.outputs.present == 'true'
+        run: pnpm exec nuxi generate
