@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 from uuid import UUID
 
@@ -416,3 +417,14 @@ def test_cors_origin_list_ignores_blanks():
     )
 
     assert settings.cors_origin_list() == ["https://a.test", "https://b.test"]
+
+
+def test_erasure_requests_expose_when_compaction_finished(env: Env, admin):
+    done = replace(_erasure(1, pending=False), compacted_at=FIXED_NOW)
+    env.parts["erasure"].requests.update({done.id: done, UUID(int=2): _erasure(2)})
+
+    items = env.client.get("/api/v1/erasure-requests", headers=admin).json()["items"]
+
+    by_id = {i["id"]: i for i in items}
+    assert by_id[str(UUID(int=1))]["compacted_at"] == "2026-10-15T12:00:00Z"
+    assert by_id[str(UUID(int=2))]["compacted_at"] is None

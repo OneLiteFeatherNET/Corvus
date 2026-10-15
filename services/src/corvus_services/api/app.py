@@ -18,7 +18,7 @@ from .jobs import build_runner
 from .pg import open_repos
 from .problems import install_problem_handlers
 from .pseudonym import Pseudonymizer
-from .routes import jobs, labels, me, models, players, pools, scores, system
+from .routes import jobs, labels, me, models, players, pools, scores, snapshot_data, system
 from .settings import ApiSettings
 
 log = logging.getLogger("corvus.api")
@@ -117,7 +117,7 @@ def create_app(settings: ApiSettings | None = None, deps: Deps | None = None) ->
         )
 
     for router in (me.router, pools.router, labels.router, players.router, players.plugin_router,
-                   models.router, jobs.router, scores.router):  # fmt: skip
+                   models.router, jobs.router, scores.router, snapshot_data.router):  # fmt: skip
         app.include_router(router, prefix=API_PREFIX)
     app.include_router(system.router)
     return app

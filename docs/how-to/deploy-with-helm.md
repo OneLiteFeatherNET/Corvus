@@ -11,6 +11,7 @@ existing Secrets.
 | api | Deployment, Service, optional Ingress, RBAC for jobs | `corvus-api` |
 | score | StatefulSet, headless Service | `corvus-score` |
 | housekeeping | CronJob (`concurrencyPolicy: Forbid`) | `corvus-housekeeping` |
+| compact | CronJob (hourly, `concurrencyPolicy: Forbid`, toggle `compact.enabled`) | `corvus-compact` |
 | ui | optional Deployment, Service, Ingress, `config.json` ConfigMap | static nginx image |
 
 ## Images and versions
@@ -33,8 +34,8 @@ Operator or SealedSecrets) and point the values at them:
 
 | Value | Default Secret / key | Content | Used by |
 |---|---|---|---|
-| `database.existingSecret`, `database.dsnKey` | `corvus-database` / `uri` | libpq DSN incl. password (the CNPG app secret key `uri` fits) | migrate, ingest, api, score, housekeeping |
-| `s3.existingSecret`, `s3.accessKeyKey`, `s3.secretKeyKey` | `corvus-s3` / `access-key`, `secret-key` | object store credentials | ingest, score, housekeeping |
+| `database.existingSecret`, `database.dsnKey` | `corvus-database` / `uri` | libpq DSN incl. password (the CNPG app secret key `uri` fits) | migrate, ingest, api, score, housekeeping, compact |
+| `s3.existingSecret`, `s3.accessKeyKey`, `s3.secretKeyKey` | `corvus-s3` / `access-key`, `secret-key` | object store credentials | ingest, score, housekeeping, compact |
 | `kek.existingSecret`, `kek.key` | `corvus-kek` / `kek` | key encryption key, base64 of 32 random bytes (`openssl rand -base64 32`) | ingest |
 | `pseudonym.existingSecret`, `pseudonym.key` | `corvus-pseudonym` / `key` | pseudonym key shared with the proxies, base64, at least 16 bytes | api (`pseudonym.enabled: false` disables it) |
 | `api.extraSecret` (optional) | none | every key becomes an env var, e.g. `CORVUS_API_PLUGIN_TOKENS` (comma separated proxy tokens) | api |

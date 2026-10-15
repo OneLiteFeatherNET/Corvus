@@ -16,6 +16,7 @@ from corvus_services.api.pagination import Page, PageRequest, paginate
 from corvus_services.api.pools import PoolFilter, RawPreview
 from corvus_services.api.ports import (
     BlockEntry,
+    CurrentFile,
     DuplicateError,
     ErasureBrief,
     ErasureRequest,
@@ -32,6 +33,7 @@ from corvus_services.api.ports import (
     ScoreLatestRecord,
     SnapshotMaterial,
     SnapshotRecord,
+    SnapshotSession,
     StaleError,
     Summary,
     TransitionRecord,
@@ -107,6 +109,10 @@ class FakeSnapshotRepo:
 
     def __init__(self) -> None:
         self.rows: dict[UUID, SnapshotRecord] = {}
+        self.erased: set[bytes] = set()
+        self.session_details: dict[bytes, SnapshotSession] = {}
+        # lake file id -> (key, replaced_by, deleted)
+        self.lake_files: dict[int, tuple[str, int | None, bool]] = {}
 
     async def insert(self, snapshot: SnapshotRecord) -> None:
         if snapshot.id in self.rows:
@@ -119,6 +125,29 @@ class FakeSnapshotRepo:
     async def list_page(self, req: PageRequest, pool_id: UUID | None) -> Page[SnapshotRecord]:
         rows = [s for s in self.rows.values() if pool_id is None or s.pool_id == pool_id]
         return paginate(rows, req, _created_key)
+
+    async def sessions_page(
+        self, snapshot_id: UUID, after: bytes | None, limit: int, exclude_erased: bool
+    ) -> list[SnapshotSession]:
+        sessions = sorted(bytes.fromhex(h) for h in self.rows[snapshot_id].manifest["sessions"])
+        return [
+            replace(
+                self.session_details.get(s, SnapshotSession(s, None, None)), erased=s in self.erased
+            )
+            for s in sessions
+            if (after is None or s > after) and not (exclude_erased and s in self.erased)
+        ][:limit]
+
+    async def current_files(self, snapshot_id: UUID) -> list[CurrentFile]:
+        out: list[CurrentFile] = []
+        for ref in self.rows[snapshot_id].manifest["files"]["events"]:
+            fid: int | None = ref["id"]
+            while fid is not None:
+                key, replaced_by, deleted = self.lake_files[fid]
+                if not deleted:
+                    out.append(CurrentFile(ref["id"], fid, key))
+                fid = replaced_by
+        return out
 
 
 class FakeLabelRepo:

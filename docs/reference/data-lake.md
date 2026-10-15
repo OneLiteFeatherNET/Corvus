@@ -83,7 +83,7 @@ Only frames that carry a payload get a `raw` row.
 - The DEK is stored wrapped (AES-256-GCM) with a key encryption key (KEK) from `CORVUS_KEK` (base64, 32 bytes),
   identified by `CORVUS_KEK_ID`. The KEK never touches the database or the lake.
 - Erasure of a player: delete the `player_keys` row (crypto-shredding of `raw`), mark `players.erased_at`, add the
-  pseudonym to the blocklist; a compaction job later rewrites `events` files without the player's sessions.
+  pseudonym to the blocklist; `corvus-compact` later rewrites `events` and still-existing `raw` files without the player's sessions (section 7).
 
 ## 4. Catalog (PostgreSQL, schema `corvus`)
 
@@ -95,6 +95,10 @@ Only frames that carry a payload get a `raw` row.
 | `segments` | (`session_id`, `segment`) | `backend_server`, `game_context`, `client_brand`, `started_at` |
 | `lake_files` | `id bigserial`, unique `s3_key` | `table_name`, `date`, `row_count`, `size_bytes`, `schema_version`, `created_at`, `deleted_at` |
 | `lake_file_sessions` | (`file_id`, `session_id`) | which sessions a file contains (pool selection, erasure, compaction) |
+
+Migration `0005_compaction.sql` adds `lake_files.replaced_by` (successor of a compacted file), `lake_files.purge_pending`
+(row marked deleted, object not yet removed), `erasure_requests.compacted_at` and the view `corvus.erased_sessions`
+(`session_id`, `pseudonym`, `erased_at` for sessions of erased players).
 
 Migrations are plain, numbered SQL files applied in order under a PostgreSQL advisory lock; they are never edited
 after release.
@@ -127,3 +131,33 @@ after release.
 Scores of `shadow` models are persisted but never published. Consumers must treat `canary` scores as
 informational; only `enforce` scores may drive automated actions in other systems, and Corvus itself
 never sanctions players.
+
+## 7. Compaction after erasure
+
+`corvus-compact` is a one-shot process (Helm: CronJob, hourly) that makes erasure physical. It takes the
+`erasure_requests` with `compaction_pending = true` that are older than `CORVUS_COMPACT_GRACE_S` (600 s, so frames still
+buffered or cached by ingest at erasure time have landed), finds the live `events` and `raw` files that list sessions of
+the erased pseudonyms in `lake_file_sessions`, and per file, under `pg_try_advisory_lock` (a file that another run holds
+is skipped and the request stays pending):
+
+1. downloads the file to local disk and rewrites it as zstd Parquet batch by batch (`CORVUS_COMPACT_BATCH_ROWS`, 65 536
+   rows), dropping the rows of erased sessions; row order and schema are unchanged;
+2. uploads the result to `_staging/<table>/<ulid>.parquet` and copies it to a new final key
+   `lake/<table>/date=<day>/part-<ulid>.parquet`, like ingest does;
+3. in one transaction inserts the new `lake_files` and `lake_file_sessions` rows (the old file's sessions minus the
+   erased ones), sets the old file's `deleted_at`, `replaced_by` and `purge_pending`; a file with no rows left has no
+   successor;
+4. deletes the old object and clears `purge_pending`.
+
+A file that lists an erased session without holding rows of it (typical for `raw`) is not rewritten; only the
+`lake_file_sessions` entry is removed. When every file of the requests is done, the requests get
+`compaction_pending = false` and `compacted_at`. The job exits non-zero if any file failed.
+
+Crash safety: until step 3 commits the old file stays the live one (an object copied but never registered is an orphan
+that housekeeping removes after one hour); after it only `purge_pending` work remains, which every run retries first.
+Repeating a run, or a repeated erasure of the same pseudonym, changes nothing.
+
+Snapshots are immutable and keep naming erased sessions and the file ids that compaction replaced. Jobs read a snapshot
+through `GET /api/v1/snapshots/{id}/sessions?exclude_erased=true` (paged) and `GET /api/v1/snapshots/{id}/files`
+(follows `replaced_by` to the live files) instead of trusting the manifest alone; see
+[control-plane-api.md](control-plane-api.md).

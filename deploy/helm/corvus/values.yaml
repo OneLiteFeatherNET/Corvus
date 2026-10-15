@@ -229,6 +229,26 @@ housekeeping:
     requests: {cpu: 100m, memory: 256Mi}
     limits: {cpu: "1", memory: 512Mi}
 
+# Rewrites lake files without the sessions of erased players (corvus-compact). Streams each file
+# through /tmp (tmpSizeLimit must hold two copies of the largest file).
+compact:
+  enabled: true
+  schedule: "7 * * * *"
+  startingDeadlineSeconds: 600
+  activeDeadlineSeconds: 3000
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 1
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  # Rows per Arrow batch while rewriting a file (bounds memory).
+  batchRows: 65536
+  # Erasure requests younger than this are left alone so late frames of the player have landed.
+  graceSeconds: 600
+  env: {}
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}
+
 ui:
   enabled: false
   replicas: 2
@@ -286,7 +306,7 @@ ui:
 # ---- cross-cutting -----------------------------------------------------------------------------
 
 serviceAccount:
-  # One ServiceAccount per component (ingest, api, score, housekeeping, ui) named
+  # One ServiceAccount per component (ingest, api, score, housekeeping, compact, ui) named
   # <fullname>-<component>; none of them mounts a token except the api with the kubernetes runner.
   create: true
   annotations: {}
