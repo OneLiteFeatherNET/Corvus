@@ -59,6 +59,8 @@ class Agg:
     packets: Counter = field(default_factory=Counter)  # (direction, state, type, wire) -> frames
     packet_bytes: Counter = field(default_factory=Counter)
     events: Counter = field(default_factory=Counter)  # decoded event name -> frames
+    payload_frames: int = 0  # frames that carry a recorded payload
+    payload_truncated: int = 0  # of those, frames whose payload was cut to max_payload_bytes
     counters: Counters = field(default_factory=Counters)
     gaps: GapStats = field(default_factory=GapStats)
 
@@ -68,6 +70,8 @@ class Agg:
         self.packets.update(other.packets)
         self.packet_bytes.update(other.packet_bytes)
         self.events.update(other.events)
+        self.payload_frames += other.payload_frames
+        self.payload_truncated += other.payload_truncated
         self.counters.add(other.counters)
         self.gaps.add(other.gaps)
 

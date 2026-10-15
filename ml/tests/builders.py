@@ -74,6 +74,7 @@ def frame(
     wire_id: int = 20,
     packet_type: int = 7,
     payload: bytes = b"\x00" * 10,
+    original_size: int = 0,
     **event,
 ):
     return pb.Frame(
@@ -84,6 +85,7 @@ def frame(
         wire_packet_id=wire_id,
         packet_type=packet_type,
         payload=payload,
+        payload_original_size=original_size,
         **event,
     )
 

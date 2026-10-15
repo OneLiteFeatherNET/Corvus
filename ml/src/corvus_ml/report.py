@@ -100,6 +100,13 @@ def context_report(ctx: ContextAgg) -> dict:
             name: {"frames": n, "frames_per_s": rate(n, seconds)}
             for name, n in sorted(agg.events.items())
         },
+        "payloads": {
+            "frames_with_payload": agg.payload_frames,
+            "truncated": agg.payload_truncated,
+            "truncated_share": (
+                agg.payload_truncated / agg.payload_frames if agg.payload_frames else None
+            ),
+        },
         "counters": asdict(agg.counters),
         "drop_rate": drop_rate(agg),
         "gaps": asdict(agg.gaps),
@@ -209,6 +216,12 @@ def render_text(report: dict) -> str:
         if c["events"]:
             evs = ", ".join(f"{k} {_fmt(v['frames_per_s'], 2)}/s" for k, v in c["events"].items())
             lines.append(f"   events: {evs}")
+        pl = c["payloads"]
+        share = pl["truncated_share"]
+        lines.append(
+            f"   payloads: {pl['frames_with_payload']:,} frames with payload, "
+            f"{pl['truncated']:,} truncated ({'-' if share is None else f'{share * 100:.2f}%'})"
+        )
         ct = c["counters"]
         dr = c["drop_rate"]
         lines.append(

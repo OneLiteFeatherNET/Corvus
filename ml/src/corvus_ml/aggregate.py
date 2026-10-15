@@ -116,6 +116,10 @@ def _record_frames(
         )
         agg.packets[key] += 1
         agg.packet_bytes[key] += size
+        if size or frame.payload_original_size:
+            agg.payload_frames += 1
+            if frame.payload_original_size > size:
+                agg.payload_truncated += 1
         event = frame.WhichOneof("event")
         if event:
             agg.events[event] += 1
