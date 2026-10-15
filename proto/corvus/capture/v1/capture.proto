@@ -173,6 +173,8 @@ message EntityMotionEvent {
     KIND_RELATIVE = 1;
     KIND_TELEPORT = 2;
     KIND_VELOCITY = 3;
+    // Absolute position at entity spawn; x/y/z are the spawn position.
+    KIND_SPAWN = 4;
   }
   Kind kind = 2;
   double x = 3;

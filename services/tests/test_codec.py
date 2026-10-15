@@ -115,6 +115,17 @@ def test_entity_motion():
     assert (row["x"], row["y"], row["z"]) == (0.1, 0.2, 0.3)
 
 
+def test_entity_motion_spawn_passes_kind_through():
+    f = frame(
+        entity_motion=pb.EntityMotionEvent(
+            entity_id=9, kind=pb.EntityMotionEvent.KIND_SPAWN, x=1.0, y=2.0, z=3.0
+        )
+    )
+    row = event_row(SESSION, 0, f)
+    assert row["action"] == 4
+    assert (row["entity_id"], row["x"], row["y"], row["z"]) == (9, 1.0, 2.0, 3.0)
+
+
 def test_event_row_records_payload_original_size_even_when_truncated():
     row = event_row(SESSION, 0, frame(payload=b"abc", payload_original_size=10))
     assert row["payload_original_size"] == 10
