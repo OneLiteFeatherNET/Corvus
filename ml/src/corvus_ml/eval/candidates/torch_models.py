@@ -174,6 +174,7 @@ class GruAutoencoderCandidate(TorchCandidate):
 class CnnCandidate(TorchCandidate):
     name = "cnn1d"
     supervised = True
+    bounded = True
 
     def tensors(self, data: EvalData):
         y = torch.from_numpy((data.label == LABEL_CHEAT).astype(np.float32))

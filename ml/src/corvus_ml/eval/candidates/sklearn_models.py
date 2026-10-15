@@ -42,6 +42,7 @@ class IsolationForestCandidate(Candidate):
     name = "isolation_forest"
     supervised = False
     input_kind = "agg"
+    onnx_raw = "neg_second"
 
     def fit(self, train: EvalData, val: EvalData | None = None) -> None:
         self.model = IsolationForest(
@@ -75,6 +76,8 @@ class GradientBoostingCandidate(Candidate):
     name = "gradient_boosting"
     supervised = True
     input_kind = "agg"
+    onnx_raw = "second_col1"
+    bounded = True
 
     def fit(self, train: EvalData, val: EvalData | None = None) -> None:
         y = (train.label == LABEL_CHEAT).astype(int)

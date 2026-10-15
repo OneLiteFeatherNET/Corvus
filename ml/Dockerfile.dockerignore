@@ -1,0 +1,11 @@
+# Used by `docker build -f ml/Dockerfile .` (BuildKit): the image needs only ml/ and proto/.
+**
+!ml/pyproject.toml
+!ml/uv.lock
+!ml/README.md
+!ml/scripts
+!ml/src
+!proto
+**/__pycache__
+**/.venv
+ml/src/corvus_ml/_gen

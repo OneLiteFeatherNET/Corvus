@@ -14,6 +14,11 @@ adapter that builds the tensors). Both import without Arrow, torch, scikit-learn
 |---|---|---|
 | `<build out>/feature_spec.json` next to `windows/` and `window_tokens/` | `corvus-features build` | `corvus-eval` (window parameters of the data; validated) |
 | `<eval out>/onnx/<game_context>/feature_spec.json` next to the exported `*.onnx` | `corvus-eval run` | the scoring service, before it loads a model |
+| `models/<name>/<version>/feature_spec.json` next to `model.onnx` | the `train` job (copied from the export) | the scoring service |
+
+The `train` job also writes `model_card.json` and `calibration.json` there; the feature spec stays
+unchanged. What the model outputs is described in `model_card.json` (`output_semantics`), see
+[ml-jobs.md](ml-jobs.md).
 
 The file next to a model describes both input kinds (`agg`, `seq`); a model uses the one matching
 its input. Normalisation (mean and std) is inside the ONNX graph and is not part of the spec.

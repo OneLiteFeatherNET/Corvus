@@ -3,6 +3,7 @@ benchmark. Produces a plain dict that :mod:`corvus_ml.eval.report` renders."""
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import replace
@@ -10,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
+from corvus_ml import calibration as cal
 from corvus_ml.eval import candidates as cand_pkg
 from corvus_ml.eval import metrics as M
 from corvus_ml.eval import onnx_bench
@@ -24,6 +26,9 @@ from corvus_ml.features.spec import SPEC_FILE, FeatureSpec
 log = logging.getLogger(__name__)
 
 PARITY_RTOL, PARITY_ATOL = 1e-3, 1e-4
+# Calibrated graphs: float32 interpolation next to a steep step of the calibration can differ
+# from the float64 reference by a fraction of that step.
+CALIBRATED_PARITY_ATOL = 2e-3
 
 
 def _tag(fpr: float) -> str:
@@ -75,11 +80,27 @@ def _training_sets(
 def _eval_metrics(cand: Candidate, data: EvalData, idx: np.ndarray, fprs) -> dict:
     sub = data.take(idx[data.label[idx] != LABEL_UNLABELLED])
     y = (sub.label == LABEL_CHEAT).astype(np.int8)
-    s = cand.score(sub)
+    s = cand.calibrated_score(sub)
     out = M.window_metrics(y, s, sub.group_codes(), fprs)
     if cand.supervised:
         out["ece"] = M.ece(y, s)
     return out
+
+
+def _calibrate(cand: Candidate, cfg: EvalConfig, train: EvalData, val: EvalData) -> None:
+    """Fit the calibration on the validation split (supervised: labelled windows; unsupervised:
+    legit windows). The shipped score is then ``cand.calibrated_score``."""
+    if cfg.calibration == "none":
+        return
+    raw = cand.score(val) if len(val) else np.zeros(0)
+    if cand.supervised:
+        cand.calibration = cal.fit_calibration(
+            cfg.calibration, True, raw, (val.label == LABEL_CHEAT).astype(np.int8),
+            bounded=cand.bounded,
+        )  # fmt: skip
+    else:
+        fallback = cand.score(train) if len(train) else None
+        cand.calibration = cal.fit_calibration(cfg.calibration, False, raw, None, fallback)
 
 
 def _fit(cand_name: str, cfg: EvalConfig, data: EvalData, train_idx, val_idx) -> Candidate | None:
@@ -91,12 +112,21 @@ def _fit(cand_name: str, cfg: EvalConfig, data: EvalData, train_idx, val_idx) ->
         return None
     cand = cand_pkg.create(cand_name, cfg.seed, cfg.threads, cfg.candidates[cand_name])
     cand.fit(train, val if len(val) else None)
+    try:
+        _calibrate(cand, cfg, train, val)
+    except ValueError as exc:
+        log.warning("%s: no calibration possible (%s); skipping the candidate", cand_name, exc)
+        return None
     return cand
 
 
 def _scores_and_labels(cand: Candidate, data: EvalData, idx: np.ndarray):
     sub = data.take(idx[data.label[idx] != LABEL_UNLABELLED])
-    return (sub.label == LABEL_CHEAT).astype(np.int8), cand.score(sub), sub.group_codes()
+    return (
+        (sub.label == LABEL_CHEAT).astype(np.int8),
+        cand.calibrated_score(sub),
+        sub.group_codes(),
+    )
 
 
 def resolve_spec(cfg: EvalConfig) -> FeatureSpec:
@@ -130,14 +160,38 @@ def _export_and_bench(
     if len(test) == 0:
         return {"error": "no labelled test windows"}
     x = cand.inputs(test)
-    path = cand.export_onnx(out / f"{cand.name}.onnx", x)
+    shipped = out / f"{cand.name}.onnx"
+    native_raw = cand.score(test)
+    if cand.calibration is None:
+        path = raw_path = cand.export_onnx(shipped, x)
+        native, atol = native_raw, PARITY_ATOL
+    else:
+        path = cand.export_calibrated_onnx(shipped, x)
+        raw_path = path.with_name(f"{cand.name}.raw.onnx")
+        native, atol = cand.calibrated_score(test), CALIBRATED_PARITY_ATOL
+        (out / f"{cand.name}.calibration.json").write_text(
+            json.dumps(cand.calibration.to_dict(), indent=2) + "\n"
+        )
+        raw_scores = cand.onnx_to_score(
+            onnx_bench.run_session(onnx_bench.make_session(raw_path, cfg.threads), x)
+        )
+        res["onnx_raw"] = {
+            "path": raw_path.name,
+            "max_abs_diff": float(np.abs(raw_scores - native_raw).max()),
+        }
     sess = onnx_bench.make_session(path, cfg.threads)
-    onnx_scores = cand.onnx_to_score(onnx_bench.run_session(sess, x))
-    native = cand.score(test)
+    outputs = onnx_bench.run_session(sess, x)
+    # A calibrated graph has the single output ``score``; a raw one is candidate specific.
+    onnx_scores = (
+        cand.onnx_to_score(outputs)
+        if cand.calibration is None
+        else np.asarray(outputs[0], dtype=np.float64)
+    )
     res["onnx"] = {
         "path": str(path.name),
+        "calibrated": cand.calibration is not None,
         "max_abs_diff": float(np.abs(onnx_scores - native).max()),
-        "parity_ok": bool(np.allclose(onnx_scores, native, rtol=PARITY_RTOL, atol=PARITY_ATOL)),
+        "parity_ok": bool(np.allclose(onnx_scores, native, rtol=PARITY_RTOL, atol=atol)),
     }
     if not cfg.bench.enabled:
         return res
@@ -145,7 +199,7 @@ def _export_and_bench(
     kw = {"warmup": cfg.bench.warmup, "iters": cfg.bench.iters, "batch": cfg.bench.batch}
     res["bench"] = bench(path, x, cfg.threads, **kw).to_dict()
     if cand.quantizable and cfg.bench.quantize:
-        res["int8"] = _quantized(cand, cfg, x, test, path, native, fprs, bench, kw)
+        res["int8"] = _quantized(cand, cfg, x, test, raw_path, native_raw, fprs, bench, kw)
     return res
 
 
@@ -212,6 +266,9 @@ def run_candidate(
         return {**base, "status": "skipped", "reason": reason}
     fit_s = time.perf_counter() - t0
     res = {**base, "status": "ok", "n_params": cand.n_params, "fit_seconds": fit_s}
+    if cand.calibration is not None:
+        c = cand.calibration
+        res["calibration"] = {"method": c.method, "n_fit": c.n_fit, "fit_on": c.fit_on}
     res["test"] = _eval_metrics(cand, data, split.test, fprs)
     res["val"] = _eval_metrics(cand, data, split.val, fprs)
     yv, sv, _ = _scores_and_labels(cand, data, split.val)
