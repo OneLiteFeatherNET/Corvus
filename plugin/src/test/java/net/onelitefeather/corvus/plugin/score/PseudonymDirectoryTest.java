@@ -49,4 +49,12 @@ class PseudonymDirectoryTest {
 
         assertEquals(0, f.directory.size());
     }
+
+    @Test
+    void hexOfComputesLazilyAndMatchesTheLookup() {
+        String hex = f.directory.hexOf(PLAYER);
+
+        assertEquals(java.util.HexFormat.of().formatHex(f.pseudonymizer.pseudonym(PLAYER)), hex);
+        assertEquals(PLAYER, f.directory.lookup(f.pseudonymizer.pseudonym(PLAYER)).orElseThrow());
+    }
 }

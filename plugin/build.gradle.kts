@@ -35,6 +35,8 @@ dependencies {
     compileOnly("com.velocitypowered:velocity-api:$velocityVersion")
     annotationProcessor("com.velocitypowered:velocity-api:$velocityVersion")
     compileOnly("com.github.retrooper:packetevents-api:$packetEventsVersion")
+    // Velocity ships Gson (toml4j relies on it too).
+    compileOnly("com.google.code.gson:gson:2.14.0")
     compileOnly("io.netty:netty-buffer:$nettyVersion")
     compileOnly("io.netty:netty-transport:$nettyVersion")
 

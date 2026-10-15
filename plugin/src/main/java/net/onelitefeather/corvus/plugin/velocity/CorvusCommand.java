@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /** {@code /corvus stats} and {@code /corvus score <player>}, permission {@code corvus.admin}. */
 final class CorvusCommand implements SimpleCommand {
@@ -23,8 +24,11 @@ final class CorvusCommand implements SimpleCommand {
     private final ProxyServer proxy;
     private final CorvusApi api;
     private final boolean scoresEnabled;
+    private final Supplier<String> blocklistStatus;
 
-    CorvusCommand(StatsReporter reporter, ProxyServer proxy, CorvusApi api, boolean scoresEnabled) {
+    CorvusCommand(StatsReporter reporter, ProxyServer proxy, CorvusApi api, boolean scoresEnabled,
+                  Supplier<String> blocklistStatus) {
+        this.blocklistStatus = blocklistStatus;
         this.reporter = reporter;
         this.proxy = proxy;
         this.api = api;
@@ -35,7 +39,7 @@ final class CorvusCommand implements SimpleCommand {
     public void execute(Invocation invocation) {
         String[] args = invocation.arguments();
         if (args.length == 1 && args[0].equalsIgnoreCase("stats")) {
-            invocation.source().sendMessage(Component.text("[corvus] " + reporter.sample()));
+            invocation.source().sendMessage(Component.text("[corvus] " + reporter.sample() + " " + blocklistStatus.get()));
         } else if (args.length == 2 && args[0].equalsIgnoreCase("score")) {
             score(invocation, args[1]);
         } else {
