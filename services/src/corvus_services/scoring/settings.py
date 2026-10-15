@@ -35,6 +35,15 @@ class ScoreSettings(Settings):
     # the packet does not exist, so tick_end_rate is known to be null for the run.
     score_tick_end_min_protocol: int = Field(default=768, ge=0)
 
+    # Raw-byte models (ADR-CORV-0008): plaintext frames are tokenized on arrival and only token
+    # ids are buffered, for about one window. This caps the frames buffered per session, segment
+    # and windowing (the oldest are dropped and counted).
+    score_raw_max_buffered_frames: int = Field(default=16_384, ge=64)
+    # p99 latency budget of one raw-byte window; a model whose max_packets is estimated to exceed
+    # it logs a warning at load time (the model is still served). Mirrors the registry gate
+    # CORVUS_GATE_MAX_P99_LATENCY_MS; 0 disables the check.
+    score_p99_budget_ms: float = Field(default=10.0, ge=0)
+
     # Models
     score_models_dir: Path = Path(
         "/tmp/corvus-score/models"

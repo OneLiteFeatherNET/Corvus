@@ -42,6 +42,31 @@ tests:
               fieldRef:
                 fieldPath: "metadata.labels['apps.kubernetes.io/pod-index']"
 
+  - it: passes the raw-byte scoring limits to the score pods
+    template: score.yaml
+    documentIndex: 0
+    set:
+      score.rawMaxBufferedFrames: 4096
+      score.p99BudgetMs: 25
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_SCORE_RAW_MAX_BUFFERED_FRAMES
+            value: "4096"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_SCORE_P99_BUDGET_MS
+            value: "25"
+
+  - it: rejects a raw-byte frame buffer below the minimum
+    template: score.yaml
+    set:
+      score.rawMaxBufferedFrames: 8
+    asserts:
+      - failedTemplate: {}
+
   - it: gives score a headless service
     template: score.yaml
     documentIndex: 1

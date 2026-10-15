@@ -8,16 +8,18 @@ from datetime import datetime, timedelta
 
 from corvus_ml.features.config import FeaturizerConfig
 from corvus_ml.features.featurizer import CompletedWindow
+from corvus_ml.raw.spec import RawBytesSpec
 
 from ..clock import Clock
+from .raw import RawWindow
 
 
 @dataclass(frozen=True)
 class PendingWindow:
     """A completed window plus what is needed to score and attribute it."""
 
-    window: CompletedWindow
-    config: FeaturizerConfig
+    window: CompletedWindow | RawWindow
+    config: FeaturizerConfig | RawBytesSpec  # which models can score it
     pseudonym: bytes
     key_id: str
     game_context: str

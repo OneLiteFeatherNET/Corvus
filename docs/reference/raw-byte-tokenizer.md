@@ -260,7 +260,8 @@ also holds `tokenizer.json`.
 
 ## 10. What the scorer has to do
 
-Nothing in `services/` implements this yet. A scorer that serves a raw-byte model must:
+`corvus-score` (`services/src/corvus_services/scoring/`) implements this; the steps below are the contract and
+name where each one lives. A scorer that serves a raw-byte model must:
 
 1. Dispatch on `model_card.input_kind == "raw_bytes"` (or `feature_spec.json` having `raw_bytes`), **not**
    on the ONNX input rank: a token-sequence model has the same rank 3.
@@ -281,6 +282,25 @@ Nothing in `services/` implements this yet. A scorer that serves a raw-byte mode
 6. For a macro model keep the last `macro_windows` windows of the segment (gaps stay padding).
 7. Use the same code, not a re-implementation: the token ids are part of the model.
 
+How `corvus-score` does it:
+
+| Step | Implementation |
+|---|---|
+| 1, 2 | `ModelManager` reads `model_card.json` first. `input_kind` `raw_bytes` (or a `raw_bytes` section in the spec) selects the raw path; a card that contradicts the spec (`agg`/`seq` with a raw spec, `raw_bytes` without one, an unknown kind) rejects the model. `FeatureSpec.load(..., require_tokenizer=True)` and `RawTokenizer.load` check the hash and the layout; a mismatch keeps the model out (reason `rejected`, not retried), all other models keep running. The ONNX input rank (3, or 4 with macro windows) and the channel count `max_tokens_per_packet + 1` are checked against the spec. |
+| 3 | `scoring/raw.py: raw_frame` maps the capture `Frame` (plaintext `payload`, `payload_original_size`, direction, packet type, offset). |
+| 4, 6 | `corvus_ml.raw.streaming.SegmentWindower`, one per (session, segment, distinct `RawBytesSpec`). It shares `tokenize_payloads` and `cut_window` with the offline path; `tests/test_raw_streaming.py` proves stream = batch for chunked feeds, segments, caps, protocol modes and macro windows. A window is emitted as soon as a frame at or after its end arrived; the windows that are only complete at the end of the segment follow on a new segment, the end of the session or an idle eviction. A macro window is emitted when the first window of the next group is complete (like training: disjoint groups). |
+| 5 | The `[PROTO_*]` token comes from `sessions.client_protocol` (`SessionStart.client_protocol_version`, or the catalog on a lookup). The micro-batch is padded to its longest window (`scoring/raw.py: stack_inputs`). |
+
+Memory and privacy: the windower tokenizes a frame when it arrives and keeps token ids only (int16), from the start of
+the next undecided window on, so about `window_seconds + stride_seconds` of traffic; a cap
+(`CORVUS_SCORE_RAW_MAX_BUFFERED_FRAMES`) bounds it. Plaintext payload bytes live for the duration of one call and are
+never stored, persisted or logged. A model that appears while a segment runs starts its window grid at its first frame
+(the featurizers behave the same); a frame whose `seq` does not exceed the last one (redelivery) is ignored.
+
+Metrics: `corvus_score_model_window_max_packets{model}`, `corvus_score_model_window_seconds{model}`,
+`corvus_score_model_estimated_p99_ms{model}`, `corvus_score_raw_window_packets` (packets per window handed to the
+models) and `corvus_score_raw_frames_dropped_total`.
+
 Cost: the table below was measured with default-size models (`d_model` 64, 2 global layers; random
 weights, latency does not depend on them) on a 32-core development machine, ONNX Runtime CPU, one window
 per call. The anomaly graph is slower because it runs the prediction heads for the masked positions.
@@ -291,7 +311,14 @@ per call. The anomaly graph is slower because it runs the prediction heads for t
 | 512 | 17.0 ms | 10.0 ms | 44.7 ms | 25.8 ms |
 | 1024 | 41.9 ms (p99 47.6) | 25.6 ms | 108.7 ms | 66.9 ms |
 
-A larger model (`d_model` 128, 4 layers) needs 68.9 ms (1 thread) for 1024 packets. Re-measure on the
+A larger model (`d_model` 128, 4 layers) needs 68.9 ms (1 thread) for 1024 packets.
+
+**Budget guard.** At load time the scorer estimates the p99 of a full window from `max_packets` (piecewise linear
+through the 1-thread classifier points above, times 0.6 for two or more threads, times 2.6 for `raw_hier_anomaly`, times
+1.15 from mean to p99; a larger model needs about 1.6 times more) and logs a warning if it exceeds
+`CORVUS_SCORE_P99_BUDGET_MS` (default 10, the registry gate `CORVUS_GATE_MAX_P99_LATENCY_MS`). The model is still
+served; the estimate is exported as `corvus_score_model_estimated_p99_ms`. With the default budget a classifier on one
+thread stays quiet up to about 270 packets and warns at 512 (about 20 ms) and 1024. Re-measure on the
 target hardware (`[benchmark] raw_packets = [128, 512, 1024]` adds this table to every report). With a
 stride of 5 s one window per session every 5 s is one call; the budget is the number of concurrent
 sessions times the cost of the window, so cap `max_packets` rather than the window length when CPU is

@@ -10,7 +10,7 @@ first). The protocol token and the final row layout are added when a window is a
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 import pyarrow as pa
@@ -57,6 +57,41 @@ def dt_ids(layout: TokenLayout, offsets_ns: np.ndarray, segment: np.ndarray) -> 
     return out
 
 
+def tokenize_payloads(
+    tok: RawTokenizer,
+    packet: PacketConfig,
+    payloads: Sequence[bytes | None],
+    original_sizes: Sequence[int],
+) -> tuple[list[list[int]], list[bool], list[bool]]:
+    """``(tokens, trunc, nopayload)`` per frame: the single tokenization path of the packet table.
+
+    Offline (``session_packet_table``) and online (``corvus_ml.raw.streaming``) both go through
+    this function so a frame gets the same ids in training and in serving. A frame without a
+    payload (``None`` or empty) is ``nopayload``; ``trunc`` means the plugin recorded fewer bytes
+    than the packet had, or the payload has more BPE tokens than fit into the row.
+    """
+    cap = payload_cap(packet)
+    present = [i for i, p in enumerate(payloads) if p]
+    encoded = dict(
+        zip(present, tok.encode_batch([payloads[i] or b"" for i in present]), strict=True)
+    )
+    tokens: list[list[int]] = []
+    trunc: list[bool] = []
+    nopay: list[bool] = []
+    for i, size in enumerate(original_sizes):
+        ids = encoded.get(i)
+        if ids is None:
+            tokens.append([])
+            trunc.append(False)
+            nopay.append(True)
+            continue
+        recorded = len(payloads[i] or b"")
+        tokens.append(ids[:cap])
+        trunc.append(bool(size > recorded) or len(ids) > cap)
+        nopay.append(False)
+    return tokens, trunc, nopay
+
+
 def session_packet_table(
     sp: SessionPackets,
     tok: RawTokenizer,
@@ -70,26 +105,14 @@ def session_packet_table(
     keep = np.array([int(s) in contexts for s in sp.segment.tolist()], dtype=bool)
     if not keep.any():
         return None
-    cap = payload_cap(packet)
     dt = dt_ids(tok.layout, sp.offset_nanos, sp.segment)
-    present = [i for i in np.flatnonzero(keep).tolist() if sp.payloads[i]]
-    encoded = dict(zip(present, tok.encode_batch([sp.payloads[i] for i in present]), strict=True))
-    tokens: list[list[int]] = []
-    trunc: list[bool] = []
-    nopay: list[bool] = []
-    for i in np.flatnonzero(keep).tolist():
-        ids = encoded.get(i)
-        if ids is None:
-            tokens.append([])
-            trunc.append(False)
-            nopay.append(True)
-            continue
-        recorded = len(sp.payloads[i] or b"")
-        cut = len(ids) > cap
-        tokens.append(ids[:cap])
-        trunc.append(bool(sp.payload_original_size[i] > recorded) or cut)
-        nopay.append(False)
     idx = np.flatnonzero(keep)
+    tokens, trunc, nopay = tokenize_payloads(
+        tok,
+        packet,
+        [sp.payloads[i] for i in idx.tolist()],
+        sp.payload_original_size[idx].tolist(),
+    )
     ctx = [contexts[int(s)] for s in sp.segment[idx].tolist()]
     return pa.table(
         {
