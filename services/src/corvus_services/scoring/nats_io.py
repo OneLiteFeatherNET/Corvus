@@ -18,7 +18,7 @@ from nats.js.api import (
 )
 from nats.js.errors import NotFoundError
 
-from ..nats_source import NatsMessage, connect_options, ensure_stream
+from ..nats_source import NatsMessage, connect_options, ensure_stream, raise_replicas
 from .partitions import filter_subjects
 from .settings import ScoreSettings
 
@@ -82,16 +82,19 @@ def score_stream_config(s: ScoreSettings) -> StreamConfig:
         retention=RetentionPolicy.LIMITS,
         discard=DiscardPolicy.OLD,
         max_age=float(s.score_stream_max_age_s),
+        num_replicas=s.nats_stream_replicas,
     )
 
 
 async def ensure_score_stream(js: Any, s: ScoreSettings) -> None:
     """Create ``CORVUS_SCORE`` if missing; an existing stream is left alone (operators own it)."""
     try:
-        await js.stream_info(s.score_stream)
+        info = await js.stream_info(s.score_stream)
     except NotFoundError:
         log.info("creating stream %s", s.score_stream)
         await js.add_stream(score_stream_config(s))
+    else:
+        await raise_replicas(js, info, s.nats_stream_replicas)
 
 
 class NatsScoreIO:

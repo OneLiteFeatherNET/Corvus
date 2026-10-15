@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     # Credentials file (.creds: JWT and NKey seed), usually mounted from a Secret; unset: none.
     nats_creds_file: str | None = None
     nats_stream: str = "CORVUS_CAPTURE"
+    # Replicas of the capture and score streams; an existing stream with fewer is updated.
+    nats_stream_replicas: int = Field(default=1, ge=1, le=5)
     nats_subject: str = "corvus.capture.v1.>"
     nats_consumer: str = "corvus-ingest"
     stream_max_age_s: int = 24 * 3600

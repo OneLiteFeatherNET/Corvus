@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any
 
 import nats
@@ -107,6 +108,7 @@ def stream_config(s: Settings) -> StreamConfig:
         max_bytes=s.stream_max_bytes,
         max_msg_size=s.stream_max_msg_size,
         duplicate_window=float(s.stream_duplicate_window_s),
+        num_replicas=s.nats_stream_replicas,
     )
 
 
@@ -120,10 +122,22 @@ def consumer_config(s: Settings) -> ConsumerConfig:
     )
 
 
+async def raise_replicas(js: Any, info: Any, wanted: int) -> None:
+    """Grow an existing stream to ``wanted`` replicas; never shrinks it (operators own that)."""
+    config = info.config
+    if (config.num_replicas or 1) >= wanted:
+        return
+    log.info("raising stream %s from %s to %s replicas", config.name, config.num_replicas, wanted)
+    await js.update_stream(replace(config, num_replicas=wanted))
+
+
 async def ensure_stream(js: Any, s: Settings) -> None:
-    """Create the stream if missing. An existing stream is left alone (operators own its limits)."""
+    """Create the stream if missing. An existing stream keeps its limits (operators own them);
+    only its replica count is raised to ``nats_stream_replicas``."""
     try:
-        await js.stream_info(s.nats_stream)
+        info = await js.stream_info(s.nats_stream)
     except NotFoundError:
         log.info("creating stream %s", s.nats_stream)
         await js.add_stream(stream_config(s))
+    else:
+        await raise_replicas(js, info, s.nats_stream_replicas)
