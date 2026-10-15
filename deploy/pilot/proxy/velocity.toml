@@ -1,0 +1,41 @@
+# Velocity configuration for the Corvus pilot.
+config-version = "2.7"
+bind = "0.0.0.0:25577"
+motd = "<#09add3>Corvus pilot"
+show-max-players = 20
+# Real Mojang authentication: chat signing stays genuine.
+online-mode = true
+force-key-authentication = true
+prevent-client-proxy-connections = false
+# The secret is read from the VELOCITY_FORWARDING_SECRET environment variable.
+player-info-forwarding-mode = "modern"
+forwarding-secret-file = "forwarding.secret"
+announce-forge = false
+kick-existing-players = false
+ping-passthrough = "DISABLED"
+
+[servers]
+lobby = "lobby:25565"
+pvp = "pvp:25565"
+try = ["lobby"]
+
+[forced-hosts]
+
+[advanced]
+compression-threshold = 256
+compression-level = -1
+login-ratelimit = 3000
+connection-timeout = 5000
+read-timeout = 30000
+haproxy-protocol = false
+tcp-fast-open = false
+bungee-plugin-message-channel = true
+show-ping-requests = false
+failover-on-unexpected-server-disconnect = true
+announce-proxy-commands = true
+log-command-executions = false
+log-player-connections = true
+accepts-transfers = false
+
+[query]
+enabled = false

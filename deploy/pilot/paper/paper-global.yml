@@ -1,0 +1,6 @@
+# Synced into /data/config/paper-global.yml; ${CFG_*} is replaced from the environment.
+proxies:
+  velocity:
+    enabled: true
+    online-mode: true
+    secret: "${CFG_VELOCITY_FORWARDING_SECRET}"
