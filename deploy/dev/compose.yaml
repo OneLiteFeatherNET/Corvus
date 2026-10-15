@@ -1,0 +1,145 @@
+# Local development stack for the Corvus ingest service. See docs/how-to/run-ingest-locally.md.
+#   cp .env.example .env   (fill in the generated values; credentials are read from .env)
+#   docker compose up --build
+
+x-ingest-env: &ingest-env
+  CORVUS_NATS_URL: nats://nats:4222
+  # The password comes from PGPASSWORD (libpq/psycopg), set in .env.
+  CORVUS_PG_DSN: postgresql://corvus@postgres:5432/corvus
+  CORVUS_S3_ENDPOINT_URL: http://s3:9000
+  CORVUS_S3_BUCKET: corvus-lake
+
+services:
+  nats:
+    image: nats:2.11.8-alpine
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports:
+      - "127.0.0.1:4222:4222"
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  # S3-compatible object store. MinIO no longer publishes container images, so the dev stack uses RustFS.
+  s3:
+    image: rustfs/rustfs:1.0.1
+    env_file: .env
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - s3-data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  # Creates the bucket; retries until the object store accepts requests.
+  s3-init:
+    image: amazon/aws-cli:2.27.50
+    env_file: .env
+    depends_on:
+      - s3
+    environment:
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        export AWS_ACCESS_KEY_ID="$$CORVUS_S3_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$$CORVUS_S3_SECRET_KEY"
+        for i in $$(seq 1 30); do
+          aws --endpoint-url http://s3:9000 s3api head-bucket --bucket corvus-lake 2>/dev/null && exit 0
+          aws --endpoint-url http://s3:9000 s3api create-bucket --bucket corvus-lake 2>/dev/null && exit 0
+          sleep 2
+        done
+        exit 1
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  postgres:
+    image: postgres:17.6-alpine
+    env_file: .env
+    environment:
+      POSTGRES_USER: corvus
+      POSTGRES_DB: corvus
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U corvus -d corvus"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  migrate:
+    build:
+      context: ../..
+      dockerfile: services/Dockerfile
+    image: corvus-services:dev
+    command: ["corvus-migrate"]
+    env_file: .env
+    environment:
+      <<: *ingest-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  ingest:
+    build:
+      context: ../..
+      dockerfile: services/Dockerfile
+    image: corvus-services:dev
+    command: ["corvus-ingest"]
+    env_file: .env
+    environment:
+      <<: *ingest-env
+      CORVUS_WORKERS: "2"
+    ports:
+      - "127.0.0.1:9464:9464"
+    depends_on:
+      nats:
+        condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+
+volumes:
+  nats-data:
+  s3-data:
+  postgres-data:
