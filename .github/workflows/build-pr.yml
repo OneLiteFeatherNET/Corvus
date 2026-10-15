@@ -1,0 +1,22 @@
+name: Build PR
+
+on: [pull_request]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  build:
+    # Reuse the OneLiteFeather org build workflow. The task runs the full build
+    # (including :plugin:test) and the shadowJar. Corvus is a Velocity plugin
+    # without OS-specific code, so one Linux runner is enough.
+    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-build-pr.yml@v2.9.0
+    with:
+      java-version: "25"
+      java-distribution: "temurin"
+      gradle-task: "build test shadowJar"
+      run-tests: true
+      runs-on: '["ubuntu-latest"]'
+    secrets: inherit

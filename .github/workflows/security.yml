@@ -1,0 +1,27 @@
+name: Security
+
+# Trivy vulnerability scan, report-only: findings land in code scanning
+# instead of turning CI red on day one.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "14 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  trivy:
+    name: Trivy scan
+    uses: OneLiteFeatherNET/workflows/.github/workflows/security-scan.yml@v2.9.0
+    with:
+      scan-type: "fs"
+      scanners: "vuln,secret"
+      severity: "CRITICAL,HIGH"
+      fail-on-findings: false
+      upload-sarif: true
+    secrets: inherit
