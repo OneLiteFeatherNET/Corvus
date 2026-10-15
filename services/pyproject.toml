@@ -1,7 +1,7 @@
 [project]
 name = "corvus-services"
 version = "0.1.0"
-description = "Corvus backend services: capture ingest, catalog migrations, lake housekeeping"
+description = "Corvus backend services: capture ingest, online scoring, catalog migrations, lake housekeeping"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -18,13 +18,20 @@ dependencies = [
     "pyjwt[crypto]>=2.15.1",
     "httpx>=0.28.1",
     "kubernetes>=37.0.1",
+    # Featurizer, feature spec and model-input adapter for online scoring; only the `serve` extra
+    # (onnxruntime), so torch and scikit-learn never reach the service image.
+    "corvus-ml[serve]",
 ]
+
+[tool.uv.sources]
+corvus-ml = { path = "../ml" }
 
 [project.scripts]
 corvus-ingest = "corvus_services.ingest:main"
 corvus-migrate = "corvus_services.migrate:main"
 corvus-housekeeping = "corvus_services.housekeeping:main"
 corvus-api = "corvus_services.api.app:main"
+corvus-score = "corvus_services.scoring.main:main"
 
 [dependency-groups]
 dev = [
@@ -70,6 +77,8 @@ select = ["E", "F", "I", "UP", "B", "SIM", "C4", "PT"]
 "src/corvus_services/api/**" = ["E501"]
 # Compact guard-and-assert style and raw SQL seeds in the database tests.
 "tests/api/test_api_integration.py" = ["E501", "PT012", "PT018"]
+# Docstrings and compact fixtures of the scoring tests.
+"tests/scoring/**" = ["E501"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI dependency declarations in parameter defaults.
@@ -85,6 +94,14 @@ strict = true
 exclude = ["src/corvus_services/_gen"]
 
 [[tool.mypy.overrides]]
-module = ["nats.*", "pyarrow.*", "psycopg_pool.*", "google.protobuf.*", "kubernetes.*"]
+module = [
+    "nats.*",
+    "pyarrow.*",
+    "psycopg_pool.*",
+    "google.protobuf.*",
+    "kubernetes.*",
+    "corvus_ml.*",
+    "onnxruntime.*",
+]
 ignore_missing_imports = true
 follow_imports = "skip"

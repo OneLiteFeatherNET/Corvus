@@ -5,9 +5,12 @@ FROM ghcr.io/astral-sh/uv:0.12.24 AS uv
 FROM python:3.13-slim AS build
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
+# corvus-ml is a uv path dependency (../ml, serve extra only: onnxruntime, no torch/scikit-learn).
+COPY ml/pyproject.toml ml/README.md /build/ml/
+COPY ml/src /build/ml/src
 WORKDIR /build/services
 COPY services/pyproject.toml services/uv.lock services/README.md ./
-# Dependencies plus protoc (proto group) first, for layer caching.
+# Dependencies (incl. corvus-ml) plus protoc (proto group) first, for layer caching.
 RUN uv sync --frozen --no-dev --group proto --no-install-project
 COPY proto /build/proto
 COPY services/scripts scripts
@@ -25,5 +28,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
     CORVUS_MIGRATIONS_DIR=/app/migrations \
     PYTHONUNBUFFERED=1
 USER 10001:10001
+# corvus-ingest and corvus-score export metrics and /healthz on 9464; corvus-score also needs a
+# writable model cache (CORVUS_SCORE_MODELS_DIR, default /tmp/corvus-score/models).
 EXPOSE 9464
 CMD ["corvus-ingest"]
