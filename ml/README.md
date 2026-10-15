@@ -5,8 +5,9 @@ harness.
 
 The core install needs only numpy, pyarrow and protobuf; grpcio-tools (protoc) is a build-time
 tool in the dependency group `proto` and not installed at runtime.
-torch, scikit-learn, onnx and skl2onnx live in the optional extra `eval`; ONNX Runtime is in `eval`
-and in `serve`. In this checkout `uv sync` installs the `eval` extra through the `dev` group, so
+torch, scikit-learn, onnx and skl2onnx (plus tokenizers, optuna, cryptography and psycopg for the
+raw-byte models) live in the optional extra `eval`; ONNX Runtime is in `eval` and in `serve`
+(`serve` also has `tokenizers`). In this checkout `uv sync` installs the `eval` extra through the `dev` group, so
 tests and CI (`uv sync --locked`) cover everything. Outside the repo:
 
 ```
@@ -26,6 +27,9 @@ uv run corvus-job <build_features|evaluate|train>   # what the control plane sta
 uv run pytest
 uv run ruff check . && uv run ruff format --check .
 ```
+
+Models on tokenised raw packet bytes (`raw_hier_classifier`, `raw_hier_anomaly`, `corvus-eval tune`):
+`../docs/reference/raw-byte-tokenizer.md`.
 
 `corvus-job` reads the job contract from the environment (`CORVUS_JOB_*`, `CORVUS_API_*`,
 `CORVUS_S3_*`) and reports its status to the control plane; see

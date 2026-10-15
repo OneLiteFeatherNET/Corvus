@@ -51,6 +51,9 @@ class JobEnv:
     scratch: Path
     secrets: Secrets
     clock: Callable[[], datetime] = lambda: datetime.now(UTC)
+    # Source of the player DEKs for raw-byte jobs (``corvus_ml.raw.keys.DekProvider``); None =
+    # read ``corvus.player_keys`` with CORVUS_PG_DSN and unwrap with CORVUS_KEK.
+    deks: Any = None
 
 
 @dataclass

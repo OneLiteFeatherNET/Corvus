@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from corvus_ml.eval.config import EvalConfig
@@ -21,6 +23,15 @@ def _parser() -> argparse.ArgumentParser:
     r = sub.add_parser("run", help="evaluate the configured candidates")
     r.add_argument("--config", required=True, type=Path, help="eval.toml")
     r.add_argument("--out", required=True, type=Path, help="report directory")
+    t = sub.add_parser(
+        "tune", help="Optuna search for the tunable candidates, then evaluate with the best"
+    )
+    t.add_argument("--config", required=True, type=Path, help="eval.toml (optional [tune] table)")
+    t.add_argument("--out", required=True, type=Path, help="report directory")
+    t.add_argument("--trials", type=int, default=None, help="overrides tune.trials")
+    q = sub.add_parser("pretrain", help="masked pretraining of a raw-byte model, saves checkpoints")
+    q.add_argument("--config", required=True, type=Path, help="eval.toml with a [raw] table")
+    q.add_argument("--out", required=True, type=Path, help="directory for pretrain/<context>.pt")
     return p
 
 
@@ -43,7 +54,14 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         raise
     cfg = EvalConfig.load(args.config)
-    report = run(cfg, args.out)
+    if args.command == "pretrain":
+        from corvus_ml.eval.runner import pretrain_checkpoints
+
+        print(json.dumps(pretrain_checkpoints(cfg, args.out), indent=2))
+        return 0
+    if args.command == "tune" and args.trials is not None:
+        cfg.tune = replace(cfg.tune, trials=args.trials)
+    report = run(cfg, args.out, tune=args.command == "tune")
     js, md = write_report(report, args.out)
     print(md.read_text())
     print(f"wrote {js} and {md}")

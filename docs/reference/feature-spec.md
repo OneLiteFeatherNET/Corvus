@@ -62,6 +62,16 @@ its input. Normalisation (mean and std) is inside the ONNX graph and is not part
 | `model_inputs.agg.columns` | Column order of the aggregate input `(n, len(columns))`, float32. Nullable aggregates are 0 when null and followed by a `has_<name>` indicator (1 = present). `n_frames` is the window's frame count. |
 | `model_inputs.seq` | Token input `(n, length, len(columns) + 1)`, float32, input name `x`. The transformed token columns are placed from position 0, zero padding follows, frames beyond `length` are cut, and the last channel is the mask (1 = real frame). Transforms: `id`, `slog` = `sign(x) * ln(1 + abs(x))`, `scale8` = `x / 8`. |
 
+### Kind `raw_bytes` (version 2)
+
+A model on tokenised raw packet bytes ([raw-byte-tokenizer.md](raw-byte-tokenizer.md)) has
+`"version": 2` and a `raw_bytes` object inside `model_inputs`: the hash and size of `tokenizer.json`
+(which must sit next to the spec), the token layout, the packet row width and the window configuration.
+The aggregate and sequence sections are still written but unused. Because of the version, a runtime
+that only knows version 1 refuses such a model (`FeatureSpecMismatch`, version) instead of feeding it
+the wrong tensor. `FeatureSpec.load(path, require_tokenizer=True)` additionally compares the SHA-256 of
+`tokenizer.json` with the recorded one.
+
 ## 3. Validation
 
 `FeatureSpec.load(path)` parses the file and compares it with the spec of the running code:

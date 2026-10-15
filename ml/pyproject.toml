@@ -18,10 +18,18 @@ eval = [
     "onnx>=1.19",
     "onnxruntime>=1.22",
     "skl2onnx>=1.19",
+    # Raw-byte models (ADR-CORV-0008): BPE tokenizer, hyper-parameter search, payload decryption
+    # and the read-only DEK lookup in the catalog.
+    "tokenizers>=0.22",
+    "optuna>=4.5",
+    "cryptography>=50.0",
+    "psycopg[binary]>=3.3",
 ]
 # Online scoring: ONNX Runtime on top of the core install (featurizer + model-input adapter).
 serve = [
     "onnxruntime>=1.22",
+    # Raw-byte models: the scorer tokenizes with the same tokenizer.json as the training.
+    "tokenizers>=0.22",
 ]
 
 [project.scripts]

@@ -31,19 +31,28 @@ def register(cls: type[Candidate]) -> type[Candidate]:
 class Candidate(ABC):
     name: ClassVar[str]
     supervised: ClassVar[bool]
-    input_kind: ClassVar[Literal["agg", "seq"]]
+    input_kind: ClassVar[Literal["agg", "seq", "raw_bytes"]]
     # True for torch models (they get the int8 dynamic-quantization variant).
     quantizable: ClassVar[bool] = False
     # How the raw score is read from the exported graph (see corvus_ml.calibration_onnx).
     onnx_raw: ClassVar[RawOutput] = "first"
     # True if the raw score is already a probability in [0, 1].
     bounded: ClassVar[bool] = False
+    # Candidates that also learn from the (unlabelled) windows of the training players get them as
+    # ``pool`` in ``fit`` (masked pretraining).
+    pretrains: ClassVar[bool] = False
+    # Optuna support: ``fit`` reports the validation loss per epoch to ``on_epoch``.
+    tunable: ClassVar[bool] = False
+    # Limit of test windows used for the ONNX parity check (huge inputs); None = all.
+    parity_rows: ClassVar[int | None] = None
 
     def __init__(self, seed: int = 0, threads: int = 1, **params):
         self.seed = seed
         self.threads = threads
         self.params = params
         self.calibration: Calibration | None = None
+        # Set by the tuner: called as ``on_epoch(epoch, val_loss)``; may raise to prune the run.
+        self.on_epoch = None
 
     def calibrated_score(self, data: EvalData) -> np.ndarray:
         """The score a deployed model outputs: ``score`` mapped through the calibration."""

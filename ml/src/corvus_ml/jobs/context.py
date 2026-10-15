@@ -110,6 +110,9 @@ class Secrets:
             environ.get("CORVUS_API_TOKEN"),
             environ.get("CORVUS_S3_SECRET_KEY"),
             environ.get("CORVUS_S3_ACCESS_KEY"),
+            environ.get("CORVUS_KEK"),
+            environ.get("CORVUS_PG_DSN"),
+            environ.get("PGPASSWORD"),
         )
 
     def scrub(self, text: str, limit: int = MAX_MESSAGE) -> str:

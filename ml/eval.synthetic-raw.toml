@@ -1,0 +1,72 @@
+# Smoke run of the raw-byte models on SYNTHETIC packets: proves the pipeline (tokenizer, windows,
+# masked pretraining, hierarchical model, calibration, ONNX export) runs end to end and says
+# nothing about real performance. Usage (from ml/):
+#   uv run corvus-eval run  --config eval.synthetic-raw.toml --out reports/synthetic-raw
+#   uv run corvus-eval tune --config eval.synthetic-raw.toml --out reports/synthetic-raw-tuned
+# See docs/reference/raw-byte-tokenizer.md and docs/how-to/evaluate-models.md.
+name = "synthetic-raw-smoke"
+
+[run]
+seed = 7
+threads = 2
+unlabelled = "exclude"
+fpr_targets = [0.01, 0.001]
+
+[raw]
+window_seconds = 10.0
+stride_seconds = 5.0
+max_packets = 160
+min_packets = 16
+overflow = "recent"
+
+[raw.synthetic]
+n_legit = 30
+n_cheat = 18
+n_unlabelled = 4
+sessions_per_player = 2
+seconds_per_session = 40.0
+contexts = ["pvp"]
+cheat_strength = 0.8
+
+[raw.tokenizer]
+vocab_size = 1024
+min_frequency = 2
+
+[candidates.raw_hier_classifier]
+epochs = 6
+batch_size = 16
+lr = "auto"
+d_model = 48
+layers = 2
+heads = 4
+local_dim = 24
+local_heads = 2
+dropout = 0.1
+pretrain_epochs = 3
+
+[candidates.raw_hier_anomaly]
+epochs = 14
+batch_size = 16
+lr = 0.002
+d_model = 48
+layers = 2
+heads = 4
+local_dim = 24
+local_heads = 2
+
+[tune]
+trials = 4
+tune_windows = true
+[tune.space]              # narrowed so that the smoke search stays small
+window_seconds = [6.0, 10.0]
+max_packets = [96, 160]
+d_model = [32, 48]
+layers = [1, 2]
+
+[benchmark]
+warmup = 3
+iters = 20
+batch = 8
+isolated = false
+quantize = false
+raw_packets = [128, 512]

@@ -89,6 +89,7 @@ class Cnn1d(_Normalised):
 
 class TorchCandidate(Candidate):
     quantizable = True
+    tunable = True
     input_kind = "seq"
 
     @abstractmethod
@@ -122,8 +123,10 @@ class TorchCandidate(Candidate):
             epochs=int(self.params.get("epochs", 30)),
             batch_size=batch,
             lr=self.lr_used,
+            weight_decay=float(self.params.get("weight_decay", 0.01)),
             patience=int(self.params.get("patience", 5)),
             seed=self.seed,
+            on_epoch=self.on_epoch,
         )
 
     def score(self, data: EvalData) -> np.ndarray:

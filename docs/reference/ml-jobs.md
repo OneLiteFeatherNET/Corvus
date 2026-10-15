@@ -3,6 +3,8 @@
 The feature, evaluation and training pipelines run as jobs started by the control plane
 ([control-plane-api.md](control-plane-api.md), section Jobs). The image `corvus-ml` (`ml/Dockerfile`)
 has the entry point `corvus-job <build_features|evaluate|train>`. Code: `ml/src/corvus_ml/jobs/`.
+Jobs on raw packet bytes (ADR-CORV-0008) are described in [raw-byte-tokenizer.md](raw-byte-tokenizer.md);
+this page lists their parameters and extra requirements.
 
 ## 1. Contract with the runner
 
@@ -14,6 +16,8 @@ has the entry point `corvus-job <build_features|evaluate|train>`. Code: `ml/src/
 | `CORVUS_API_URL`, `CORVUS_API_TOKEN` | API base URL and bearer token; every request carries `Authorization: Bearer <token>` and `X-Corvus-Job-Id` |
 | `CORVUS_S3_ENDPOINT_URL`, `CORVUS_S3_ACCESS_KEY`, `CORVUS_S3_SECRET_KEY`, `CORVUS_S3_BUCKET` (default `corvus-lake`), `CORVUS_S3_REGION` (default `us-east-1`) | the lake bucket, path-style addressing, same names as the services |
 | `CORVUS_JOB_SCRATCH_DIR` | optional directory for temporary files (default: the system temp dir; features can be large, mount an `emptyDir`) |
+| `CORVUS_PG_DSN`, `PGPASSWORD`, `CORVUS_KEK` | **raw-byte jobs only** (`build_features` with `kind = "raw_bytes"` or `"train_tokenizer"`): read-only access to `corvus.player_keys` and the KEK that unwraps the DEKs. The role needs `SELECT` on `corvus.player_keys`; the values are scrubbed from job messages |
+| `CORVUS_OPTUNA_STORAGE` | optional Optuna storage URL for `params.tune` (default: a SQLite file in the job's scratch dir) |
 
 Exit code 0: succeeded. 1: the job failed (reported as `failed`). 2: the contract was violated or the
 API could not be told about the state.
@@ -32,8 +36,9 @@ API calls beyond `PATCH /jobs/{id}`:
 | `POST /api/v1/models` | registering a trained model (not retried) |
 
 **Shape assumed for the sessions endpoint.** Each item has `session_id` (hex, 16 bytes), `pseudonym`
-(hex, 32 bytes), `started_at` (ISO 8601), `segments` (`[{"segment": 0, "game_context": "pvp"}]`) and
-optionally `labels` (`[{"label": "cheat", "source": "honeypot", "confidence": 1.0, "valid_from": null,
+(hex, 32 bytes), `started_at` (ISO 8601), `segments` (`[{"segment": 0, "game_context": "pvp"}]`),
+optionally `client_protocol` (integer, `sessions.client_protocol`; used by the raw-byte build for the
+protocol token, a missing value gives `[PROTO_OTHER]` and is counted) and optionally `labels` (`[{"label": "cheat", "source": "honeypot", "confidence": 1.0, "valid_from": null,
 "valid_to": null}]`) and `erased`. Sessions flagged `erased` are skipped by the job even if the API
 returned them, and sessions that are not in the manifest's `sessions` list are ignored. A missing
 pseudonym keeps the session out of evaluation (windows without a pseudonym are dropped there).
@@ -55,7 +60,12 @@ models/<name>/<version>/model_card.json
 models/<name>/<version>/evaluation.json     the candidate's entry of report.json
 ```
 
-A new `build_features` job replaces `features/<snapshot_id>/` completely. The windows and tokens
+A raw-byte build writes `features/<snapshot_id>/raw/` instead (tokenizer, feature spec, packet table,
+sessions, labels, `build.json`; section 4 of [raw-byte-tokenizer.md](raw-byte-tokenizer.md)); a
+`train_tokenizer` job writes `tokenizers/<snapshot_id>/<job_id>/{tokenizer.json,feature_spec.json}`.
+Raw-byte models additionally upload `models/<name>/<version>/tokenizer.json`.
+
+A new `build_features` job replaces `features/<snapshot_id>/` completely (the raw-byte build only its `raw/` prefix). The windows and tokens
 tables are those of [features.md](features.md); the same code builds them offline and online.
 
 ## 3. Jobs and parameters
@@ -71,6 +81,18 @@ so memory stays bounded; the number of worker processes is at most the CPU limit
 | `group_size` | 4 | sessions per task (memory knob) |
 | `workers` | cgroup limit | upper bound; never above the cgroup limit |
 
+**`build_features` with `kind = "raw_bytes"`** reads the `events` and `raw` files of the snapshot, decrypts
+the payloads, trains the tokenizer (unless `tokenizer_prefix` points at a trained one) and tokenizes all
+sessions. Sessions whose player has no DEK (erased) are skipped; the result counts them
+(`sessions_crypto_shredded`). `raw` files come from `manifest.files.raw`, else from the `lake/raw/date=...`
+partitions of the sessions' start dates. Parameters (all optional): `kind` (`aggregate` default, `raw_bytes`,
+`train_tokenizer`), `game_context(s)`, `group_size` (4), `vocab_size` (4096), `min_frequency` (2),
+`train_bytes_per_payload` (256), `max_train_payloads`, `max_train_bytes`, `tokenizer_sessions` (2000),
+`tokenizer_prefix`, `dt_buckets`, `dt_min_ms`, `dt_max_ms`, `protocols`, `packet_type_max`,
+`max_tokens_per_packet` (48), `proto_mode` and the window defaults recorded in the spec (`window_seconds`,
+`stride_seconds`, `max_packets`, `overflow`, `min_packets`, `macro_window_seconds`). The build runs in one
+process (decryption and tokenization are not parallelised).
+
 **`evaluate`** needs a complete feature build and runs `corvus-eval` on it ([evaluate-models.md](../how-to/evaluate-models.md));
 it uploads the reports and registers nothing. **`train`** does the same, then for each game context
 takes the best usable candidate (highest `select_by` on the test split, ties by lower p99 latency;
@@ -78,13 +100,15 @@ the ONNX parity check must pass), uploads its artefacts and registers the model.
 
 | Param | Default | Meaning |
 |---|---|---|
-| `candidates` | `["isolation_forest", "gradient_boosting"]` | list of names or `{name: {hyperparameters}}` |
+| `candidates` | `["isolation_forest", "gradient_boosting"]` | list of names or `{name: {hyperparameters}}`; `raw_hier_classifier` / `raw_hier_anomaly` need the raw build and cannot be mixed with the others |
 | `game_context` / `game_contexts` | all | contexts to evaluate |
 | `unlabelled` | `exclude` | or `assume_legit` |
 | `label_sources`, `min_confidence` | all, 0 | which labels count (for example `["honeypot", "staff_verdict"]`) |
 | `seed`, `threads`, `seq_len`, `split`, `fpr_targets`, `learning_curve`, `benchmark` | as `eval.toml` | `threads` at most 8 |
 | `calibration` | `auto` | `isotonic`, `platt`, `ecdf`; `none` is refused |
 | `select_by` | `recall@fpr0.1pct` | metric that picks the candidate |
+| `tune` | off | `true` or an object (`trials`, `timeout_s`, `storage`, `study_name`, `tune_windows`, `space`): an Optuna study per tunable candidate before the evaluation, see section 8 of [raw-byte-tokenizer.md](raw-byte-tokenizer.md). The API has no `tune` job type, so a search is an `evaluate` or `train` job with this parameter; the result lists `best_params` per candidate |
+| `window_seconds`, `stride_seconds`, `max_packets`, `overflow`, `min_packets`, `macro_window_seconds`, `max_windows` | from the build | raw-byte candidates only: override the window configuration of the raw build (`max_windows` 200 000 caps the dataset); refused for other candidates |
 | `model_name`, `version`, `domain` (`train`) | candidate name, `<snapshot8>-<job8>`, `general` | registry fields; the registered name is `<model_name>-<game_context>` |
 
 ## 4. Output semantics and calibration

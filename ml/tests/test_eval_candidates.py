@@ -45,8 +45,10 @@ def fitted(request, dataset, tmp_path_factory):
     return cand, data.take(split.test), tmp_path_factory.mktemp(request.param)
 
 
-def test_registry_holds_the_four_baseline_candidates():
-    assert set(candidates.REGISTRY) == set(PARAMS)
+def test_registry_holds_the_four_baseline_candidates_and_the_raw_byte_ones():
+    raw = {n for n, c in candidates.REGISTRY.items() if c.input_kind == "raw_bytes"}
+    assert set(candidates.REGISTRY) - raw == set(PARAMS)
+    assert raw == {"raw_hier_classifier", "raw_hier_anomaly"}
 
 
 def test_candidate_separates_synthetic_cheaters_better_than_chance(fitted):

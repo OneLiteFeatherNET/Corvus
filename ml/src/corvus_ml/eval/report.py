@@ -8,8 +8,8 @@ from pathlib import Path
 
 SYNTHETIC_BANNER = (
     "> **SYNTHETIC DATA.** These numbers come from the toy generator in "
-    "`corvus_ml.eval.synthetic`. They show that the pipeline runs end to end and say nothing "
-    "about performance on real players."
+    "`corvus_ml.eval.synthetic` (raw packets: `corvus_ml.raw.synthetic`). They show that the "
+    "pipeline runs end to end and say nothing about performance on real players."
 )
 
 
@@ -50,6 +50,22 @@ def to_markdown(report: dict) -> str:
         "per player.",
         "",
     ]
+    if "raw_bytes" in report:
+        raw = report["raw_bytes"]
+        w = raw["window"]
+        lines += [
+            f"Raw-byte input: tokenizer `{raw['tokenizer_sha256'][:12]}` "
+            f"(vocab {raw['vocab_size']}), windows of {w['window_seconds']:g} s every "
+            f"{w['stride_seconds']:g} s, at most "
+            f"{w['max_packets']} packets ({w['overflow']}), "
+            f"{raw['packet']['max_tokens_per_packet']} tokens per packet"
+            + (
+                f", macro windows of {w['macro_window_seconds']:g} s."
+                if w["macro_window_seconds"]
+                else "."
+            ),
+            "",
+        ]
     for ctx, info in report["contexts"].items():
         lines += [f"## game_context `{ctx}`", ""]
         sp = info["split"]
@@ -99,10 +115,53 @@ def to_markdown(report: dict) -> str:
         ]
         if skipped:
             lines += ["Skipped:", *skipped, ""]
+        lines += _tune_section(info)
+        lines += _sizes_section(info)
         lines += _int8_section(info, fprs)
         lines += _confusion_section(info, fprs)
         lines += _curve_section(info, fprs)
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _tune_section(info: dict) -> list[str]:
+    studies = info.get("tune") or {}
+    if not studies:
+        return []
+    lines = ["### Hyper-parameter search (Optuna)", ""]
+    for name, t in studies.items():
+        best = ", ".join(
+            f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}"
+            for k, v in t["best_params"].items()
+        )
+        lines += [
+            f"`{name}`: {t['n_trials']} trials ({t['n_complete']} complete, "
+            f"{t['n_pruned']} pruned), {t['sampler']}, {t['pruner']}, storage `{t['storage']}`. "
+            f"Objective: {t['direction']}; best {_f(t['best_value'], 4)} "
+            f"(trial {t['best_trial']}).",
+            "",
+            f"Best parameters: {best or 'none (no complete trial)'}",
+            "",
+        ]
+    return lines
+
+
+def _sizes_section(info: dict) -> list[str]:
+    rows = []
+    for name, c in info["candidates"].items():
+        for count, b in (c.get("bench_sizes") or {}).items():
+            rows.append(
+                [
+                    name,
+                    count,
+                    _f(b["latency_p50_ms"], 2),
+                    _f(b["latency_p99_ms"], 2),
+                    f"{b['threads']}",
+                ]
+            )
+    if not rows:
+        return []
+    head = ["candidate", "packets", "p50 ms", "p99 ms", "threads"]
+    return ["### CPU latency per window by packet count (batch of 1)", "", *_table(head, rows), ""]
 
 
 def _int8_section(info: dict, fprs: list[float]) -> list[str]:

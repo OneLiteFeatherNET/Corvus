@@ -33,6 +33,10 @@ class EvalData:
     agg: np.ndarray  # float32 (n, len(AGG_NAMES))
     seq: np.ndarray | None = None  # float32 (n, L, N_SEQ_FEATURES)
     meta: dict = field(default_factory=dict)
+    # Raw-byte windows (ADR-CORV-0008): token ids int16 (n, macro, packets, tokens) and packet
+    # times float32 (n, macro, packets). ``agg`` is then an (n, 0) array.
+    raw_ids: np.ndarray | None = None
+    raw_time: np.ndarray | None = None
 
     def __len__(self) -> int:
         return len(self.label)
@@ -50,6 +54,8 @@ class EvalData:
             self.agg[idx],
             None if self.seq is None else self.seq[idx],
             self.meta,
+            None if self.raw_ids is None else self.raw_ids[idx],
+            None if self.raw_time is None else self.raw_time[idx],
         )
 
     def group_codes(self) -> np.ndarray:

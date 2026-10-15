@@ -5,9 +5,14 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
+from typing import Any
 
 from corvus_ml.calibration import METHODS as CALIBRATION_METHODS
 from corvus_ml.eval.synthetic import SyntheticConfig
+from corvus_ml.raw.layout import TokenLayout
+from corvus_ml.raw.spec import PacketConfig, WindowConfig
+from corvus_ml.raw.synthetic import SyntheticRawConfig
+from corvus_ml.raw.tokenizer import TokenizerConfig
 
 UNLABELLED_MODES = ("exclude", "assume_legit")
 
@@ -20,6 +25,36 @@ class BenchConfig:
     batch: int = 64
     isolated: bool = True  # fresh process per model so peak RSS belongs to that model
     quantize: bool = True  # int8 dynamic quantisation variant of the torch models
+    # Raw-byte models: extra single-window latencies at these packet counts (full-width rows).
+    raw_packets: tuple[int, ...] = ()
+
+
+@dataclass
+class RawEvalConfig:
+    """Raw-byte input (``[raw]``): a packet table below ``dir`` or a synthetic source."""
+
+    dir: Path | None = None  # features/<snapshot>/raw: packets/, sessions, labels, spec, tokenizer
+    window_overrides: dict[str, Any] = field(default_factory=dict)
+    synthetic: SyntheticRawConfig | None = None
+    tokenizer: TokenizerConfig = field(default_factory=lambda: TokenizerConfig(vocab_size=1024))
+    packet: PacketConfig = field(default_factory=PacketConfig)
+    max_windows: int | None = None  # random subsample of the windows (memory bound)
+
+    def window(self, base: WindowConfig | None = None) -> WindowConfig:
+        merged = {**(base or WindowConfig()).__dict__, **self.window_overrides}
+        return WindowConfig(**merged)
+
+
+@dataclass
+class TuneConfig:
+    """Optuna study (``[tune]``); see docs/how-to/evaluate-models.md."""
+
+    trials: int = 20
+    timeout_s: float | None = None
+    storage: str = ""  # "" = sqlite file in the output dir (or CORVUS_OPTUNA_STORAGE), "memory"
+    study_name: str = "corvus"
+    tune_windows: bool = True  # raw-byte models: window_seconds and max_packets are searched too
+    space: dict[str, Any] = field(default_factory=dict)  # per parameter [low, high] or a list
 
 
 @dataclass
@@ -43,6 +78,8 @@ class EvalConfig:
     synthetic: SyntheticConfig | None = None
     candidates: dict[str, dict] = field(default_factory=dict)
     bench: BenchConfig = field(default_factory=BenchConfig)
+    raw: RawEvalConfig | None = None
+    tune: TuneConfig = field(default_factory=TuneConfig)
 
     @classmethod
     def from_dict(cls, raw: dict, base: Path = Path()) -> EvalConfig:
@@ -85,16 +122,81 @@ class EvalConfig:
                 syn["contexts"] = tuple(syn["contexts"])
             syn.setdefault("seed", cfg.seed)
             cfg.synthetic = SyntheticConfig(**syn)
+        elif "raw" in raw:
+            cfg.raw = _raw_config(dict(raw["raw"]), base)
         elif not (cfg.windows and cfg.sessions):
-            raise ValueError("config needs [data] windows + sessions, or a [synthetic] table")
+            raise ValueError(
+                "config needs [data] windows + sessions, a [synthetic] table or a [raw] table"
+            )
         cfg.candidates = {k: dict(v) for k, v in raw.get("candidates", {}).items()}
         if not cfg.candidates:
             raise ValueError("config needs at least one [candidates.<name>] table")
         bench = dict(raw.get("benchmark", {}))
+        if "raw_packets" in bench:
+            bench["raw_packets"] = tuple(int(v) for v in bench["raw_packets"])
         cfg.bench = BenchConfig(**bench)
+        if "tune" in raw:
+            tune = dict(raw["tune"])
+            extra = set(tune) - {f.name for f in fields(TuneConfig)}
+            if extra:
+                raise ValueError(f"unknown [tune] keys: {sorted(extra)}")
+            cfg.tune = TuneConfig(**tune)
+        _check_candidate_kinds(cfg)
         return cfg
 
     @classmethod
     def load(cls, path: Path) -> EvalConfig:
         path = Path(path)
         return cls.from_dict(tomllib.loads(path.read_text()), path.parent)
+
+
+_WINDOW_KEYS = {f.name for f in fields(WindowConfig)}
+
+
+def _raw_config(raw: dict, base: Path) -> RawEvalConfig:
+    out = RawEvalConfig()
+    if "dir" in raw:
+        out.dir = (base / raw.pop("dir")).resolve()
+    if "synthetic" in raw:
+        syn = dict(raw.pop("synthetic"))
+        for key in ("contexts", "protocols"):
+            if key in syn:
+                syn[key] = tuple(syn[key])
+        out.synthetic = SyntheticRawConfig(**syn)
+    if "tokenizer" in raw:
+        tok = dict(raw.pop("tokenizer"))
+        if "layout" in tok:
+            lay = dict(tok.pop("layout"))
+            if "protocols" in lay:
+                lay["protocols"] = tuple(int(v) for v in lay["protocols"])
+            tok["layout"] = TokenLayout(**lay)
+        out.tokenizer = TokenizerConfig(**{"vocab_size": 1024, **tok})
+    if "packet" in raw:
+        out.packet = PacketConfig(**raw.pop("packet"))
+    if "max_windows" in raw:
+        out.max_windows = int(raw.pop("max_windows"))
+    unknown = set(raw) - _WINDOW_KEYS
+    if unknown:
+        raise ValueError(f"unknown [raw] keys: {sorted(unknown)}")
+    out.window_overrides = dict(raw)
+    out.window()  # validates
+    if (out.dir is None) == (out.synthetic is None):
+        raise ValueError("[raw] needs exactly one of dir and [raw.synthetic]")
+    return out
+
+
+def _check_candidate_kinds(cfg: EvalConfig) -> None:
+    """Raw-byte candidates run on their own windows: they cannot share a run with the others."""
+    from corvus_ml.eval import candidates as cand_pkg
+
+    kinds = {
+        cand_pkg.REGISTRY[n].input_kind == "raw_bytes"
+        for n in cfg.candidates
+        if n in cand_pkg.REGISTRY
+    }
+    if len(kinds) > 1:
+        raise ValueError("raw-byte candidates need their own run: do not mix them with others")
+    if kinds == {True} and cfg.raw is None:
+        raise ValueError("raw-byte candidates need a [raw] table")
+    if kinds == {False} and cfg.raw is not None:
+        raise ValueError("a [raw] table needs raw-byte candidates")
