@@ -68,6 +68,8 @@ message CaptureCounters {
   uint64 dropped_privacy = 2;
   // Exceptions caught inside the listener.
   uint64 listener_errors = 3;
+  // Frames lost because the transport (e.g. NATS) rejected or timed out the publish.
+  uint64 dropped_transport = 4;
 }
 
 enum Direction {
