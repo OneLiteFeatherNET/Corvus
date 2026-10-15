@@ -34,8 +34,18 @@ def run_session(sess: ort.InferenceSession, x: np.ndarray) -> list[np.ndarray]:
 
 
 def _peak_rss_mb() -> float:
-    # ru_maxrss is KiB on Linux.
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+    """Peak resident set size of this process in MiB.
+
+    ``ru_maxrss`` survives ``exec`` and would carry the parent's peak into the benchmark child,
+    so on Linux the per-address-space high-water mark ``VmHWM`` is preferred.
+    """
+    try:
+        for line in Path("/proc/self/status").read_text().splitlines():
+            if line.startswith("VmHWM:"):
+                return int(line.split()[1]) / 1024.0
+    except OSError:
+        pass
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0  # KiB on Linux
 
 
 @dataclass
