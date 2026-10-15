@@ -1,0 +1,14 @@
+{
+  "apiBaseUrl": "/api/v1",
+  "basePath": "/",
+  "auth": {
+    "mode": "token",
+    "rolesClaim": "roles",
+    "roleMapping": {}
+  },
+  "oidc": {
+    "issuer": "",
+    "clientId": "",
+    "scopes": "openid profile"
+  }
+}

@@ -2,7 +2,7 @@
 # See docs/how-to/run-ingest-locally.md.
 #   cp .env.example .env   (fill in the generated values; credentials are read from .env)
 #   cp .env.api.example .env.api   (optional, only for the api service; holds its tokens and keys)
-#   docker compose up --build
+#   docker compose up --build   (the ui service is then served on http://127.0.0.1:8081)
 
 x-ingest-env: &ingest-env
   CORVUS_NATS_URL: nats://nats:4222
@@ -177,6 +177,30 @@ services:
         limits:
           cpus: "1.0"
           memory: 512M
+
+  # Management UI (docs/how-to/run-the-ui.md). It proxies /api/ to the api service on its own origin, so the
+  # browser needs no CORS. It holds no secrets: log in with the dev token from .env.api (CORVUS_API_DEV_TOKEN).
+  ui:
+    build:
+      context: ../..
+      dockerfile: ui/Dockerfile
+    image: corvus-ui:dev
+    environment:
+      CORVUS_UI_BASE_PATH: /
+      CORVUS_UI_API_UPSTREAM: http://api:8080
+    volumes:
+      - ./ui-config.json:/usr/share/nginx/html/config.json:ro
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
 
 volumes:
   nats-data:
