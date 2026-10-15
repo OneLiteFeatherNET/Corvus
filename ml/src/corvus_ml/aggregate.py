@@ -16,7 +16,13 @@ from corvus_ml.model import (
     SegmentSummary,
     SessionSummary,
 )
-from corvus_ml.privacy import Denylist, PrivacyFindings, identifier_kind, iter_string_fields
+from corvus_ml.privacy import (
+    Denylist,
+    PayloadCheck,
+    PrivacyFindings,
+    identifier_kind,
+    iter_string_fields,
+)
 from corvus_ml.proto import pb
 from corvus_ml.reader import ReadStats, iter_envelopes, read_file
 
@@ -96,6 +102,7 @@ def _record_frames(
     denylist: Denylist,
     findings: PrivacyFindings,
     file_name: str,
+    payload_check: PayloadCheck | None = None,
 ) -> None:
     seg = session.segment(batch.segment)
     agg = seg.agg
@@ -146,6 +153,13 @@ def _record_frames(
         reason = denylist.hit(direction, state, frame.packet_type, frame.wire_packet_id)
         if reason:
             findings.add(reason, f"{file_name} seq={frame.seq} {direction}/{state}")
+        if payload_check:
+            reason = payload_check.violation(direction, frame.packet_type, size)
+            if reason:
+                findings.add(
+                    reason,
+                    f"{file_name} seq={frame.seq} {direction}/{state} type={frame.packet_type}",
+                )
         if _FRAME_HAS_STRINGS:
             _scan_strings(frame, f"{file_name}.frame", findings)
 
@@ -242,7 +256,9 @@ def _finalize(session: _Session, result: FileResult) -> None:
         result.versions[session.client_protocol, session.observed_protocol] += 1
 
 
-def aggregate_stream(envelopes, name: str, denylist: Denylist) -> FileResult:
+def aggregate_stream(
+    envelopes, name: str, denylist: Denylist, payload_check: PayloadCheck | None = None
+) -> FileResult:
     """Aggregate an iterable of envelopes (one logical capture file)."""
     result = FileResult(files=1, denylist_active=denylist.active)
     sessions: dict[bytes, _Session] = {}
@@ -272,7 +288,7 @@ def aggregate_stream(envelopes, name: str, denylist: Denylist) -> FileResult:
             _scan_strings(m, f"{name}.segment_start", result.privacy)
         elif kind == "batch":
             m = env.batch
-            _record_frames(get(m.session_id), m, denylist, result.privacy, name)
+            _record_frames(get(m.session_id), m, denylist, result.privacy, name, payload_check)
         elif kind == "session_end":
             m = env.session_end
             s = get(m.session_id)
@@ -284,10 +300,12 @@ def aggregate_stream(envelopes, name: str, denylist: Denylist) -> FileResult:
     return result
 
 
-def analyze_file(path: Path, denylist: Denylist) -> FileResult:
+def analyze_file(
+    path: Path, denylist: Denylist, payload_check: PayloadCheck | None = None
+) -> FileResult:
     """Aggregate one capture file (top-level so it can run in a worker process)."""
     stats = ReadStats()
-    result = aggregate_stream(read_file(path, stats), path.name, denylist)
+    result = aggregate_stream(read_file(path, stats), path.name, denylist, payload_check)
     result.envelopes = stats.envelopes
     result.truncated_files = int(stats.truncated)
     result.corrupt_files = int(stats.corrupt)

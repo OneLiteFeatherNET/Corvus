@@ -13,7 +13,13 @@ from pathlib import Path
 from corvus_ml.aggregate import analyze_file
 from corvus_ml.cgroup import default_workers
 from corvus_ml.model import FileResult
-from corvus_ml.privacy import Denylist
+from corvus_ml.privacy import (
+    PAYLOAD_MODES,
+    Denylist,
+    PayloadCheck,
+    Vocabulary,
+    default_vocabulary_path,
+)
 from corvus_ml.report import build_report, render_text
 
 EXIT_OK = 0
@@ -28,7 +34,12 @@ def find_captures(root: Path) -> list[Path]:
     return sorted(root.rglob("*.cvc"))
 
 
-def analyze_paths(paths: Sequence[Path], denylist: Denylist, workers: int) -> FileResult:
+def analyze_paths(
+    paths: Sequence[Path],
+    denylist: Denylist,
+    workers: int,
+    payload_check: PayloadCheck | None = None,
+) -> FileResult:
     """Aggregate each file (in a bounded process pool if useful) and merge the results.
 
     Results are merged as they arrive, so memory stays bounded by the pool size plus the
@@ -38,10 +49,16 @@ def analyze_paths(paths: Sequence[Path], denylist: Denylist, workers: int) -> Fi
     pool_size = max(1, min(workers, len(paths)))
     if pool_size == 1:
         for path in paths:
-            total.merge(analyze_file(path, denylist))
+            total.merge(analyze_file(path, denylist, payload_check))
         return total
     with ProcessPoolExecutor(max_workers=pool_size) as pool:
-        for partial in pool.map(analyze_file, paths, [denylist] * len(paths), chunksize=1):
+        for partial in pool.map(
+            analyze_file,
+            paths,
+            [denylist] * len(paths),
+            [payload_check] * len(paths),
+            chunksize=1,
+        ):
             total.merge(partial)
     return total
 
@@ -52,7 +69,22 @@ def _build_parser() -> argparse.ArgumentParser:
     analyze = sub.add_parser("analyze", help="analyze a directory of .cvc capture files")
     analyze.add_argument("captures_dir", type=Path)
     analyze.add_argument("--json", type=Path, dest="json_out", help="also write the report here")
-    analyze.add_argument("--denylist", type=Path, help="JSON file with chat/command packet ids")
+    analyze.add_argument(
+        "--denylist",
+        type=Path,
+        help="extra JSON denylist (packet types, wire ids), added to the vocabulary's private ids",
+    )
+    analyze.add_argument(
+        "--vocabulary",
+        type=Path,
+        help="plugin vocabulary export (default: proto/corvus/capture/v1/vocabulary.json)",
+    )
+    analyze.add_argument(
+        "--payload-policy",
+        choices=PAYLOAD_MODES,
+        default="serverbound",
+        help="the plugin's capture.raw_payloads setting the captures were recorded with",
+    )
     analyze.add_argument(
         "--workers",
         type=int,
@@ -72,10 +104,19 @@ def main(argv: Iterable[str] | None = None) -> int:
     if args.workers is not None and args.workers < 1:
         print("--workers must be at least 1", file=sys.stderr)
         return EXIT_USAGE
-    denylist = Denylist.from_file(args.denylist) if args.denylist else Denylist()
+    vocabulary_path = args.vocabulary or default_vocabulary_path()
+    try:
+        vocabulary = Vocabulary.from_file(vocabulary_path)
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"cannot load vocabulary {vocabulary_path}: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    denylist = vocabulary.private_denylist()
+    if args.denylist:
+        denylist = denylist.union(Denylist.from_file(args.denylist))
+    payload_check = PayloadCheck(vocabulary, args.payload_policy)
     workers = args.workers if args.workers is not None else default_workers()
 
-    result = analyze_paths(paths, denylist, workers)
+    result = analyze_paths(paths, denylist, workers, payload_check)
     report = build_report(result)
     if args.json_out:
         args.json_out.write_text(json.dumps(report, indent=2, sort_keys=True))

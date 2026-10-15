@@ -81,6 +81,90 @@ class Denylist:
     def from_file(cls, path: Path) -> Denylist:
         return cls.from_dict(json.loads(path.read_text()))
 
+    def union(self, other: Denylist) -> Denylist:
+        return Denylist(self.packet_types | other.packet_types, self.wire_rules + other.wire_rules)
+
+
+def default_vocabulary_path() -> Path:
+    """The committed ``vocabulary.json`` next to the capture schema (repo checkout)."""
+    from corvus_ml.proto import proto_dir
+
+    return proto_dir() / "corvus" / "capture" / "v1" / "vocabulary.json"
+
+
+PAYLOAD_MODES = ("none", "serverbound", "all")
+
+
+@dataclass(frozen=True)
+class VocabularyEntry:
+    id: int
+    name: str
+    direction: str
+    state: str
+    private: bool
+    payload_policy: str  # frame_dropped | stripped | default | all_only
+
+
+@dataclass(frozen=True)
+class Vocabulary:
+    """The plugin's packet vocabulary export (``vocabulary.json``)."""
+
+    entries: dict[int, VocabularyEntry] = field(default_factory=dict)
+
+    @classmethod
+    def from_list(cls, rows: list[dict]) -> Vocabulary:
+        entries = {}
+        for row in rows:
+            entry = VocabularyEntry(
+                int(row["id"]),
+                row["name"],
+                row["direction"],
+                row["state"],
+                bool(row["private"]),
+                row["payload_policy"],
+            )
+            if entry.id in entries:
+                raise ValueError(f"duplicate vocabulary id {entry.id}")
+            entries[entry.id] = entry
+        return cls(entries)
+
+    @classmethod
+    def from_file(cls, path: Path) -> Vocabulary:
+        return cls.from_list(json.loads(path.read_text()))
+
+    def private_denylist(self) -> Denylist:
+        """Denylist of all privacy-dropped packet types (chat, commands, player lists...)."""
+        return Denylist(frozenset(e.id for e in self.entries.values() if e.private))
+
+
+@dataclass(frozen=True)
+class PayloadCheck:
+    """Checks recorded payloads against the vocabulary's payload policy.
+
+    ``mode`` is the plugin's ``capture.raw_payloads``: ``none``, ``serverbound`` (default) or
+    ``all``. Payloads of ``stripped`` types are a violation in every mode.
+    """
+
+    vocabulary: Vocabulary
+    mode: str = "serverbound"
+
+    def violation(self, direction: str, packet_type: int, payload_size: int) -> str | None:
+        """Reason string if a frame carries a payload its policy forbids, else None."""
+        if not payload_size:
+            return None
+        if self.mode == "none":
+            return "payload_recorded_in_mode_none"
+        entry = self.vocabulary.entries.get(packet_type) if packet_type else None
+        if entry is not None and entry.payload_policy == "stripped":
+            return "payload_in_stripped_type"
+        if self.mode == "all":
+            return None
+        if entry is not None and entry.payload_policy == "default":
+            return None
+        if direction == "clientbound":
+            return "clientbound_payload_outside_allowlist"
+        return "payload_outside_policy"
+
 
 def identifier_kind(value: str) -> str | None:
     """Return "uuid" or "ip" if the string contains something shaped like one."""
