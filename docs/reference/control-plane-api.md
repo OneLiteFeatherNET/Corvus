@@ -37,9 +37,48 @@ outside local development. The service refuses to start if neither OIDC nor a de
 `CORVUS_API_PLUGIN_TOKENS` (comma separated) and nothing else; OIDC tokens and the dev token do not work there, and
 proxy tokens open nothing else. With no tokens configured the endpoint rejects every request.
 
+**Job tokens.** ML jobs authenticate with a machine token instead of a person's OIDC token. The API is configured with
+`CORVUS_API_JOB_TOKENS`, a comma separated list of `<sha256 hex of the token>:<job name>` entries; only the hash is
+stored, never the token. The presented bearer is hashed with SHA-256 and compared in constant time against every
+configured hash. A match yields a principal with role `data_scientist` and subject `job:<name>`. Generate a token and
+its entry with:
+
+```sh
+token=$(openssl rand -hex 32)
+echo "$(printf %s "$token" | sha256sum | cut -d' ' -f1):train"   # goes into CORVUS_API_JOB_TOKENS
+```
+
+A job token is accepted only where a job needs it: `GET /snapshots`, `GET /snapshots/{id}`, `POST /models`,
+`GET /models`, `GET /models/{id}`, `GET /models/{name}/{version}`, `GET /jobs/{id}` and `PATCH /jobs/{id}`. It cannot
+submit jobs, promote models or reach pools, labels, players, erasure, blocklist, scores, `/me` or `/summary` (`403`).
+On `GET` and `PATCH /jobs/{id}` a job token additionally needs the header `X-Corvus-Job-Id` to equal the id in the
+path (the job's `CORVUS_JOB_ID`), so a job can only act on its own job. The ML job runner reads `CORVUS_API_URL` and
+`CORVUS_API_TOKEN` from its environment (for Kubernetes jobs put both into the Secret named by
+`CORVUS_API_JOB_K8S_ENV_SECRET`; the local runner passes these two variables through and strips every other
+`CORVUS_API_*`) and uses them to register models (`POST /models`) and report progress (`PATCH /jobs/{id}`).
+
+**CORS.** Browsers may call the API from the origins in `CORVUS_API_CORS_ORIGINS` (comma separated, `*` for any;
+default none, which disables CORS). Credentials are off (the bearer token travels in the `Authorization` header, not in
+cookies), the allowed request headers are `Authorization` and `Content-Type`, and no response headers are exposed
+because pagination is part of the JSON body.
+
 ## Endpoints
 
 `DS` = `data_scientist`. "read" = `viewer`, `staff`, `data_scientist` (and `admin`).
+
+### Identity and dashboard
+
+| Method and path | Role | Purpose |
+|---|---|---|
+| `GET /me` | any valid token | `{"subject", "display_name", "roles"}`; `roles` are the Corvus roles after `CORVUS_API_ROLE_MAPPING`; `display_name` comes from the claim `CORVUS_API_DISPLAY_NAME_CLAIM` (default `name`, fallback `preferred_username`) and is `null` when the token has none. |
+| `GET /summary` | read | Counts and recent activity for the dashboard, see below. |
+| `GET /erasure-requests` | admin | Erasure requests, newest first, paginated; filter `status` (`completed`). |
+
+`GET /summary` returns `pools`, `snapshots`, `jobs_by_status` (`queued`, `running`, `succeeded`, `failed`),
+`models_by_stage`, `labels_by_label` (`legit`, `cheat`; absent buckets are `0`), `pending_erasures` (requests with
+`compaction_pending`), `recent_jobs` (the 10 newest; id, type, status, snapshot, timestamps, no parameters) and
+`recent_erasures` (the 10 newest; id, `pseudonym_prefix` with the first 12 hex characters only, time, status,
+`compaction_pending`).
 
 ### Pools and snapshots
 
@@ -47,6 +86,7 @@ proxy tokens open nothing else. With no tokens configured the endpoint rejects e
 |---|---|---|
 | `POST /pools`, `GET /pools`, `GET/PUT/DELETE /pools/{id}` | DS | Pool definitions. Names are unique (`409`). Deleting a pool keeps its snapshots. |
 | `POST /pools/{id}/preview` | DS | Counts for the current filter. |
+| `POST /pools/preview` | DS | Live preview without saving: the body is a pool filter (the `filter` object of a pool), validated exactly like on create; nothing is stored. |
 | `POST /pools/{id}/snapshots` | DS | Materialise an immutable snapshot. |
 | `GET /pools/{id}/snapshots`, `GET /snapshots`, `GET /snapshots/{id}` | DS | List and detail (the detail view includes the manifest). |
 
@@ -116,8 +156,8 @@ logs only the first 12 hex characters of the pseudonym.
 
 **Erasure semantics.** In one transaction: (1) delete the `player_keys` row, which crypto-shreds the player's `raw`
 payloads; (2) set `players.erased_at` (ingest stops storing data for that pseudonym); (3) put the pseudonym on the
-blocklist with `source = erasure`; (4) insert an `erasure_requests` row (who, when, pseudonym, `status = completed`,
-`player_known`, `key_deleted`, `compaction_pending = true`). If any step fails nothing is changed. A pseudonym that was
+blocklist with `source = erasure`; (4) delete the player's rows in `scores_latest` and `score_history`; (5) insert an `erasure_requests` row (who, when,
+pseudonym, `status = completed`, `player_known`, `key_deleted`, `compaction_pending = true`). If any step fails nothing is changed. A pseudonym that was
 never captured is still blocklisted and audited. Erasure can be repeated. `events` files are not rewritten here:
 `compaction_pending` stays `true` until the later compaction job clears it. Blocklist entries created by an erasure
 are permanent: changing or deleting them is `409`. Snapshots keep the (random) session ids they were built from; a
@@ -128,7 +168,8 @@ training job must skip sessions of erased players.
 | Method and path | Role | Purpose |
 |---|---|---|
 | `POST /models` | DS | Register (`stage = registered`). `name` plus `version` is unique; the snapshot must exist. |
-| `GET /models`, `GET /models/{id}`, `GET /models/{id}/transitions` | read | List (filter `stage`), detail, audit trail. |
+| `GET /models`, `GET /models/{id}`, `GET /models/{id}/transitions` | read | List, detail, audit trail. The list filters on `name`, `version`, `game_context`, `domain` and `stage` (exact match, combined with AND). |
+| `GET /models/{name}/{version}` | read | One model by its unique name and version (`404` if unknown). |
 | `POST /models/{id}/stage` | DS | `{"stage": ..., "reason": ...}`. |
 
 Fields: `name`, `version`, `candidate_type`, `game_context`, `domain`, `snapshot_id`, `metrics` (JSON), `onnx_key`.
@@ -151,10 +192,16 @@ transition (including the automatic archive) is stored in `model_transitions` wi
 
 ### Jobs (DS)
 
-`POST /jobs` (`202`), `GET /jobs` (filter `status`), `GET /jobs/{id}`. A job has `type` (`build_features`, `evaluate`,
+`POST /jobs` (`202`), `GET /jobs` (filter `status`), `GET /jobs/{id}`, `PATCH /jobs/{id}`. A job has `type` (`build_features`, `evaluate`,
 `train`), a `snapshot_id` that must exist, and free-form `params` (at most 16 KiB; no secrets). Status values:
 `queued`, `running`, `succeeded`, `failed`. `GET /jobs/{id}` refreshes a non-final job from the runner; runner errors
 leave the stored status unchanged.
+
+`PATCH /jobs/{id}` is how the job process reports back (DS or a job token, see above): body
+`{"status": "running" | "succeeded" | "failed", "message": "...", "result": {...}}` (`message` at most 2000
+characters, `result` at most 16 KiB and free of secrets; unknown members are `422`). `succeeded` and `failed` are
+final: a different status afterwards is `409`, repeating the identical report is accepted. `result` is returned on the
+job. A message the job reported is not overwritten by the runner's own status refresh.
 
 The runner is selected with `CORVUS_API_JOB_RUNNER`:
 
@@ -197,6 +244,9 @@ unauthenticated; keep it on the cluster network.
 | `CORVUS_API_OIDC_ISSUER`, `..._AUDIENCE`, `..._JWKS_URL` | unset | All three are needed for OIDC. |
 | `CORVUS_API_DEV_TOKEN`, `CORVUS_API_DEV_TOKEN_ROLES` | unset, `["admin"]` | Development only. |
 | `CORVUS_API_PLUGIN_TOKENS` | empty | Comma separated proxy tokens. |
+| `CORVUS_API_JOB_TOKENS` | empty | Comma separated `<sha256 hex>:<job name>`, see "Job tokens". |
+| `CORVUS_API_CORS_ORIGINS` | empty | Comma separated browser origins; empty disables CORS. |
+| `CORVUS_API_DISPLAY_NAME_CLAIM` | `name` | Token claim shown by `GET /me` (fallback `preferred_username`). |
 | `CORVUS_PSEUDONYM_KEY`, `CORVUS_PSEUDONYM_KEY_ID` | unset, `k1` | Same as the plugin. |
 | `CORVUS_API_DEFAULT_PAGE_SIZE`, `CORVUS_API_MAX_PAGE_SIZE` | `50`, `200` | |
 
@@ -204,4 +254,4 @@ unauthenticated; keep it on the cluster network.
 
 `0002_control_plane.sql` adds `pools`, `dataset_snapshots` (with the immutability trigger), `labels`, `blocklist`,
 `erasure_requests`, `models`, `model_transitions` and `jobs` to the `corvus` schema; `0003_scores.sql` adds
-`scores_latest` and `score_history`. Run `corvus-migrate` before starting the API.
+`scores_latest` and `score_history`; `0004_job_result.sql` adds the nullable `jobs.result`. Run `corvus-migrate` before starting the API.
