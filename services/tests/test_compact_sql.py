@@ -17,6 +17,16 @@ def test_sessions_page_binds_every_value():
     assert "%s" not in SESSIONS_PAGE_SQL
 
 
+def test_sessions_page_reads_segments_labels_and_the_erased_flag():
+    for fragment in (
+        "FROM corvus.segments g",
+        "FROM corvus.labels l",
+        "LEFT JOIN corvus.sessions s ON s.session_id = sid.session_id",
+        "l.valid_from IS NULL OR l.valid_from <= s.started_at",
+    ):
+        assert fragment in SESSIONS_PAGE_SQL
+
+
 def test_sessions_page_orders_by_session_id_and_reads_the_erased_view():
     assert SESSIONS_PAGE_SQL.endswith("ORDER BY sid.session_id LIMIT %(limit)s")
     assert "corvus.erased_sessions" in SESSIONS_PAGE_SQL

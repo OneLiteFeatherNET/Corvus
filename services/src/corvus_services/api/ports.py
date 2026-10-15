@@ -148,6 +148,34 @@ class JobRecord:
 
 
 @dataclass(frozen=True)
+class SessionSegment:
+    segment: int
+    game_context: str
+
+
+@dataclass(frozen=True)
+class SessionLabel:
+    label: str
+    source: str
+    confidence: float
+    valid_from: datetime | None
+    valid_to: datetime | None
+
+
+@dataclass(frozen=True)
+class SnapshotSession:
+    """A manifest session as the jobs need it. ``pseudonym`` and ``started_at`` are ``None`` for
+    a session that is no longer in the catalog."""
+
+    session_id: bytes
+    pseudonym: bytes | None
+    started_at: datetime | None
+    segments: list[SessionSegment] = field(default_factory=list)
+    labels: list[SessionLabel] = field(default_factory=list)
+    erased: bool = False
+
+
+@dataclass(frozen=True)
 class SnapshotMaterial:
     session_ids: list[bytes]
     files: list[LakeFileRef]
@@ -183,8 +211,8 @@ class SnapshotRepo(Protocol):
     async def list_page(self, req: PageRequest, pool_id: UUID | None) -> Page[SnapshotRecord]: ...
     async def sessions_page(
         self, snapshot_id: UUID, after: bytes | None, limit: int, exclude_erased: bool
-    ) -> list[bytes]:
-        """Up to ``limit`` session ids of the manifest, ascending, greater than ``after``;
+    ) -> list[SnapshotSession]:
+        """Up to ``limit`` sessions of the manifest, ascending by id, greater than ``after``;
         sessions of erased players are left out if ``exclude_erased``."""
         ...
 

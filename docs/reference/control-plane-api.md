@@ -89,7 +89,7 @@ because pagination is part of the JSON body.
 | `POST /pools/preview` | DS | Live preview without saving: the body is a pool filter (the `filter` object of a pool), validated exactly like on create; nothing is stored. |
 | `POST /pools/{id}/snapshots` | DS | Materialise an immutable snapshot. |
 | `GET /pools/{id}/snapshots`, `GET /snapshots`, `GET /snapshots/{id}` | DS | List and detail (the detail view includes the manifest). |
-| `GET /snapshots/{id}/sessions` | DS | Session ids of the manifest, ascending, 32 hex characters. `exclude_erased=true` leaves out sessions of erased players; `limit`, `cursor` (the previous page's `next_cursor`). |
+| `GET /snapshots/{id}/sessions` | DS | Sessions of the manifest, ascending by id. Items: `session_id` (32 hex), `pseudonym` (64 hex or `null`), `started_at`, `segments` (`segment`, `game_context`), `labels` (`label`, `source`, `confidence`, `valid_from`, `valid_to`; those applicable at the session start) and `erased`. `exclude_erased=true` leaves out sessions of erased players; `limit` (server maximum applies), `cursor` (the previous page's `next_cursor`, the last session id). |
 | `GET /snapshots/{id}/files` | DS | `{"items": [{"manifest_file_id", "id", "key"}]}`: the live `events` files for the manifest's files; a file replaced by compaction is followed to its successor, a file that vanished entirely is omitted. |
 
 Pool filter (`filter` in the body; all parts optional, combined with AND):

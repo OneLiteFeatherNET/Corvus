@@ -33,6 +33,7 @@ from corvus_services.api.ports import (
     ScoreLatestRecord,
     SnapshotMaterial,
     SnapshotRecord,
+    SnapshotSession,
     StaleError,
     Summary,
     TransitionRecord,
@@ -109,6 +110,7 @@ class FakeSnapshotRepo:
     def __init__(self) -> None:
         self.rows: dict[UUID, SnapshotRecord] = {}
         self.erased: set[bytes] = set()
+        self.session_details: dict[bytes, SnapshotSession] = {}
         # lake file id -> (key, replaced_by, deleted)
         self.lake_files: dict[int, tuple[str, int | None, bool]] = {}
 
@@ -126,10 +128,12 @@ class FakeSnapshotRepo:
 
     async def sessions_page(
         self, snapshot_id: UUID, after: bytes | None, limit: int, exclude_erased: bool
-    ) -> list[bytes]:
+    ) -> list[SnapshotSession]:
         sessions = sorted(bytes.fromhex(h) for h in self.rows[snapshot_id].manifest["sessions"])
         return [
-            s
+            replace(
+                self.session_details.get(s, SnapshotSession(s, None, None)), erased=s in self.erased
+            )
             for s in sessions
             if (after is None or s > after) and not (exclude_erased and s in self.erased)
         ][:limit]

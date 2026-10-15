@@ -19,6 +19,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from .pagination import Page, PageRequest, page_of
 from .pools import (
+    LABEL_MATCH,
     FileShare,
     PoolFilter,
     RawPreview,
@@ -43,8 +44,11 @@ from .ports import (
     Repos,
     ScoreHistoryRecord,
     ScoreLatestRecord,
+    SessionLabel,
+    SessionSegment,
     SnapshotMaterial,
     SnapshotRecord,
+    SnapshotSession,
     StaleError,
     Summary,
     TransitionRecord,
@@ -229,11 +233,22 @@ def _snapshot(r: tuple[Any, ...]) -> SnapshotRecord:
     return SnapshotRecord(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8])
 
 
-# Sessions of a manifest, ascending by id (hex order equals byte order), keyset on the id.
+# Sessions of a manifest with pseudonym, start, segments, applicable labels and the erased flag,
+# ascending by id (hex order equals byte order), keyset on the id.
 SESSIONS_PAGE_SQL = (
-    "SELECT sid.session_id FROM corvus.dataset_snapshots d,"
+    "SELECT sid.session_id, s.pseudonym, s.started_at,"
+    " COALESCE((SELECT jsonb_agg(jsonb_build_object('segment', g.segment,"
+    "  'game_context', g.game_context) ORDER BY g.segment)"
+    "  FROM corvus.segments g WHERE g.session_id = sid.session_id), '[]'::jsonb),"
+    " COALESCE((SELECT jsonb_agg(jsonb_build_object('label', l.label, 'source', l.source,"
+    "  'confidence', l.confidence, 'valid_from', l.valid_from, 'valid_to', l.valid_to)"
+    "  ORDER BY l.created_at, l.id)"
+    f"  FROM corvus.labels l WHERE {LABEL_MATCH}), '[]'::jsonb),"
+    " EXISTS (SELECT 1 FROM corvus.erased_sessions x WHERE x.session_id = sid.session_id)"
+    " FROM corvus.dataset_snapshots d,"
     " LATERAL (SELECT decode(e.value, 'hex') AS session_id"
     "  FROM jsonb_array_elements_text(d.manifest -> 'sessions') AS e(value)) sid"
+    " LEFT JOIN corvus.sessions s ON s.session_id = sid.session_id"
     " WHERE d.id = %(snapshot_id)s"
     " AND (%(after)s::bytea IS NULL OR sid.session_id > %(after)s::bytea)"
     " AND (NOT %(exclude_erased)s OR NOT EXISTS"
@@ -256,6 +271,30 @@ CURRENT_FILES_SQL = (
     " FROM chain c JOIN corvus.lake_files n ON n.id = c.replaced_by)"
     " SELECT origin, id, s3_key FROM chain WHERE deleted_at IS NULL ORDER BY origin, id"
 )
+
+
+def _snapshot_session(r: tuple[Any, ...]) -> SnapshotSession:
+    return SnapshotSession(
+        session_id=bytes(r[0]),
+        pseudonym=bytes(r[1]) if r[1] is not None else None,
+        started_at=r[2],
+        segments=[SessionSegment(int(g["segment"]), str(g["game_context"])) for g in r[3]],
+        labels=[
+            SessionLabel(
+                str(lb["label"]),
+                str(lb["source"]),
+                float(lb["confidence"]),
+                _opt_dt(lb["valid_from"]),
+                _opt_dt(lb["valid_to"]),
+            )
+            for lb in r[4]
+        ],
+        erased=bool(r[5]),
+    )
+
+
+def _opt_dt(value: Any) -> datetime | None:
+    return datetime.fromisoformat(value) if value else None
 
 
 class PgSnapshotRepo:
@@ -310,7 +349,7 @@ class PgSnapshotRepo:
 
     async def sessions_page(
         self, snapshot_id: UUID, after: bytes | None, limit: int, exclude_erased: bool
-    ) -> list[bytes]:
+    ) -> list[SnapshotSession]:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 SESSIONS_PAGE_SQL.encode(),
@@ -321,7 +360,7 @@ class PgSnapshotRepo:
                     "exclude_erased": exclude_erased,
                 },
             )
-            return [bytes(r[0]) for r in await cur.fetchall()]
+            return [_snapshot_session(tuple(r)) for r in await cur.fetchall()]
 
     async def current_files(self, snapshot_id: UUID) -> list[CurrentFile]:
         async with self._pool.connection() as conn:

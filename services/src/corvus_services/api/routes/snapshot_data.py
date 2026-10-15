@@ -6,14 +6,16 @@ Snapshots are immutable, so their manifest still lists erased sessions and the f
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..auth import Principal, Role, require
 from ..deps import Deps, get_deps
+from ..ports import SnapshotSession
 from ..problems import ProblemError
 
 router = APIRouter(tags=["snapshots"])
@@ -21,9 +23,50 @@ _DS = Depends(require(Role.DATA_SCIENTIST))
 _NOT_FOUND: dict[int | str, dict[str, Any]] = {404: {"description": "Snapshot not found"}}
 
 
+class SegmentOut(BaseModel):
+    segment: int
+    game_context: str
+
+
+class LabelOut(BaseModel):
+    label: str
+    source: str
+    confidence: float
+    valid_from: datetime | None
+    valid_to: datetime | None
+
+
+class SessionOut(BaseModel):
+    session_id: str = Field(description="32 hex characters")
+    pseudonym: str | None = Field(description="64 hex characters; null if the session is gone")
+    started_at: datetime | None
+    segments: list[SegmentOut]
+    labels: list[LabelOut] = Field(description="Labels applicable to the session at its start")
+    erased: bool = Field(description="The player was erased; always false with exclude_erased")
+
+    @classmethod
+    def of(cls, s: SnapshotSession) -> SessionOut:
+        return cls(
+            session_id=s.session_id.hex(),
+            pseudonym=s.pseudonym.hex() if s.pseudonym is not None else None,
+            started_at=s.started_at,
+            segments=[SegmentOut(segment=g.segment, game_context=g.game_context) for g in s.segments],
+            labels=[
+                LabelOut(
+                    label=lb.label, source=lb.source, confidence=lb.confidence,
+                    valid_from=lb.valid_from, valid_to=lb.valid_to,
+                )
+                for lb in s.labels
+            ],
+            erased=s.erased,
+        )  # fmt: skip
+
+
 class SessionsOut(BaseModel):
-    items: list[str]
-    next_cursor: str | None = None
+    items: list[SessionOut]
+    next_cursor: str | None = Field(
+        default=None, description="Pass as `cursor`: the last session id of this page"
+    )
 
 
 class CurrentFileOut(BaseModel):
@@ -52,9 +95,9 @@ def _after(cursor: str | None) -> bytes | None:
     "/snapshots/{snapshot_id}/sessions",
     response_model=SessionsOut,
     responses=_NOT_FOUND,
-    summary="Session ids of a snapshot, ascending, optionally without erased players",
+    summary="Sessions of a snapshot, ascending, optionally without erased players",
     description=(
-        "Pages through the manifest's sessions (32 hex characters). With `exclude_erased=true` the "
+        "Pages through the manifest's sessions with pseudonym, start, segments and labels. With `exclude_erased=true` the "
         "sessions of erased players are left out; jobs must use this when they read a snapshot "
         "because the manifest itself is immutable. `cursor` is the `next_cursor` of the previous "
         "page (the last session id of that page)."
@@ -74,8 +117,11 @@ async def snapshot_sessions(
     s = deps.settings
     size = min(limit if limit is not None else s.default_page_size, s.max_page_size)
     rows = await deps.repos.snapshots.sessions_page(snapshot_id, after, size + 1, exclude_erased)
-    items = [r.hex() for r in rows[:size]]
-    return SessionsOut(items=items, next_cursor=items[-1] if len(rows) > size else None)
+    page = rows[:size]
+    return SessionsOut(
+        items=[SessionOut.of(r) for r in page],
+        next_cursor=page[-1].session_id.hex() if len(rows) > size else None,
+    )
 
 
 @router.get(

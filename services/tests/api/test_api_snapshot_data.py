@@ -6,11 +6,20 @@ import pytest
 from api_fakes import FIXED_NOW
 from api_support import Env
 
-from corvus_services.api.ports import SnapshotRecord
+from corvus_services.api.ports import (
+    SessionLabel,
+    SessionSegment,
+    SnapshotRecord,
+    SnapshotSession,
+)
 from corvus_services.api.snapshots import LakeFileRef, build_manifest, manifest_sha256
 
 SNAP = UUID(int=42)
 SESSIONS = [bytes([i]) * 16 for i in range(1, 6)]
+
+
+def _ids(page: dict) -> list[str]:
+    return [i["session_id"] for i in page["items"]]
 
 
 def _add_snapshot(env: Env) -> None:
@@ -39,9 +48,9 @@ def test_sessions_are_listed_ascending_with_a_cursor(env: Env, ds):
         f"/api/v1/snapshots/{SNAP}/sessions?limit=2&cursor={first['next_cursor']}", headers=ds
     ).json()
 
-    assert first["items"] == [SESSIONS[0].hex(), SESSIONS[1].hex()]
+    assert _ids(first) == [SESSIONS[0].hex(), SESSIONS[1].hex()]
     assert first["next_cursor"] == SESSIONS[1].hex()
-    assert second["items"] == [SESSIONS[2].hex(), SESSIONS[3].hex()]
+    assert _ids(second) == [SESSIONS[2].hex(), SESSIONS[3].hex()]
 
 
 def test_last_page_has_no_cursor(env: Env, ds):
@@ -56,11 +65,60 @@ def test_exclude_erased_drops_exactly_the_erased_sessions(env: Env, ds):
 
     kept = env.client.get(
         f"/api/v1/snapshots/{SNAP}/sessions?exclude_erased=true&limit=5", headers=ds
-    ).json()["items"]
+    ).json()
     everything = env.client.get(f"/api/v1/snapshots/{SNAP}/sessions?limit=5", headers=ds).json()
 
-    assert kept == [SESSIONS[i].hex() for i in (0, 2, 4)]
+    assert _ids(kept) == [SESSIONS[i].hex() for i in (0, 2, 4)]
+    assert not any(i["erased"] for i in kept["items"])
     assert len(everything["items"]) == 5  # the default keeps the manifest unchanged
+    assert [i["erased"] for i in everything["items"]] == [False, True, False, True, False]
+
+
+def test_a_session_item_has_the_shape_the_jobs_read(env: Env, ds):
+    env.parts["snapshots"].session_details[SESSIONS[0]] = SnapshotSession(
+        SESSIONS[0],
+        b"\xab" * 32,
+        FIXED_NOW,
+        [SessionSegment(0, "pvp"), SessionSegment(1, "bedwars")],
+        [SessionLabel("cheat", "honeypot", 1.0, None, FIXED_NOW)],
+    )
+
+    item = env.client.get(f"/api/v1/snapshots/{SNAP}/sessions?limit=1", headers=ds).json()["items"][
+        0
+    ]
+
+    assert item == {
+        "session_id": SESSIONS[0].hex(),
+        "pseudonym": "ab" * 32,
+        "started_at": "2026-10-15T12:00:00Z",
+        "segments": [
+            {"segment": 0, "game_context": "pvp"},
+            {"segment": 1, "game_context": "bedwars"},
+        ],
+        "labels": [
+            {
+                "label": "cheat",
+                "source": "honeypot",
+                "confidence": 1.0,
+                "valid_from": None,
+                "valid_to": "2026-10-15T12:00:00Z",
+            }
+        ],
+        "erased": False,
+    }
+
+
+def test_a_session_missing_from_the_catalog_has_null_pseudonym_and_no_segments(env: Env, ds):
+    item = env.client.get(f"/api/v1/snapshots/{SNAP}/sessions?limit=1", headers=ds).json()["items"][
+        0
+    ]
+
+    assert (item["pseudonym"], item["started_at"], item["segments"], item["labels"]) == (
+        None,
+        None,
+        [],
+        [],
+    )
 
 
 def test_page_size_is_capped_by_the_server_maximum(env: Env, ds):
