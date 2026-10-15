@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -171,5 +172,32 @@ class CorvusConfigTest {
         assertEquals("corvus.score.v1.>", scores.subject());
         assertEquals(2, scores.listenerThreads());
         assertEquals(1024, scores.listenerQueueSize());
+    }
+
+    @Test
+    void blocklistSyncIsOffByDefault() {
+        CorvusConfig.BlocklistSync sync = CorvusConfig.parse(CorvusConfig.DEFAULT_TOML).blocklistSync();
+
+        assertFalse(sync.enabled());
+        assertEquals(300, sync.intervalSeconds());
+    }
+
+    @Test
+    void blocklistSyncSettingsAreParsed() {
+        CorvusConfig.BlocklistSync sync = CorvusConfig.parse("[blocklist_sync]\nenabled = true\n"
+                + "url = \"https://api.example\"\ntoken_file = \"api.token\"\ninterval_seconds = 60\n"
+                + "timeout_seconds = 4\n").blocklistSync();
+
+        assertTrue(sync.enabled());
+        assertEquals("https://api.example", sync.url());
+        assertEquals("api.token", sync.tokenFile());
+        assertEquals(60, sync.intervalSeconds());
+        assertEquals(4, sync.timeoutSeconds());
+    }
+
+    @Test
+    void enabledBlocklistSyncWithoutUrlIsRejected() {
+        assertThrows(IllegalArgumentException.class,
+                () -> CorvusConfig.parse("[blocklist_sync]\nenabled = true\n"));
     }
 }

@@ -29,7 +29,8 @@ public record CorvusConfig(
         Map<String, String> serverContexts,
         SinkType sinkType,
         Nats nats,
-        Scores scores) {
+        Scores scores,
+        BlocklistSync blocklistSync) {
 
     public enum ListMode { ALL, ALLOWLIST }
 
@@ -57,6 +58,17 @@ public record CorvusConfig(
     public record Scores(boolean enabled, String subject, int listenerThreads, int listenerQueueSize) {
 
         public static final String DEFAULT_SUBJECT = "corvus.score.v1.>";
+    }
+
+    /**
+     * Optional periodic fetch of the blocked pseudonyms from the control plane
+     * ({@code GET <url>/api/v1/plugin/blocklist}). The token comes from CORVUS_PLUGIN_API_TOKEN or token_file.
+     */
+    public record BlocklistSync(boolean enabled, String url, String tokenFile, int intervalSeconds,
+                                int timeoutSeconds) {
+
+        public static final int DEFAULT_INTERVAL_SECONDS = 300;
+        public static final int DEFAULT_TIMEOUT_SECONDS = 10;
     }
 
     public static final String DEFAULT_TOML = """
@@ -122,6 +134,17 @@ public record CorvusConfig(
             listener_threads = 2
             listener_queue = 1024
 
+            [blocklist_sync]
+            # Fetch the blocklist of the control plane (GET <url>/api/v1/plugin/blocklist, proxy API token) and
+            # never capture the listed pseudonyms. On failure the last good list is kept.
+            enabled = false
+            # API base URL, for example "https://corvus-api.example". Required when enabled.
+            url = ""
+            # Token: environment variable CORVUS_PLUGIN_API_TOKEN, or this file (relative to the plugin directory).
+            token_file = ""
+            interval_seconds = 300
+            timeout_seconds = 10
+
             [game_context]
             default = "unknown"
 
@@ -175,7 +198,24 @@ public record CorvusConfig(
                 contexts,
                 sinkType,
                 parseNats(toml, sinkType),
-                parseScores(toml, sinkType));
+                parseScores(toml, sinkType),
+                parseBlocklistSync(toml));
+    }
+
+    private static BlocklistSync parseBlocklistSync(Toml toml) {
+        boolean enabled = toml.getBoolean("blocklist_sync.enabled", false);
+        String url = toml.getString("blocklist_sync.url", "").trim();
+        if (enabled && url.isEmpty()) {
+            throw new IllegalArgumentException("blocklist_sync.enabled = true requires blocklist_sync.url");
+        }
+        return new BlocklistSync(
+                enabled,
+                url,
+                toml.getString("blocklist_sync.token_file", "").trim(),
+                (int) Math.min(86_400L, Math.max(5L, toml.getLong("blocklist_sync.interval_seconds",
+                        (long) BlocklistSync.DEFAULT_INTERVAL_SECONDS))),
+                (int) Math.min(120L, Math.max(1L, toml.getLong("blocklist_sync.timeout_seconds",
+                        (long) BlocklistSync.DEFAULT_TIMEOUT_SECONDS))));
     }
 
     private static Scores parseScores(Toml toml, SinkType sinkType) {

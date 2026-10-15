@@ -30,6 +30,19 @@ public final class PseudonymDirectory {
         byPseudonym.put(pseudonym, player);
     }
 
+    /**
+     * Lower-case hex pseudonym of a player, computed on first use (packets can arrive before the login event) and
+     * cached until {@link #remove}.
+     */
+    public String hexOf(UUID player) {
+        String cached = byPlayer.get(player);
+        if (cached == null) {
+            add(player);
+            cached = byPlayer.get(player);
+        }
+        return cached;
+    }
+
     /** Forgets a player that went offline. */
     public void remove(UUID player) {
         String pseudonym = byPlayer.remove(player);
