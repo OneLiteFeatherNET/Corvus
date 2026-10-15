@@ -28,7 +28,7 @@ class NatsTransportTest {
     private final List<String> warnings = new ArrayList<>();
 
     private NatsTransport transport(long budget) {
-        return new NatsTransport(publisher, "corvus.capture.v1", "proxy-a", budget, nanos::get, metrics,
+        return new NatsTransport(publisher, "corvus.capture.v1", "proxy-a", 16, budget, nanos::get, metrics,
                 warnings::add);
     }
 
@@ -59,7 +59,7 @@ class NatsTransportTest {
         t.begin(s, start(s));
 
         FakeEnvelopePublisher.Published p = publisher.published.get(0);
-        assertEquals("corvus.capture.v1.proxy-a", p.subject());
+        assertEquals("corvus.capture.v1.proxy-a.00", p.subject());
         assertEquals("capture.v1", p.headers().get("Corvus-Schema"));
         assertEquals(s.idHex() + "-0", p.headers().get("Nats-Msg-Id"));
         assertEquals(start(s), Envelope.parseFrom(p.body()), "body is the bare envelope without length prefix");
@@ -310,7 +310,7 @@ class NatsTransportTest {
 
     @Test
     void backlogOverflowDropsOldestSessionEndThenSegmentButNeverASessionStart() {
-        NatsTransport t = new NatsTransport(publisher, "corvus.capture.v1", "proxy-a", 1 << 20, 4, 1 << 20,
+        NatsTransport t = new NatsTransport(publisher, "corvus.capture.v1", "proxy-a", 16, 1 << 20, 4, 1 << 20,
                 nanos::get, metrics, warnings::add);
         publisher.ready = false;
         SessionState a = session(1);
@@ -334,7 +334,7 @@ class NatsTransportTest {
 
     @Test
     void backlogIsBoundedByBytesToo() {
-        NatsTransport t = new NatsTransport(publisher, "corvus.capture.v1", "proxy-a", 1 << 20, 100, 40,
+        NatsTransport t = new NatsTransport(publisher, "corvus.capture.v1", "proxy-a", 16, 1 << 20, 100, 40,
                 nanos::get, metrics, warnings::add);
         publisher.ready = false;
         SessionState a = session(1);
@@ -374,7 +374,7 @@ class NatsTransportTest {
     void writerBatchingFeedsTheNatsTransport() throws Exception {
         ByteBoundedQueue queue = new ByteBoundedQueue(1 << 20);
         EngineFixture f = EngineFixture.withSink(queue);
-        NatsTransport t = new NatsTransport(publisher, "corvus.capture.v1", "proxy-test", 1 << 20, f.nanos::get,
+        NatsTransport t = new NatsTransport(publisher, "corvus.capture.v1", "proxy-test", 16, 1 << 20, f.nanos::get,
                 f.metrics, f.logs::add);
         CaptureWriter writer = new CaptureWriter(t, queue, 2, 5_000, f.nanos::get, f.metrics, f.logs::add);
         for (int i = 0; i < 5; i++) {

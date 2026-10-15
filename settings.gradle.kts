@@ -1,3 +1,3 @@
 rootProject.name = "corvus"
 
-include(":proto-java", ":plugin")
+include(":proto-java", ":api", ":plugin")

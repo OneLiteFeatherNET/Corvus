@@ -6,6 +6,7 @@ import com.velocitypowered.api.command.CommandMeta;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.player.ServerPostConnectEvent;
+import com.velocitypowered.api.event.connection.PostLoginEvent;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
 import com.velocitypowered.api.event.proxy.ProxyShutdownEvent;
 import com.velocitypowered.api.plugin.Dependency;
@@ -13,6 +14,7 @@ import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
+import net.onelitefeather.corvus.api.CorvusProvider;
 import net.onelitefeather.corvus.plugin.BuildConstants;
 import net.onelitefeather.corvus.plugin.capture.ByteBoundedQueue;
 import net.onelitefeather.corvus.plugin.capture.CaptureEngine;
@@ -26,6 +28,11 @@ import net.onelitefeather.corvus.plugin.capture.StatsReporter;
 import net.onelitefeather.corvus.plugin.capture.WriterThread;
 import net.onelitefeather.corvus.plugin.config.CorvusConfig;
 import net.onelitefeather.corvus.plugin.nats.JetStreamEnvelopePublisher;
+import net.onelitefeather.corvus.plugin.nats.ScoreSubscriber;
+import net.onelitefeather.corvus.plugin.score.PseudonymDirectory;
+import net.onelitefeather.corvus.plugin.score.RateLimitedLog;
+import net.onelitefeather.corvus.plugin.score.ScoreProcessor;
+import net.onelitefeather.corvus.plugin.score.ScoreRegistry;
 import net.onelitefeather.corvus.plugin.pe.CorvusPacketListener;
 import net.onelitefeather.corvus.plugin.privacy.KeyLoader;
 import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
@@ -43,7 +50,10 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.InstantSource;
 import java.util.Optional;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Plugin(
         id = "corvus",
@@ -63,6 +73,10 @@ public final class CorvusPlugin {
     private CaptureEngine engine;
     private WriterThread writerThread;
     private CorvusPacketListener listener;
+    private ScoreRegistry scoreRegistry;
+    private ThreadPoolExecutor scoreExecutor;
+    private PseudonymDirectory pseudonyms;
+    private ScoreSubscriber scoreSubscriber;
 
     @Inject
     public CorvusPlugin(ProxyServer proxy, Logger logger, @DataDirectory Path dataDirectory) {
@@ -117,9 +131,12 @@ public final class CorvusPlugin {
                 },
                 metrics, logger::info);
 
+        startScores(config, key, nano);
+
         StatsReporter commandStats = new StatsReporter(metrics, queue, engine, nano);
         CommandMeta meta = proxy.getCommandManager().metaBuilder("corvus").plugin(this).build();
-        proxy.getCommandManager().register(meta, new CorvusCommand(commandStats));
+        proxy.getCommandManager().register(meta,
+                new CorvusCommand(commandStats, proxy, scoreRegistry, scoreSubscriber != null));
 
         if (!engine.isCapturing()) {
             logger.warn("Corvus is loaded but NOT capturing (no valid pseudonym key). Players are unaffected.");
@@ -129,10 +146,11 @@ public final class CorvusPlugin {
         EnvelopeTransport transport;
         if (config.sinkType() == CorvusConfig.SinkType.NATS) {
             CorvusConfig.Nats nats = config.nats();
-            logger.info("Corvus sink: NATS JetStream {} -> {}.{} (connecting in the background)", nats.urls(),
-                    nats.subjectPrefix(), config.proxyId());
+            logger.info("Corvus sink: NATS JetStream {} -> {}.{}.<partition> (connecting in the background)",
+                    nats.urls(), nats.subjectPrefix(), config.proxyId());
             transport = new NatsTransport(new JetStreamEnvelopePublisher(nats, logger::info, logger::warn),
-                    nats.subjectPrefix(), config.proxyId(), nats.maxInFlightBytes(), nano, metrics, logger::warn);
+                    nats.subjectPrefix(), config.proxyId(), nats.partitions(), nats.maxInFlightBytes(), nano, metrics,
+                    logger::warn);
         } else {
             transport = new FileTransport(dataDirectory.resolve("captures"));
         }
@@ -147,6 +165,38 @@ public final class CorvusPlugin {
 
         listener = new CorvusPacketListener(engine);
         registerListener(0);
+    }
+
+    /** Score subscription and API; independent of capture, but needs the pseudonym key to map players. */
+    private void startScores(CorvusConfig config, Optional<PseudonymKey> key, NanoClock nano) {
+        CorvusConfig.Scores scores = config.scores();
+        AtomicInteger threadNumber = new AtomicInteger();
+        scoreExecutor = new ThreadPoolExecutor(scores.listenerThreads(), scores.listenerThreads(), 0L,
+                TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(scores.listenerQueueSize()), runnable -> {
+                    Thread t = new Thread(runnable, "corvus-score-listener-" + threadNumber.incrementAndGet());
+                    t.setDaemon(true);
+                    return t;
+                });
+        RateLimitedLog log = new RateLimitedLog(nano, logger::warn, RateLimitedLog.DEFAULT_INTERVAL_NANOS);
+        scoreRegistry = new ScoreRegistry(scoreExecutor, log);
+        // The API is always available; without scoring it simply never has scores.
+        CorvusProvider.register(scoreRegistry);
+        if (!scores.enabled()) {
+            return;
+        }
+        if (key.isEmpty()) {
+            logger.warn("scores.enabled but there is no pseudonym key: scores cannot be mapped to players");
+            return;
+        }
+        Pseudonymizer pseudonymizer = new Pseudonymizer(key.get());
+        pseudonyms = new PseudonymDirectory(pseudonymizer::pseudonym);
+        for (Player online : proxy.getAllPlayers()) {
+            pseudonyms.add(online.getUniqueId());
+        }
+        ScoreProcessor processor = new ScoreProcessor(pseudonyms, scoreRegistry, InstantSource.system(), log);
+        scoreSubscriber = new ScoreSubscriber(config.nats(), scores.subject(), processor::onMessage, logger::info,
+                logger::warn);
+        logger.info("Corvus scores: subscribing to {} (connecting in the background)", scores.subject());
     }
 
     /** PacketEvents initialises itself in its own ProxyInitializeEvent handler; wait until it is ready. */
@@ -182,7 +232,28 @@ public final class CorvusPlugin {
     }
 
     @Subscribe
+    public void onPostLogin(PostLoginEvent event) {
+        try {
+            if (pseudonyms != null) {
+                pseudonyms.add(event.getPlayer().getUniqueId());
+            }
+        } catch (Throwable t) {
+            logger.debug("Corvus ignored a pseudonym cache failure", t);
+        }
+    }
+
+    @Subscribe
     public void onDisconnect(DisconnectEvent event) {
+        try {
+            if (pseudonyms != null) {
+                pseudonyms.remove(event.getPlayer().getUniqueId());
+            }
+            if (scoreRegistry != null) {
+                scoreRegistry.evict(event.getPlayer().getUniqueId());
+            }
+        } catch (Throwable t) {
+            logger.debug("Corvus ignored a score eviction failure", t);
+        }
         try {
             if (engine != null) {
                 engine.onDisconnect(event.getPlayer().getUniqueId());
@@ -194,6 +265,15 @@ public final class CorvusPlugin {
 
     @Subscribe
     public void onProxyShutdown(ProxyShutdownEvent event) {
+        if (scoreSubscriber != null) {
+            scoreSubscriber.close(Duration.ofSeconds(2));
+        }
+        if (scoreRegistry != null) {
+            CorvusProvider.unregister(scoreRegistry);
+        }
+        if (scoreExecutor != null) {
+            scoreExecutor.shutdownNow();
+        }
         try {
             if (listener != null) {
                 PacketEvents.getAPI().getEventManager().unregisterListener(listener);

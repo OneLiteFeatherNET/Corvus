@@ -67,7 +67,7 @@ writable for the proxy user (uid 1000).
 
 `sink.type = "file"` (the pilot default) writes the `.cvc` files described above. `sink.type = "nats"`
 publishes every envelope to NATS JetStream instead, following the transport contract in
-[`docs/reference/data-lake.md`](reference/data-lake.md) section 1: subject `<nats.subject_prefix>.<proxy_id>`,
+[`docs/reference/data-lake.md`](reference/data-lake.md) section 1: subject `<nats.subject_prefix>.<proxy_id>.<partition>` (`nats.partitions`, default 16, two-digit decimal),
 body = one serialized `Envelope`, headers `Nats-Msg-Id` (`<session-id-hex>-<n>`) and `Corvus-Schema`, each
 envelope below 512 KiB. The keys are `nats.url` (one URL or a list), `nats.creds_file` (optional),
 `nats.subject_prefix` (default `corvus.capture.v1`), `nats.max_in_flight_bytes` (default 32 MiB) and
@@ -83,6 +83,12 @@ Behaviour to know when operating the NATS sink:
   batch is dropped; its frames are counted as `dropped_transport`, reported in the next `CaptureBatch` or
   `SessionEnd` counters, and shown as `dropped_transport=` in `/corvus stats` and the 60 s log line.
 - On shutdown the plugin flushes with a bounded 3 s timeout and then closes the connection.
+
+### Online scores (`[scores]`)
+
+With `sink.type = "nats"` (or `scores.enabled = true`) the plugin also subscribes to `corvus.score.v1.>` and serves
+the scores of online players to other plugins through `corvus-api`, and through `/corvus score <player>`
+(permission `corvus.admin`). Details and the decision-aid rules: [`docs/reference/plugin-api.md`](reference/plugin-api.md).
 
 ### Raw payload policy (`capture.raw_payloads`)
 

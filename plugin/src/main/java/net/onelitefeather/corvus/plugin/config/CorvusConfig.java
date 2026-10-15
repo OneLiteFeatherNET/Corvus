@@ -28,7 +28,8 @@ public record CorvusConfig(
         String defaultGameContext,
         Map<String, String> serverContexts,
         SinkType sinkType,
-        Nats nats) {
+        Nats nats,
+        Scores scores) {
 
     public enum ListMode { ALL, ALLOWLIST }
 
@@ -41,13 +42,21 @@ public record CorvusConfig(
             String subjectPrefix,
             long maxInFlightBytes,
             long publishTimeoutMillis,
-            long reconnectBufferBytes) {
+            long reconnectBufferBytes,
+            int partitions) {
 
         public static final String DEFAULT_SUBJECT_PREFIX = "corvus.capture.v1";
+        public static final int DEFAULT_PARTITIONS = 16;
 
         public Nats {
             urls = List.copyOf(urls);
         }
+    }
+
+    /** Settings of the online score subscription; connection settings come from {@link Nats}. */
+    public record Scores(boolean enabled, String subject, int listenerThreads, int listenerQueueSize) {
+
+        public static final String DEFAULT_SUBJECT = "corvus.score.v1.>";
     }
 
     public static final String DEFAULT_TOML = """
@@ -91,14 +100,27 @@ public record CorvusConfig(
             url = ["nats://localhost:4222"]
             # Optional NATS credentials file (.creds); empty = no authentication.
             creds_file = ""
-            # Envelopes go to <subject_prefix>.<proxy_id>.
+            # Envelopes go to <subject_prefix>.<proxy_id>.<partition>.
             subject_prefix = "corvus.capture.v1"
+            # Number of partitions: first 4 bytes of the session id (big-endian, unsigned) mod partitions, written
+            # with at least two digits (00..15). Must be identical on all proxies and match the scorers.
+            partitions = 16
             # Unacknowledged bytes allowed in flight; further batches are dropped (dropped_transport).
             max_in_flight_bytes = 33554432
             # A publish without an acknowledgement after this long counts as failed.
             publish_timeout_seconds = 5
             # Bytes jnats buffers while reconnecting; beyond this publishes fail.
             reconnect_buffer_bytes = 8388608
+
+            [scores]
+            # Subscribe to the scores of the scoring service and expose them through the corvus-api. Defaults to
+            # true when sink.type = "nats" and false otherwise; set it explicitly to override. Needs [nats] url
+            # and the pseudonym key (scores are mapped to online players through their pseudonym).
+            # enabled = true
+            subject = "corvus.score.v1.>"
+            # Worker threads and queue size (updates) for score listeners of other plugins; a full queue drops updates.
+            listener_threads = 2
+            listener_queue = 1024
 
             [game_context]
             default = "unknown"
@@ -152,7 +174,20 @@ public record CorvusConfig(
                 toml.getString("game_context.default", "unknown"),
                 contexts,
                 sinkType,
-                parseNats(toml, sinkType));
+                parseNats(toml, sinkType),
+                parseScores(toml, sinkType));
+    }
+
+    private static Scores parseScores(Toml toml, SinkType sinkType) {
+        Toml scores = toml.getTable("scores");
+        Object rawEnabled = scores == null ? null : scores.toMap().get("enabled");
+        boolean enabled = rawEnabled instanceof Boolean b ? b : sinkType == SinkType.NATS;
+        String subject = toml.getString("scores.subject", Scores.DEFAULT_SUBJECT).trim();
+        return new Scores(
+                enabled,
+                subject.isEmpty() ? Scores.DEFAULT_SUBJECT : subject,
+                (int) Math.min(16L, Math.max(1L, toml.getLong("scores.listener_threads", 2L))),
+                (int) Math.min(1_000_000L, Math.max(1L, toml.getLong("scores.listener_queue", 1024L))));
     }
 
     private static Nats parseNats(Toml toml, SinkType sinkType) {
@@ -167,8 +202,11 @@ public record CorvusConfig(
             urls.add(String.valueOf(rawUrl).trim());
         }
         urls.removeIf(String::isEmpty);
-        if (urls.isEmpty() && sinkType == SinkType.NATS) {
-            throw new IllegalArgumentException("sink.type = \"nats\" requires nats.url (one URL or a list)");
+        Object rawScores = toml.getTable("scores") == null ? null : toml.getTable("scores").toMap().get("enabled");
+        boolean scoresOn = rawScores instanceof Boolean b && b;
+        if (urls.isEmpty() && (sinkType == SinkType.NATS || scoresOn)) {
+            throw new IllegalArgumentException(
+                    "sink.type = \"nats\" or scores.enabled = true requires nats.url (one URL or a list)");
         }
         String prefix = toml.getString("nats.subject_prefix", Nats.DEFAULT_SUBJECT_PREFIX).trim();
         return new Nats(
@@ -177,7 +215,8 @@ public record CorvusConfig(
                 prefix.isEmpty() ? Nats.DEFAULT_SUBJECT_PREFIX : prefix,
                 Math.max(1024L, toml.getLong("nats.max_in_flight_bytes", 32L * 1024 * 1024)),
                 Math.max(1L, toml.getLong("nats.publish_timeout_seconds", 5L)) * 1000L,
-                Math.max(64L * 1024, toml.getLong("nats.reconnect_buffer_bytes", 8L * 1024 * 1024)));
+                Math.max(64L * 1024, toml.getLong("nats.reconnect_buffer_bytes", 8L * 1024 * 1024)),
+                (int) Math.min(100_000L, Math.max(1L, toml.getLong("nats.partitions", (long) Nats.DEFAULT_PARTITIONS))));
     }
 
     private static Object rawPayloadsValue(Toml toml) {
