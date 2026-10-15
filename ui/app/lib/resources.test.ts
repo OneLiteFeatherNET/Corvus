@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { createApiClient } from './api-client'
-import { findModel, jobsResource, labelsResource, modelsResource, playersResource, poolsResource } from './resources'
+import {
+  jobsResource, labelsResource, meResource, modelsResource, playersResource, poolsResource, scoresResource, summaryResource,
+} from './resources'
 import type { Model } from '~/types'
 
 function harness(responder: (url: string, init: RequestInit) => unknown) {
@@ -69,24 +71,50 @@ describe('resources', () => {
   })
 })
 
-describe('findModel', () => {
-  it('walks the pages until it finds name and version', async () => {
-    const list = vi.fn()
-      .mockResolvedValueOnce({ items: [model('a', '1')], next_cursor: 'c1' })
-      .mockResolvedValueOnce({ items: [model('a', '2'), model('b', '1')], next_cursor: null })
-    const found = await findModel({ list } as never, 'b', '1')
-    expect(found?.id).toBe('b-1')
-    expect(list).toHaveBeenLastCalledWith({ limit: 200, cursor: 'c1' })
+describe('endpoints of the extended API', () => {
+  const pseudonym = 'ab'.repeat(32)
+
+  it('reads the identity from /me and the dashboard from /summary', async () => {
+    const { client, calls } = harness(() => ({}))
+    await meResource(client).get()
+    await summaryResource(client).get()
+    expect(calls.map(c => c.url)).toEqual(['/api/v1/me', '/api/v1/summary'])
   })
 
-  it('returns null when the registry has no such model', async () => {
-    const list = vi.fn().mockResolvedValue({ items: [model('a', '1')], next_cursor: null })
-    expect(await findModel({ list } as never, 'x', '9')).toBeNull()
+  it('lists erasure requests from the API with paging and status filter', async () => {
+    const { client, calls } = harness(() => ({ items: [], next_cursor: null }))
+    await playersResource(client).erasureRequests({ limit: 50, cursor: 'c1', status: 'completed' })
+    expect(calls[0]!.url).toBe('/api/v1/erasure-requests?limit=50&cursor=c1&status=completed')
+    expect(calls[0]!.init.method).toBe('GET')
   })
 
-  it('stops after maxPages', async () => {
-    const list = vi.fn().mockResolvedValue({ items: [], next_cursor: 'more' })
-    expect(await findModel({ list } as never, 'x', '9', 3)).toBeNull()
-    expect(list).toHaveBeenCalledTimes(3)
+  it('sends the model filters to the server and skips empty ones', async () => {
+    const { client, calls } = harness(() => ({ items: [], next_cursor: null }))
+    await modelsResource(client).list({ limit: 200, name: 'gbm', version: '', gameContext: 'bw', domain: 'movement', stage: 'canary' })
+    expect(calls[0]!.url).toBe('/api/v1/models?limit=200&name=gbm&game_context=bw&domain=movement&stage=canary')
+  })
+
+  it('looks a model up by name and version and escapes both', async () => {
+    const { client, calls } = harness(() => model('a/b', '1.0'))
+    await modelsResource(client).byRef('a/b', '1.0 rc')
+    expect(calls[0]!.url).toBe('/api/v1/models/a%2Fb/1.0%20rc')
+  })
+
+  it('previews an unsaved filter with the filter as body and the given abort signal', async () => {
+    const { client, calls } = harness(() => ({}))
+    const controller = new AbortController()
+    await poolsResource(client).previewFilter({ game_contexts: ['bw'] } as never, controller.signal)
+    expect(calls[0]!.url).toBe('/api/v1/pools/preview')
+    expect(calls[0]!.init.method).toBe('POST')
+    expect(calls[0]!.init.body).toBe('{"game_contexts":["bw"]}')
+    expect(calls[0]!.init.signal).toBe(controller.signal)
+  })
+
+  it('reads the latest scores and the history of a pseudonym', async () => {
+    const { client, calls } = harness(() => ({ items: [] }))
+    await scoresResource(client).latest(pseudonym)
+    await scoresResource(client).history(pseudonym, { gameContext: 'bw', limit: 250 })
+    expect(calls[0]!.url).toBe(`/api/v1/scores/players/${pseudonym}`)
+    expect(calls[1]!.url).toBe(`/api/v1/scores/players/${pseudonym}/history?game_context=bw&limit=250`)
   })
 })

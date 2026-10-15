@@ -9,6 +9,7 @@ export type Action =
   | 'models.read' | 'models.transition'
   | 'labels.read' | 'labels.create' | 'labels.import'
   | 'players.manage' | 'blocklist.manage'
+  | 'scores.read'
 
 const READ: readonly Role[] = ['viewer', 'staff', 'data_scientist', 'admin']
 const DS: readonly Role[] = ['data_scientist', 'admin']
@@ -28,6 +29,7 @@ export const REQUIRED_ROLES: Record<Action, readonly Role[]> = {
   'labels.import': DS,
   'players.manage': ['admin'],
   'blocklist.manage': ['admin'],
+  'scores.read': ['staff', 'admin'],
 }
 
 export function can(roles: readonly Role[], action: Action): boolean {

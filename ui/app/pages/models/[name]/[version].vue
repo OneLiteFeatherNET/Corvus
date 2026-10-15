@@ -54,7 +54,7 @@
 
 <script setup lang="ts">
 import { formatDateTime } from '~/lib/format'
-import { findModel } from '~/lib/resources'
+import { ApiError } from '~/lib/problem'
 import { formatMetric, METRICS, metricValue } from '~/lib/metrics'
 import { modelRef } from '~/lib/model-list'
 import type { Model, ModelTransition } from '~/types'
@@ -88,13 +88,11 @@ async function onChanged(updated: Model) {
 
 onMounted(async () => {
   try {
-    const found = await findModel(models, String(route.params.name), String(route.params.version))
-    if (!found) throw new Error(t('models.notFound'))
-    model.value = found
+    model.value = await models.byRef(String(route.params.name), String(route.params.version))
     await loadTransitions()
   }
   catch (e) {
-    loadError.value = e instanceof Error ? e : new Error(String(e))
+    loadError.value = e instanceof ApiError && e.status === 404 ? new Error(t('models.notFound')) : e instanceof Error ? e : new Error(String(e))
   }
 })
 </script>

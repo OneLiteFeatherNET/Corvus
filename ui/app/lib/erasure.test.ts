@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { buildErasureRequest, ERASE_WORD, isErasureConfirmed, isPseudonym, isUuid, shortPseudonym } from './erasure'
-import { readErasureIds, rememberErasureId } from './erasure-log'
 
 const pseudonym = 'ab'.repeat(32)
 const uuid = '069a79f4-44e9-4726-a5be-fca90e38aaf5'
@@ -45,31 +44,5 @@ describe('identifier checks', () => {
 
   it('shortens a pseudonym to the 12 characters the API logs', () => {
     expect(shortPseudonym(pseudonym)).toBe('abababababab')
-  })
-})
-
-describe('erasure log', () => {
-  const memory = () => {
-    const data = new Map<string, string>()
-    return { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v) }
-  }
-
-  it('remembers ids newest first without duplicates', () => {
-    const s = memory()
-    rememberErasureId(s, 'a')
-    rememberErasureId(s, 'b')
-    expect(rememberErasureId(s, 'a')).toEqual(['a', 'b'])
-    expect(readErasureIds(s)).toEqual(['a', 'b'])
-  })
-
-  it('stores only the request id, never the identifier', () => {
-    const s = memory()
-    rememberErasureId(s, 'req-1')
-    expect(s.getItem('corvus.erasure-requests')).toBe('["req-1"]')
-  })
-
-  it('survives corrupt storage', () => {
-    expect(readErasureIds({ getItem: () => '{broken' })).toEqual([])
-    expect(readErasureIds({ getItem: () => '{"a":1}' })).toEqual([])
   })
 })

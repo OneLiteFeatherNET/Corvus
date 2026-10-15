@@ -17,7 +17,7 @@ def _latest(model: str = "gb", stage: str = "enforce", ctx: str = "pvp") -> Scor
     return ScoreLatestRecord(ctx, "combat", model, "1", stage, 0.8, 0.7, 5, FIXED_NOW)
 
 
-def _history(i: int, ctx: str = "pvp", stage: str = "shadow") -> ScoreHistoryRecord:
+def _history(i: int, ctx: str = "pvp", stage: str = "enforce") -> ScoreHistoryRecord:
     return ScoreHistoryRecord(
         i, b"\x07" * 16, 0, ctx, "combat", "gb", "1", stage, 0.5, 0.4, i,
         1_000, 2_000, FIXED_NOW + timedelta(seconds=i),
@@ -29,9 +29,10 @@ def staff(env: Env, token) -> dict[str, str]:
     return env.headers(token(["staff"]))
 
 
-def test_latest_scores_list_every_model_including_shadow(env: Env, staff):
+def test_latest_scores_hide_shadow_models_from_staff(env: Env, staff):
     env.parts["scores"].latest_rows[PSEUDONYM] = [
         _latest("b", "shadow"),
+        _latest("c", "canary"),
         _latest("a", "enforce"),
     ]
 
@@ -39,7 +40,7 @@ def test_latest_scores_list_every_model_including_shadow(env: Env, staff):
 
     assert r.status_code == 200
     items = r.json()["items"]
-    assert [(i["model_name"], i["stage"]) for i in items] == [("a", "enforce"), ("b", "shadow")]
+    assert [(i["model_name"], i["stage"]) for i in items] == [("a", "enforce"), ("c", "canary")]
     assert items[0]["smoothed"] == pytest.approx(0.7)
     assert items[0]["windows"] == 5
 
@@ -90,9 +91,42 @@ def test_scores_need_a_token(env: Env, path):
     assert env.client.get(URL + path).status_code == 401
 
 
-@pytest.mark.parametrize("role", ["viewer", "data_scientist"])
+@pytest.mark.parametrize("role", ["data_scientist", "admin"])
+def test_latest_scores_include_shadow_models_for_model_evaluators(env: Env, token, role):
+    env.parts["scores"].latest_rows[PSEUDONYM] = [_latest("b", "shadow"), _latest("a", "enforce")]
+
+    r = env.client.get(URL, headers=env.headers(token([role])))
+
+    assert [i["stage"] for i in r.json()["items"]] == ["enforce", "shadow"]
+
+
+def test_history_hides_shadow_rows_from_staff_before_the_limit_is_applied(env: Env, staff):
+    env.parts["scores"].history_rows[PSEUDONYM] = [
+        _history(1, stage="enforce"),
+        _history(2, stage="shadow"),
+        _history(3, stage="shadow"),
+    ]
+
+    r = env.client.get(f"{URL}/history?limit=2", headers=staff)
+
+    assert [(i["windows"], i["stage"]) for i in r.json()["items"]] == [(1, "enforce")]
+
+
+@pytest.mark.parametrize("role", ["data_scientist", "admin"])
+def test_history_includes_shadow_rows_for_model_evaluators(env: Env, token, role):
+    env.parts["scores"].history_rows[PSEUDONYM] = [
+        _history(1, stage="enforce"),
+        _history(2, stage="shadow"),
+    ]
+
+    r = env.client.get(f"{URL}/history", headers=env.headers(token([role])))
+
+    assert [i["stage"] for i in r.json()["items"]] == ["shadow", "enforce"]
+
+
+@pytest.mark.parametrize("role", ["viewer"])
 @pytest.mark.parametrize("path", ["", "/history"])
-def test_scores_are_forbidden_for_roles_other_than_staff(env: Env, token, role, path):
+def test_scores_are_forbidden_for_roles_without_score_access(env: Env, token, role, path):
     r = env.client.get(URL + path, headers=env.headers(token([role])))
 
     assert r.status_code == 403

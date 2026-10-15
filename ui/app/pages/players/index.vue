@@ -29,7 +29,10 @@
             <dt>{{ $t('players.lastSeen') }}</dt><dd>{{ formatDateTime(result.last_seen, locale) }}</dd>
             <dt>{{ $t('players.erasedAt') }}</dt><dd>{{ formatDateTime(result.erased_at, locale) }}</dd>
           </dl>
-          <v-btn class="mt-4" color="error" variant="tonal" prepend-icon="mdi-delete-forever-outline" @click="openErasure(result.pseudonym)">{{ $t('players.erasure.open') }}</v-btn>
+          <div class="d-flex flex-wrap ga-3 mt-4">
+            <v-btn color="error" variant="tonal" prepend-icon="mdi-delete-forever-outline" @click="openErasure(result.pseudonym)">{{ $t('players.erasure.open') }}</v-btn>
+            <v-btn variant="tonal" prepend-icon="mdi-chart-line" :to="{ path: '/scores', query: { pseudonym: result.pseudonym } }">{{ $t('players.openScores') }}</v-btn>
+          </div>
         </div>
       </v-card-text>
     </v-card>
@@ -52,13 +55,19 @@
     </v-card>
 
     <h2 class="text-headline-small mb-1">{{ $t('players.requests') }}</h2>
-    <p class="text-body-medium text-on-surface-variant mb-3">{{ $t('players.localLogHint') }}</p>
-    <v-data-table :headers="headers" :items="requests" :no-data-text="$t('common.empty')" item-value="id">
+    <AppProblem :error="requests.error.value" />
+    <v-data-table :headers="headers" :items="requests.items.value" :loading="requests.loading.value" :no-data-text="$t('common.empty')" item-value="id">
       <template #[`item.pseudonym`]="{ item }"><span class="mono">{{ shortPseudonym(item.pseudonym) }}…</span></template>
       <template #[`item.requested_at`]="{ item }">{{ formatDateTime(item.requested_at, locale) }}</template>
       <template #[`item.key_deleted`]="{ item }">{{ item.key_deleted ? $t('common.yes') : $t('common.no') }}</template>
-      <template #[`item.compaction_pending`]="{ item }">{{ item.compaction_pending ? $t('common.yes') : $t('common.no') }}</template>
+      <template #[`item.compaction`]="{ item }">
+        <v-chip size="small" label variant="tonal" :color="item.compaction_pending ? 'warning' : 'primary'" :prepend-icon="item.compaction_pending ? 'mdi-timer-sand' : 'mdi-check'">
+          {{ item.compaction_pending ? $t('players.compactionPending') : $t('players.compactionDone') }}
+        </v-chip>
+      </template>
+      <template #[`item.compacted_at`]="{ item }">{{ formatDateTime(item.compacted_at, locale) }}</template>
     </v-data-table>
+    <v-btn v-if="requests.hasMore()" class="mt-3" variant="tonal" :loading="requests.loading.value" @click="requests.loadMore()">{{ $t('common.loadMore') }}</v-btn>
 
     <ErasureDialog v-model="dialog" :pseudonym="target" @erased="onErased" />
   </div>
@@ -66,9 +75,8 @@
 
 <script setup lang="ts">
 import { isPseudonym, isUuid, shortPseudonym } from '~/lib/erasure'
-import { readErasureIds } from '~/lib/erasure-log'
 import { formatDateTime } from '~/lib/format'
-import type { Erasure, PlayerLookup } from '~/types'
+import type { PlayerLookup } from '~/types'
 
 const { t, locale } = useI18n()
 const players = usePlayers()
@@ -79,7 +87,8 @@ const result = ref<PlayerLookup | null>(null)
 const pseudonymInput = ref('')
 const dialog = ref(false)
 const target = ref('')
-const requests = ref<Erasure[]>([])
+// The API lists the requests, newest first; nothing is remembered in this browser.
+const requests = usePagedList(cursor => players.erasureRequests({ limit: 50, cursor }))
 
 const lookup = useAction(async () => {
   result.value = await players.lookup(uuid.value.trim())
@@ -91,17 +100,12 @@ function openErasure(pseudonym: string) {
   dialog.value = true
 }
 
-async function loadRequests() {
-  const rows = await Promise.all(readErasureIds(localStorage).map(id => players.erasure(id).catch(() => null)))
-  requests.value = rows.filter((r): r is Erasure => r !== null)
-}
-
 async function onErased() {
   pseudonymInput.value = ''
-  await loadRequests()
+  await requests.load()
 }
 
-onMounted(loadRequests)
+onMounted(requests.load)
 
 const headers = computed(() => [
   { title: t('players.pseudonym'), key: 'pseudonym' },
@@ -109,7 +113,8 @@ const headers = computed(() => [
   { title: t('players.requestedBy'), key: 'requested_by' },
   { title: t('players.status'), key: 'status' },
   { title: t('players.keyDeleted'), key: 'key_deleted' },
-  { title: t('players.compactionPending'), key: 'compaction_pending' },
+  { title: t('players.compaction'), key: 'compaction', sortable: false },
+  { title: t('players.compactedAt'), key: 'compacted_at' },
 ])
 </script>
 

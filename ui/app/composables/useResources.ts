@@ -1,5 +1,6 @@
 import {
-  blocklistResource, jobsResource, labelsResource, modelsResource, playersResource, poolsResource, snapshotsResource,
+  blocklistResource, jobsResource, labelsResource, modelsResource, playersResource, poolsResource, scoresResource,
+  snapshotsResource, summaryResource,
 } from '~/lib/resources'
 
 // One composable per resource; each returns the typed calls bound to the shared API client.
@@ -12,3 +13,5 @@ export const useModels = () => modelsResource(api())
 export const useLabels = () => labelsResource(api())
 export const usePlayers = () => playersResource(api())
 export const useBlocklist = () => blocklistResource(api())
+export const useSummary = () => summaryResource(api())
+export const useScores = () => scoresResource(api())
