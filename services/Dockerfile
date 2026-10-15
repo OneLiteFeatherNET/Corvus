@@ -4,7 +4,9 @@ FROM ghcr.io/astral-sh/uv:0.12.24 AS uv
 
 FROM python:3.13-slim AS build
 COPY --from=uv /uv /usr/local/bin/uv
-ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
+# The venv is built at the path it runs from: console-script shebangs and the pyvenv.cfg
+# point into it, so copying a venv built elsewhere would break corvus-ingest and friends.
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_PROJECT_ENVIRONMENT=/opt/venv
 # corvus-ml is a uv path dependency (../ml, serve extra only: onnxruntime, no torch/scikit-learn).
 COPY ml/pyproject.toml ml/README.md /build/ml/
 COPY ml/src /build/ml/src
@@ -16,13 +18,13 @@ COPY proto /build/proto
 COPY services/scripts scripts
 COPY services/src src
 # Generate the protobuf bindings at build time, then install the project without the proto group.
-RUN PATH="/build/services/.venv/bin:$PATH" scripts/gen_proto.sh \
+RUN PATH="/opt/venv/bin:$PATH" scripts/gen_proto.sh \
  && uv sync --frozen --no-dev --no-editable
 
 FROM python:3.13-slim
 RUN groupadd --system --gid 10001 corvus \
  && useradd --system --uid 10001 --gid corvus --no-create-home corvus
-COPY --from=build /build/services/.venv /opt/venv
+COPY --from=build /opt/venv /opt/venv
 COPY services/migrations /app/migrations
 ENV PATH="/opt/venv/bin:$PATH" \
     CORVUS_MIGRATIONS_DIR=/app/migrations \
