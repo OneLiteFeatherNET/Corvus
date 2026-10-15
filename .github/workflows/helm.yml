@@ -1,0 +1,68 @@
+name: Helm
+
+on:
+  pull_request:
+    paths:
+      - "deploy/helm/**"
+      - ".github/workflows/helm.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: helm-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  KUBECONFORM_VERSION: v0.7.0
+  CHART: deploy/helm/corvus
+
+jobs:
+  chart:
+    name: Lint and render chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The chart may not exist on a branch yet; skip the remaining steps until it does.
+      - name: Detect chart
+        id: detect
+        run: |
+          if [ -f "$CHART/Chart.yaml" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$CHART not found, nothing to check"
+          fi
+
+      - uses: azure/setup-helm@v5
+        if: steps.detect.outputs.present == 'true'
+
+      - name: Install kubeconform
+        if: steps.detect.outputs.present == 'true'
+        run: |
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" kubeconform
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      # Defaults plus every values file under ci/ (the full one switches on every optional component).
+      - name: Lint, render and validate
+        if: steps.detect.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          validate() {
+            kubeconform -strict -summary -ignore-missing-schemas \
+              -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+              "$1"
+          }
+          helm lint "$CHART"
+          helm template corvus "$CHART" > "$RUNNER_TEMP/default.yaml"
+          validate "$RUNNER_TEMP/default.yaml"
+          for f in "$CHART"/ci/*.yaml; do
+            [ -e "$f" ] || continue
+            helm lint "$CHART" -f "$f"
+            out="$RUNNER_TEMP/$(basename "$f")"
+            helm template corvus "$CHART" -f "$f" > "$out"
+            validate "$out"
+          done

@@ -1,0 +1,78 @@
+name: Images
+
+# Pull requests build the container images without pushing them. Publishing happens on release in
+# release-please.yml (a tag created with GITHUB_TOKEN never triggers another workflow).
+on:
+  pull_request:
+    paths:
+      - "services/**"
+      - "proto/**"
+      - "ui/**"
+      - ".github/workflows/images.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: images-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  services:
+    name: Build corvus-services (no push)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: detect
+        run: |
+          if [ -f services/Dockerfile ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::services/Dockerfile not found, nothing to build"
+          fi
+
+      - uses: docker/setup-buildx-action@v4
+        if: steps.detect.outputs.present == 'true'
+
+      - name: Build image
+        if: steps.detect.outputs.present == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: services/Dockerfile
+          push: false
+          tags: corvus-services:ci
+          cache-from: type=gha,scope=corvus-services
+          cache-to: type=gha,scope=corvus-services,mode=max
+
+  ui:
+    name: Build corvus-ui (no push)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The UI image only exists once ui/Dockerfile does.
+      - id: detect
+        run: |
+          if [ -f ui/Dockerfile ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::ui/Dockerfile not found, nothing to build"
+          fi
+
+      - uses: docker/setup-buildx-action@v4
+        if: steps.detect.outputs.present == 'true'
+
+      - name: Build image
+        if: steps.detect.outputs.present == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ui/Dockerfile
+          push: false
+          tags: corvus-ui:ci
+          cache-from: type=gha,scope=corvus-ui
+          cache-to: type=gha,scope=corvus-ui,mode=max
