@@ -29,10 +29,13 @@ from .pools import (
 from .ports import (
     BlockEntry,
     DuplicateError,
+    ErasureBrief,
     ErasureRequest,
     ErasureTx,
+    JobBrief,
     JobRecord,
     LabelRecord,
+    ModelFilter,
     ModelRecord,
     PlayerInfo,
     PoolRecord,
@@ -42,7 +45,19 @@ from .ports import (
     SnapshotMaterial,
     SnapshotRecord,
     StaleError,
+    Summary,
     TransitionRecord,
+)
+from .queries import (
+    DELETE_SCORE_HISTORY,
+    DELETE_SCORES_LATEST,
+    SUMMARY_COUNTS,
+    SUMMARY_GROUPS,
+    SUMMARY_RECENT_ERASURES,
+    SUMMARY_RECENT_JOBS,
+    UPDATE_JOB,
+    list_sql,
+    model_conditions,
 )
 from .snapshots import LakeFileRef
 
@@ -68,18 +83,21 @@ async def _list_page[R](
     id_param_sql: str,
     to_record: Callable[[tuple[Any, ...]], R],
     key: Callable[[R], tuple[datetime, str]],
+    time_col: str = "created_at",
 ) -> Page[R]:
     """Keyset pagination, newest first. ``select_sql`` ends before WHERE; all parts are constants."""
-    conds = list(where)
     args = dict(params, limit=req.limit + 1)
     if req.cursor is not None:
-        conds.append(f"(created_at, {id_col}) < (%(cursor_at)s, {id_param_sql})")
         args["cursor_at"] = req.cursor.created_at
         args["cursor_id"] = req.cursor.id
-    sql = select_sql
-    if conds:
-        sql += " WHERE " + " AND ".join(conds)
-    sql += f" ORDER BY created_at DESC, {id_col} DESC LIMIT %(limit)s"
+    sql = list_sql(
+        select_sql,
+        where,
+        id_col=id_col,
+        id_param_sql=id_param_sql,
+        time_col=time_col,
+        with_cursor=req.cursor is not None,
+    )
     async with pool.connection() as conn:
         cur = await conn.execute(sql.encode(), args)
         rows = await cur.fetchall()
@@ -376,6 +394,11 @@ class PgErasureTx:
         )
         return cur.rowcount > 0
 
+    async def delete_scores(self, pseudonym: bytes) -> int:
+        latest = await self._conn.execute(DELETE_SCORES_LATEST, (pseudonym,))
+        history = await self._conn.execute(DELETE_SCORE_HISTORY, (pseudonym,))
+        return int(latest.rowcount) + int(history.rowcount)
+
     async def mark_erased(self, pseudonym: bytes, at: datetime) -> None:
         await self._conn.execute(
             "UPDATE corvus.players SET erased_at = COALESCE(erased_at, %s) WHERE pseudonym = %s",
@@ -402,6 +425,16 @@ class PgErasureTx:
         )
 
 
+_ERASURE_COLS = (
+    "id, pseudonym, requested_by, requested_at, status, player_known, key_deleted,"
+    " compaction_pending"
+)
+
+
+def _erasure(r: tuple[Any, ...]) -> ErasureRequest:
+    return ErasureRequest(r[0], bytes(r[1]), r[2], r[3], r[4], r[5], r[6], r[7])
+
+
 class PgErasureStore:
     def __init__(self, pool: Pool) -> None:
         self._pool = pool
@@ -414,15 +447,28 @@ class PgErasureStore:
     async def get_request(self, request_id: UUID) -> ErasureRequest | None:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT id, pseudonym, requested_by, requested_at, status, player_known,"
-                " key_deleted, compaction_pending FROM corvus.erasure_requests WHERE id = %s",
+                f"SELECT {_ERASURE_COLS} FROM corvus.erasure_requests WHERE id = %s".encode(),
                 (request_id,),
             )
             row = await cur.fetchone()
-        if row is None:
-            return None
-        r = tuple(row)
-        return ErasureRequest(r[0], bytes(r[1]), r[2], r[3], r[4], r[5], r[6], r[7])
+        return _erasure(tuple(row)) if row else None
+
+    async def list_requests(self, req: PageRequest, status: str | None) -> Page[ErasureRequest]:
+        where, params = (
+            ([], {}) if status is None else (["status = %(status)s"], {"status": status})
+        )
+        return await _list_page(
+            self._pool,
+            f"SELECT {_ERASURE_COLS} FROM corvus.erasure_requests",
+            where,
+            params,
+            req,
+            id_col="id",
+            id_param_sql="%(cursor_id)s::uuid",
+            to_record=_erasure,
+            key=lambda e: (e.requested_at, str(e.id)),
+            time_col="requested_at",
+        )
 
 
 async def _put_block(conn: psycopg.AsyncConnection[Any], e: BlockEntry) -> None:
@@ -543,8 +589,17 @@ class PgModelRepo:
             row = await cur.fetchone()
         return _model(tuple(row)) if row else None
 
-    async def list_page(self, req: PageRequest, stage: str | None) -> Page[ModelRecord]:
-        where, params = ([], {}) if stage is None else (["stage = %(stage)s"], {"stage": stage})
+    async def get_by_name_version(self, name: str, version: str) -> ModelRecord | None:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                f"SELECT {_MODEL_COLS} FROM corvus.models WHERE name = %s AND version = %s".encode(),
+                (name, version),
+            )
+            row = await cur.fetchone()
+        return _model(tuple(row)) if row else None
+
+    async def list_page(self, req: PageRequest, flt: ModelFilter) -> Page[ModelRecord]:
+        where, params = model_conditions(flt)
         return await _list_page(
             self._pool,
             f"SELECT {_MODEL_COLS} FROM corvus.models",
@@ -614,7 +669,7 @@ class PgModelRepo:
 
 _JOB_COLS = (
     "id, type, snapshot_id, params, status, runner, runner_ref, message, created_by, created_at,"
-    " updated_at, finished_at"
+    " updated_at, finished_at, result"
 )
 
 
@@ -630,7 +685,7 @@ class PgJobRepo:
         async with self._pool.connection() as conn:
             await conn.execute(
                 f"INSERT INTO corvus.jobs ({_JOB_COLS})"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)".encode(),
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)".encode(),
                 (
                     job.id,
                     job.type,
@@ -644,6 +699,7 @@ class PgJobRepo:
                     job.created_at,
                     job.updated_at,
                     job.finished_at,
+                    Jsonb(job.result) if job.result is not None else None,
                 ),
             )
 
@@ -680,14 +736,21 @@ class PgJobRepo:
         message: str,
         now: datetime,
         finished: bool,
+        result: dict[str, Any] | None = None,
     ) -> JobRecord:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
-                "UPDATE corvus.jobs SET status = %s, runner_ref = COALESCE(%s, runner_ref),"
-                " message = %s, updated_at = %s,"
-                " finished_at = CASE WHEN %s THEN %s ELSE finished_at END"
-                f" WHERE id = %s RETURNING {_JOB_COLS}".encode(),
-                (status, runner_ref, message, now, finished, now, job_id),
+                f"{UPDATE_JOB} WHERE id = %s RETURNING {_JOB_COLS}".encode(),
+                (
+                    status,
+                    runner_ref,
+                    message,
+                    now,
+                    finished,
+                    now,
+                    Jsonb(result) if result is not None else None,
+                    job_id,
+                ),
             )
             row = await cur.fetchone()
         assert row is not None
@@ -723,6 +786,40 @@ class PgScoreRepo:
             return [ScoreHistoryRecord(r[0], bytes(r[1]), *r[2:]) for r in await cur.fetchall()]
 
 
+class PgSummaryRepo:
+    def __init__(self, pool: Pool) -> None:
+        self._pool = pool
+
+    async def summary(self, recent: int) -> Summary:
+        async with self._pool.connection() as conn, conn.transaction():
+            await conn.execute(_READ_ONLY_RR)
+            counts: dict[str, int] = {}
+            for name, sql in SUMMARY_COUNTS.items():
+                cur = await conn.execute(sql.encode())
+                row = await cur.fetchone()
+                counts[name] = int(row[0]) if row else 0
+            groups: dict[str, dict[str, int]] = {}
+            for name, sql in SUMMARY_GROUPS.items():
+                cur = await conn.execute(sql.encode())
+                groups[name] = {str(r[0]): int(r[1]) for r in await cur.fetchall()}
+            cur = await conn.execute(SUMMARY_RECENT_JOBS.encode(), (recent,))
+            jobs = [JobBrief(*r) for r in await cur.fetchall()]
+            cur = await conn.execute(SUMMARY_RECENT_ERASURES.encode(), (recent,))
+            erasures = [
+                ErasureBrief(r[0], bytes(r[1]), r[2], r[3], r[4]) for r in await cur.fetchall()
+            ]
+        return Summary(
+            pools=counts["pools"],
+            snapshots=counts["snapshots"],
+            jobs_by_status=groups["jobs_by_status"],
+            models_by_stage=groups["models_by_stage"],
+            labels_by_label=groups["labels_by_label"],
+            pending_erasures=counts["pending_erasures"],
+            recent_jobs=jobs,
+            recent_erasures=erasures,
+        )
+
+
 class PgDatabase:
     def __init__(self, pool: Pool) -> None:
         self._pool = pool
@@ -745,6 +842,7 @@ async def open_repos(dsn: str, max_size: int) -> Repos:
         models=PgModelRepo(pool),
         jobs=PgJobRepo(pool),
         scores=PgScoreRepo(pool),
+        summary=PgSummaryRepo(pool),
         db=PgDatabase(pool),
         closers=[pool.close],
     )

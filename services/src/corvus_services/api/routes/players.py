@@ -112,6 +112,23 @@ async def erase(
 
 
 @router.get(
+    "/erasure-requests",
+    response_model=Paged[ErasureOut],
+    summary="List erasure requests, newest first (admin)",
+)
+async def list_erasure_requests(
+    status: Literal["completed"] | None = Query(default=None),
+    _: Principal = _ADMIN,
+    page: PageRequest = Depends(get_page),
+    deps: Deps = Depends(get_deps),
+) -> Paged[ErasureOut]:
+    result = await deps.repos.erasure.list_requests(page, status)
+    return Paged[ErasureOut](
+        items=[ErasureOut.of(r) for r in result.items], next_cursor=result.next_cursor
+    )
+
+
+@router.get(
     "/players/erasure/{request_id}",
     response_model=ErasureOut,
     responses={404: {"description": "Unknown request"}},
