@@ -73,7 +73,8 @@ class CorvusConfigTest {
         CorvusConfig c = CorvusConfig.parse("proxy_id = \"p\"\n");
 
         assertEquals(CorvusConfig.SinkType.FILE, c.sinkType());
-        assertEquals(List.of("nats://localhost:4222"), c.nats().urls());
+        assertTrue(c.nats().urls().isEmpty(), "no implicit localhost default");
+        assertEquals(8L * 1024 * 1024, c.nats().reconnectBufferBytes());
         assertEquals("", c.nats().credsFile());
         assertEquals("corvus.capture.v1", c.nats().subjectPrefix());
         assertEquals(32L * 1024 * 1024, c.nats().maxInFlightBytes());
@@ -106,6 +107,24 @@ class CorvusConfigTest {
         CorvusConfig c = CorvusConfig.parse("[nats]\nurl = \"nats://only:4222\"\n");
 
         assertEquals(List.of("nats://only:4222"), c.nats().urls());
+    }
+
+    @Test
+    void natsSinkWithoutUrlIsAConfigError() {
+        IllegalArgumentException missing = assertThrows(IllegalArgumentException.class,
+                () -> CorvusConfig.parse("[sink]\ntype = \"nats\"\n"));
+        IllegalArgumentException empty = assertThrows(IllegalArgumentException.class,
+                () -> CorvusConfig.parse("[sink]\ntype = \"nats\"\n[nats]\nurl = []\n"));
+
+        assertTrue(missing.getMessage().contains("nats.url"), missing.getMessage());
+        assertTrue(empty.getMessage().contains("nats.url"), empty.getMessage());
+    }
+
+    @Test
+    void reconnectBufferIsConfigurable() {
+        CorvusConfig c = CorvusConfig.parse("[nats]\nreconnect_buffer_bytes = 1048576\n");
+
+        assertEquals(1_048_576L, c.nats().reconnectBufferBytes());
     }
 
     @Test

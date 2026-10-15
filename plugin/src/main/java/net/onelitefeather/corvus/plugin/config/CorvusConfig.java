@@ -40,7 +40,8 @@ public record CorvusConfig(
             String credsFile,
             String subjectPrefix,
             long maxInFlightBytes,
-            long publishTimeoutMillis) {
+            long publishTimeoutMillis,
+            long reconnectBufferBytes) {
 
         public static final String DEFAULT_SUBJECT_PREFIX = "corvus.capture.v1";
 
@@ -85,7 +86,8 @@ public record CorvusConfig(
             type = "file"
 
             [nats]
-            # One URL or a list of URLs. Connects in the background; an outage never delays the proxy.
+            # Required when sink.type = "nats": one URL or a list. Connects in the background; an outage never
+            # delays the proxy.
             url = ["nats://localhost:4222"]
             # Optional NATS credentials file (.creds); empty = no authentication.
             creds_file = ""
@@ -95,6 +97,8 @@ public record CorvusConfig(
             max_in_flight_bytes = 33554432
             # A publish without an acknowledgement after this long counts as failed.
             publish_timeout_seconds = 5
+            # Bytes jnats buffers while reconnecting; beyond this publishes fail.
+            reconnect_buffer_bytes = 8388608
 
             [game_context]
             default = "unknown"
@@ -148,10 +152,10 @@ public record CorvusConfig(
                 toml.getString("game_context.default", "unknown"),
                 contexts,
                 sinkType,
-                parseNats(toml));
+                parseNats(toml, sinkType));
     }
 
-    private static Nats parseNats(Toml toml) {
+    private static Nats parseNats(Toml toml, SinkType sinkType) {
         List<String> urls = new ArrayList<>();
         Toml nats = toml.getTable("nats");
         Object rawUrl = nats == null ? null : nats.toMap().get("url");
@@ -163,8 +167,8 @@ public record CorvusConfig(
             urls.add(String.valueOf(rawUrl).trim());
         }
         urls.removeIf(String::isEmpty);
-        if (urls.isEmpty()) {
-            urls.add("nats://localhost:4222");
+        if (urls.isEmpty() && sinkType == SinkType.NATS) {
+            throw new IllegalArgumentException("sink.type = \"nats\" requires nats.url (one URL or a list)");
         }
         String prefix = toml.getString("nats.subject_prefix", Nats.DEFAULT_SUBJECT_PREFIX).trim();
         return new Nats(
@@ -172,7 +176,8 @@ public record CorvusConfig(
                 toml.getString("nats.creds_file", "").trim(),
                 prefix.isEmpty() ? Nats.DEFAULT_SUBJECT_PREFIX : prefix,
                 Math.max(1024L, toml.getLong("nats.max_in_flight_bytes", 32L * 1024 * 1024)),
-                Math.max(1L, toml.getLong("nats.publish_timeout_seconds", 5L)) * 1000L);
+                Math.max(1L, toml.getLong("nats.publish_timeout_seconds", 5L)) * 1000L,
+                Math.max(64L * 1024, toml.getLong("nats.reconnect_buffer_bytes", 8L * 1024 * 1024)));
     }
 
     private static Object rawPayloadsValue(Toml toml) {

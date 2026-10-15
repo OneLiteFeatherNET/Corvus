@@ -17,6 +17,12 @@ final class FakeEnvelopePublisher implements EnvelopePublisher {
     boolean autoAck = true;
     RuntimeException throwOnPublish;
     Duration closedWith;
+    boolean ready = true;
+
+    @Override
+    public boolean isReady() {
+        return ready;
+    }
 
     @Override
     public CompletionStage<Void> publish(String subject, Map<String, String> headers, byte[] body) {

@@ -14,5 +14,8 @@ public interface EnvelopePublisher {
     CompletionStage<Void> publish(String subject, Map<String, String> headers, byte[] body);
 
     /** Flushes what is buffered, waiting at most {@code timeout}, then releases the connection. */
+    /** True when a connection exists, so deferred lifecycle envelopes can be published. */
+    boolean isReady();
+
     void close(Duration timeout);
 }

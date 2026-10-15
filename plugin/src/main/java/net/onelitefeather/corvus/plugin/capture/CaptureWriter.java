@@ -80,6 +80,7 @@ public final class CaptureWriter {
 
     /** Flushes sessions whose oldest buffered frames have waited for the flush interval. */
     public void flushDue() {
+        transport.poll();
         long now = clock.nanoTime();
         for (Target t : targets.values()) {
             if (!t.pending.isEmpty() && now - t.lastFlushNanos >= flushIntervalNanos) {

@@ -20,12 +20,10 @@ import java.util.function.Consumer;
 /**
  * {@link EnvelopePublisher} on the official jnats client. The connection is built on a background thread and
  * jnats keeps reconnecting forever with a bounded reconnect buffer, so an outage never delays the proxy and a
- * publish only ever completes exceptionally, never blocks. Until the first connection exists, publishes fail
- * (and are counted as dropped). The stream is not created here.
+ * publish only ever completes exceptionally, never blocks. Until the first connection exists, isReady() is false
+ * and the transport keeps lifecycle envelopes back. The stream is not created here.
  */
 public final class JetStreamEnvelopePublisher implements EnvelopePublisher {
-
-    private static final long RECONNECT_BUFFER_BYTES = 8L * 1024 * 1024;
 
     private final long publishTimeoutMillis;
     private final Consumer<String> info;
@@ -49,7 +47,7 @@ public final class JetStreamEnvelopePublisher implements EnvelopePublisher {
                     .servers(config.urls().toArray(new String[0]))
                     .connectionName("corvus-capture")
                     .maxReconnects(-1)
-                    .reconnectBufferSize(RECONNECT_BUFFER_BYTES)
+                    .reconnectBufferSize(config.reconnectBufferBytes())
                     .connectionListener((conn, type) -> onConnectionEvent(type))
                     .errorListener(new io.nats.client.ErrorListener() {
                         @Override
@@ -105,6 +103,12 @@ public final class JetStreamEnvelopePublisher implements EnvelopePublisher {
         } catch (Throwable t) {
             return CompletableFuture.failedFuture(t);
         }
+    }
+
+    @Override
+    public boolean isReady() {
+        Connection conn = connection;
+        return jetStream != null && conn != null && conn.getStatus() == Connection.Status.CONNECTED;
     }
 
     @Override

@@ -25,5 +25,9 @@ public interface EnvelopeTransport {
     void end(SessionState session);
 
     /** Releases everything, waiting only a short bounded time for outstanding deliveries. */
+    /** Called regularly by the writer thread; lets a transport retry deferred work. Default: nothing. */
+    default void poll() {
+    }
+
     void close();
 }
