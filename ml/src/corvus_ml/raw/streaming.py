@@ -28,6 +28,7 @@ goes backwards is clamped to the previous one.
 
 from __future__ import annotations
 
+from array import array
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
@@ -127,7 +128,7 @@ class SegmentWindower:
         self._dt: list[int] = []
         self._trunc: list[bool] = []
         self._nopay: list[bool] = []
-        self._tokens: list[list[int]] = []
+        self._tokens: list[array[int]] = []  # int16 payload ids per frame (compact)
         # macro grouping
         self._group: int | None = None
         self._members: dict[int, StreamWindow] = {}
@@ -192,7 +193,7 @@ class SegmentWindower:
         self._dt.extend(dt.tolist())
         self._trunc.extend(trunc)
         self._nopay.extend(nopay)
-        self._tokens.extend(tokens)
+        self._tokens.extend(array("h", t) for t in tokens)
         self._last_offset = int(offsets[-1])
         if self._first is None:
             self._first = int(offsets[0])
