@@ -81,7 +81,45 @@ def choose_candidate(candidates: dict[str, dict[str, Any]], select_by: str) -> s
     return max(usable, key=sort_key)[0] if usable else None
 
 
-def _read_params(ctx: JobContext, spec: FeatureSpec, train: bool) -> dict[str, Any]:
+RAW_WINDOW_KEYS = ("window_seconds", "stride_seconds", "max_packets", "overflow", "min_packets")
+
+
+def _candidate_names(params: dict[str, Any]) -> list[str]:
+    raw = params.get("candidates", list(DEFAULT_CANDIDATES))
+    if isinstance(raw, list):
+        return [n for n in raw if isinstance(n, str)]
+    return [str(n) for n in raw] if isinstance(raw, dict) else []
+
+
+def wants_raw(params: dict[str, Any]) -> bool:
+    """True if the requested candidates read raw packet bytes (they need the ``raw/`` build)."""
+    from corvus_ml.eval import candidates as cand_pkg
+
+    kinds = {
+        cand_pkg.REGISTRY[n].input_kind == "raw_bytes"
+        for n in _candidate_names(params)
+        if n in cand_pkg.REGISTRY
+    }
+    if len(kinds) > 1:
+        raise JobError("raw-byte candidates need their own job: do not mix them with others")
+    return kinds == {True}
+
+
+def _tune_params(p: Params) -> dict[str, Any] | None:
+    """``tune``: false / absent = off, true = defaults, an object = ``[tune]`` settings."""
+    raw = p.raw("tune", False)
+    if raw is False or raw is None:
+        return None
+    if raw is True:
+        return {}
+    if isinstance(raw, dict):
+        return dict(raw)
+    raise JobError("tune must be true, false or an object")
+
+
+def _read_params(
+    ctx: JobContext, spec: FeatureSpec, train: bool, raw_mode: bool = False
+) -> dict[str, Any]:
     from corvus_ml.eval.config import BenchConfig
 
     p = Params(ctx.params)
@@ -113,7 +151,27 @@ def _read_params(ctx: JobContext, spec: FeatureSpec, train: bool) -> dict[str, A
         "calibration": p.string("calibration", "auto"),
         "select_by": p.string("select_by", DEFAULT_SELECT_BY),
         "benchmark": BenchConfig(**bench_raw),
+        "tune": _tune_params(p),
     }
+    if raw_mode:
+        macro = p.raw("macro_window_seconds")
+        if macro is not None and (isinstance(macro, bool) or not isinstance(macro, (int, float))):
+            raise JobError("macro_window_seconds must be a number")
+        window: dict[str, Any] = {}  # only what the job sets overrides the build's window
+        if p.has("window_seconds"):
+            window["window_seconds"] = p.number("window_seconds", 10.0, 0.01, 86_400.0)
+        if p.has("stride_seconds"):
+            window["stride_seconds"] = p.number("stride_seconds", 5.0, 0.01, 86_400.0)
+        if p.has("max_packets"):
+            window["max_packets"] = p.integer("max_packets", 1024, 1, 100_000)
+        if p.has("overflow"):
+            window["overflow"] = p.string("overflow", "recent")
+        if p.has("min_packets"):
+            window["min_packets"] = p.integer("min_packets", 8, 1, 100_000)
+        if macro is not None:
+            window["macro_window_seconds"] = float(macro)
+        out["raw_window"] = window
+        out["max_windows"] = p.integer("max_windows", 200_000, 1, 10_000_000)
     if train:
         out["model_name"] = p.string("model_name")
         out["version"] = p.string("version")
@@ -144,9 +202,44 @@ def _filtered_labels(path: Path, sources: list[str] | None, min_confidence: floa
     return target
 
 
-def _eval_config(ctx: JobContext, opts: dict[str, Any], features: Path, labels: Path | None):
-    from corvus_ml.eval.config import EvalConfig
+def _tune_config(raw: dict[str, Any] | None):
+    from corvus_ml.eval.config import TuneConfig
 
+    if raw is None:
+        return TuneConfig()
+    known = {f.name for f in dataclasses.fields(TuneConfig)}
+    if set(raw) - known:
+        raise JobError(f"unknown tune keys: {sorted(set(raw) - known)}")
+    return TuneConfig(**raw)
+
+
+def _eval_config(
+    ctx: JobContext, opts: dict[str, Any], features: Path, labels: Path | None, raw_mode=False
+):
+    from corvus_ml.eval.config import EvalConfig, RawEvalConfig
+
+    if raw_mode:
+        window = dict(opts["raw_window"])
+        return EvalConfig(
+            name=f"job-{ctx.job_id[:8]}",
+            seed=opts["seed"],
+            threads=opts["threads"],
+            seq_len=opts["seq_len"],
+            unlabelled=opts["unlabelled"],
+            calibration=opts["calibration"],
+            contexts=opts["contexts"],
+            split=opts["split"],
+            fpr_targets=opts["fpr_targets"],
+            min_confidence=opts["min_confidence"],
+            learning_curve=opts["learning_curve"],
+            labels=labels,
+            raw=RawEvalConfig(
+                dir=features, window_overrides=window, max_windows=opts["max_windows"]
+            ),
+            candidates=opts["candidates"],
+            bench=opts["benchmark"],
+            tune=_tune_config(opts["tune"]),
+        )
     tokens = features / "window_tokens"
     return EvalConfig(
         name=f"job-{ctx.job_id[:8]}",
@@ -166,11 +259,17 @@ def _eval_config(ctx: JobContext, opts: dict[str, Any], features: Path, labels: 
         labels=labels,
         candidates=opts["candidates"],
         bench=opts["benchmark"],
+        tune=_tune_config(opts["tune"]),
     )
 
 
 def _summary(info: dict[str, Any], chosen: str | None) -> dict[str, Any]:
+    tuned = {
+        name: {k: t[k] for k in ("n_trials", "n_complete", "n_pruned", "best_value", "best_params")}
+        for name, t in (info.get("tune") or {}).items()
+    }
     return {
+        **({"tune": tuned} if tuned else {}),
         "chosen": chosen,
         "windows": info["windows"],
         "players": info["players"],
@@ -193,15 +292,21 @@ def _evaluate_and_maybe_train(ctx: JobContext, env: JobEnv, train: bool) -> JobO
     except ModuleNotFoundError as exc:
         raise JobError(f"the eval dependencies are missing from this image: {exc.name}") from None
 
+    raw_mode = wants_raw(ctx.params)
     prefix = layout.features_prefix(ctx.snapshot_id)
+    if raw_mode:
+        prefix = f"{prefix}/raw"
     if not env.store.exists(f"{prefix}/{layout.BUILD_FILE}"):
-        raise JobError("no complete feature build for this snapshot: run build_features first")
+        kind = ' with kind "raw_bytes"' if raw_mode else ""
+        raise JobError(
+            f"no complete feature build for this snapshot: run build_features{kind} first"
+        )
 
     spec_bytes = env.store.get_bytes(f"{prefix}/{SPEC_FILE}")
     features = env.scratch / "features"
     features.mkdir(parents=True, exist_ok=True)
     (features / SPEC_FILE).write_bytes(spec_bytes)
-    opts = _read_params(ctx, FeatureSpec.read(features / SPEC_FILE), train)
+    opts = _read_params(ctx, FeatureSpec.read(features / SPEC_FILE), train, raw_mode)
     unknown = sorted(set(opts["candidates"]) - set(cand_pkg.REGISTRY))
     if unknown:
         raise JobError(f"unknown candidates {unknown}; known: {sorted(cand_pkg.REGISTRY)}")
@@ -209,13 +314,15 @@ def _evaluate_and_maybe_train(ctx: JobContext, env: JobEnv, train: bool) -> JobO
     env.store.download_dir(
         prefix, features, skip=lambda rel: rel.startswith("window_tokens/") and not need_seq
     )
+    if raw_mode:
+        FeatureSpec.load(features / SPEC_FILE, require_tokenizer=True)  # hash of tokenizer.json
     labels = _filtered_labels(
         features / layout.LABELS_FILE, opts["label_sources"], opts["min_confidence"]
     )
 
-    cfg = _eval_config(ctx, opts, features, labels)
+    cfg = _eval_config(ctx, opts, features, labels, raw_mode)
     out = env.scratch / "eval"
-    report = run(cfg, out)
+    report = run(cfg, out, tune=opts["tune"] is not None)
     if not report["contexts"]:
         raise JobError("no windows in the requested game contexts")
     json_path, md_path = write_report(report, out)
@@ -296,7 +403,9 @@ def _publish(
             "job_id": ctx.job_id,
             "created_at": env.clock().isoformat(),
             "input": cls.input_kind,
+            "input_kind": cls.input_kind,
             "feature_spec": SPEC_FILE,
+            **_raw_card(onnx_dir, info),
             "calibration": {
                 k: calibration[k] for k in ("method", "kind", "n_fit", "fit_on") if k in calibration
             },
@@ -317,6 +426,8 @@ def _publish(
         SPEC_FILE: onnx_dir / SPEC_FILE,
         layout.CALIBRATION_FILE: onnx_dir / f"{candidate}.calibration.json",
     }
+    if cls.input_kind == "raw_bytes":
+        uploads["tokenizer.json"] = onnx_dir / "tokenizer.json"
     for target, source in uploads.items():
         env.store.put_file(f"{prefix}/{target}", source)
     env.store.put_bytes(f"{prefix}/{layout.MODEL_CARD_FILE}", json.dumps(card, indent=2).encode())
@@ -344,6 +455,19 @@ def _publish(
         "game_context": context,
         "candidate": candidate,
         "onnx_key": onnx_key,
+    }
+
+
+def _raw_card(onnx_dir: Path, info: dict[str, Any]) -> dict[str, Any]:
+    """``model_card.json`` fields of a raw-byte model: tokenizer hash and window configuration."""
+    spec = FeatureSpec.read(onnx_dir / SPEC_FILE).raw_bytes
+    if spec is None:
+        return {}
+    return {
+        "tokenizer": {"file": spec.tokenizer_file, "sha256": spec.tokenizer_sha256},
+        "window": spec.window.__dict__,
+        "packet": spec.packet.__dict__,
+        "scorer_contract": "docs/reference/raw-byte-tokenizer.md",
     }
 
 

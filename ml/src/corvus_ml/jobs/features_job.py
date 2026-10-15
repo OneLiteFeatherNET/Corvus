@@ -53,6 +53,15 @@ def _timestamp(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+def _protocol(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _hex_id(value: Any, length: int, what: str) -> str:
     try:
         raw = bytes.fromhex(str(value).removeprefix("\\x").replace("-", ""))
@@ -97,6 +106,8 @@ class Selection:
                 "session_id": sid,
                 "pseudonym": _hex_id(pseudonym, 32, "pseudonym") if pseudonym else None,
                 "started_at": _timestamp(item.get("started_at")),
+                # Optional in the API response; only the raw-byte build uses it (protocol token).
+                "client_protocol": _protocol(item.get("client_protocol")),
             }
         )
         for lab in item.get("labels") or []:
@@ -130,8 +141,19 @@ def _write_tables(sel: Selection, out: Path) -> None:
         pq.write_table(pa.Table.from_pylist(sel.labels, LABELS_SCHEMA), out / layout.LABELS_FILE)
 
 
+KINDS = ("aggregate", "raw_bytes", "train_tokenizer")
+
+
 def build_features(ctx: JobContext, env: JobEnv) -> JobOutcome:
+    kind = Params(ctx.params).string("kind", "aggregate")
+    if kind not in KINDS:
+        raise JobError(f"kind must be one of {KINDS}")
+    if kind != "aggregate":
+        from corvus_ml.jobs import raw_job
+
+        return raw_job.build_raw(ctx, env, kind)
     p = Params(ctx.params)
+    p.string("kind")
     contexts = p.game_contexts()
     cfg = FeatureConfig(
         window=p.integer("window", 256, 1, 100_000),
