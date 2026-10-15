@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package corvus.score.v1;
+
+option java_multiple_files = true;
+option java_package = "net.onelitefeather.corvus.proto.score.v1";
+
+// A model's judgement of one context window of one player. Published on
+// corvus.score.v1.<game_context>. Contains no clear-text player identity.
+message Score {
+  // HMAC pseudonym of the player (same as capture SessionStart.player_pseudonym).
+  bytes player_pseudonym = 1;
+  string pseudonym_key_id = 2;
+  bytes session_id = 3;
+  uint32 segment = 4;
+  string game_context = 5;
+  // Model domain, e.g. "movement", "combat", "interaction", "packet_anomaly".
+  string domain = 6;
+  string model_name = 7;
+  string model_version = 8;
+  enum Stage {
+    STAGE_UNSPECIFIED = 0;
+    STAGE_SHADOW = 1;
+    STAGE_CANARY = 2;
+    STAGE_ENFORCE = 3;
+  }
+  Stage stage = 9;
+  // Probability-like score in [0, 1]; higher means more likely cheating.
+  float score = 10;
+  // Smoothed score over the player's recent windows in this segment.
+  float score_smoothed = 11;
+  // Number of windows behind score_smoothed.
+  uint32 windows = 12;
+  uint64 window_start_offset_nanos = 13;
+  uint64 window_end_offset_nanos = 14;
+  int64 scored_at_unix_millis = 15;
+  // Optional explanation: names of the most influential features, most important first.
+  repeated string top_features = 16;
+}

@@ -9,13 +9,17 @@ Changing it requires a schema version bump or an append-only change.
 |---|---|
 | Stream | `CORVUS_CAPTURE` |
 | Subjects | `corvus.capture.v1.>` |
-| Publish subject | `corvus.capture.v1.<proxy_id>` |
+| Publish subject | `corvus.capture.v1.<proxy_id>.<partition>`; `partition` = first 4 bytes of `session_id` as big-endian unsigned int mod `partitions` (default 16), formatted as two-digit decimal (`00`..`15`) |
 | Message body | one serialized `corvus.capture.v1.Envelope` (no length prefix) |
 | Header `Nats-Msg-Id` | `<session-id-hex>-<n>`, `n` = per-session envelope counter starting at 0 (JetStream de-duplication) |
 | Header `Corvus-Schema` | `capture.v1` |
 | Max message size | 1 MiB; the plugin splits `CaptureBatch`es so that each serialized envelope stays below 512 KiB |
 | Stream limits | file storage, `max_age` 24 h, `max_bytes` configurable (default 10 GiB), discard old, duplicate window 2 min |
-| Consumer | durable pull consumer `corvus-ingest`, explicit ack, `ack_wait` 120 s, `max_ack_pending` 1000; all ingest replicas share it |
+| Consumer (ingest) | durable pull consumer `corvus-ingest` on `corvus.capture.v1.>`, explicit ack, `ack_wait` 120 s, `max_ack_pending` 1000; all ingest replicas share it |
+
+All envelopes of one session use the same partition, so a consumer that filters on a partition sees a
+session completely. The partition count is part of the deployment config and must be identical on all
+proxies; changing it requires draining the scorers.
 
 Envelope kinds: `SessionStart`, `SegmentStart`, `CaptureBatch`, `SessionEnd`. Every `CaptureBatch` carries
 `session_id` and `segment`, so ingest never depends on message order.
@@ -104,3 +108,19 @@ after release.
    transaction, then ack all messages whose frames are in the file, then delete the staging object.
 4. Redelivery can produce duplicate rows; readers de-duplicate on (`session_id`, `seq`). Final objects without a
    catalog row older than 1 h are orphans and are removed by housekeeping.
+
+## 6. Online scoring
+
+| Item | Value |
+|---|---|
+| Consumer (scoring) | one durable pull consumer per scorer replica, `corvus-score-<ordinal>`, `filter_subjects` = the replica's partitions (`corvus.capture.v1.*.<p>`), deliver policy `new` (scoring never replays history), explicit ack right after the frames are fed into the featurizer |
+| Partition assignment | replica `i` of `n` owns partitions `p` with `p mod n == i` (StatefulSet ordinal; standalone: config) |
+| Featurizer | the same `corvus_ml.features` code as offline feature building (no training/serving skew) |
+| Models | loaded from the model registry: stages `shadow`, `canary`, `enforce`, one per (`game_context`, `domain`); ONNX Runtime on CPU |
+| Score subject | `corvus.score.v1.<game_context>`; body = serialized `corvus.score.v1.Score` (`proto/corvus/score/v1/score.proto`) |
+| Score stream | `CORVUS_SCORE`, subjects `corvus.score.v1.>`, `max_age` 7 d |
+| Persistence | latest score per (`pseudonym`, `game_context`, `model`) and a bounded history in the catalog |
+
+Scores of `shadow` models are persisted but never published. Consumers must treat `canary` scores as
+informational; only `enforce` scores may drive automated actions in other systems, and Corvus itself
+never sanctions players.
