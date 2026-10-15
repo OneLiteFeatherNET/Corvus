@@ -52,6 +52,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
+            - name: CORVUS_SCORE_RAW_MAX_BUFFERED_FRAMES
+              value: {{ .Values.score.rawMaxBufferedFrames | quote }}
+            - name: CORVUS_SCORE_P99_BUDGET_MS
+              value: {{ .Values.score.p99BudgetMs | quote }}
             {{- include "corvus.extraEnv" .Values.score.env | nindent 12 }}
           ports:
             - name: metrics

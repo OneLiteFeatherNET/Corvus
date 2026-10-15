@@ -248,6 +248,8 @@
         "enabled": {"type": "boolean"},
         "replicas": {"type": "integer", "minimum": 1},
         "metricsPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "rawMaxBufferedFrames": {"type": "integer", "minimum": 64},
+        "p99BudgetMs": {"type": "number", "minimum": 0},
         "env": {"type": "object"},
         "resources": {"$ref": "#/definitions/resources"},
         "podDisruptionBudget": {"$ref": "#/definitions/pdb"},

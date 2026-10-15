@@ -205,6 +205,16 @@ score:
   enabled: true
   replicas: 2
   metricsPort: 9464
+  # Raw-byte models (ADR-CORV-0008). The scorer tokenizes plaintext frames on arrival and buffers
+  # token ids for about one window per session, segment and windowing (roughly 0.3 KiB per frame,
+  # so a 10 s window at 300 frames/s is about 1 MiB per session): size `resources.limits.memory`
+  # for the concurrent players and lower CORVUS_SCORE_SESSIONS_MAX (via `env`) if needed.
+  # Frames buffered per session, segment and windowing at most; the oldest are dropped and counted.
+  rawMaxBufferedFrames: 16384
+  # p99 budget in ms of one raw-byte window. A model whose max_packets is estimated to exceed it is
+  # still served but logs a warning at load time. 0 disables the check. Keep it in line with the
+  # registry gate (CORVUS_GATE_MAX_P99_LATENCY_MS of the api).
+  p99BudgetMs: 10
   env: {}
   resources:
     requests: {cpu: "1", memory: 512Mi}
