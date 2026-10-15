@@ -168,10 +168,30 @@ class PoolCatalog(Protocol):
     async def snapshot_material(self, pool_filter: PoolFilter) -> SnapshotMaterial: ...
 
 
+@dataclass(frozen=True)
+class CurrentFile:
+    """The live lake file that holds the data of a manifest file after compaction."""
+
+    manifest_file_id: int
+    id: int
+    key: str
+
+
 class SnapshotRepo(Protocol):
     async def insert(self, snapshot: SnapshotRecord) -> None: ...
     async def get(self, snapshot_id: UUID) -> SnapshotRecord | None: ...
     async def list_page(self, req: PageRequest, pool_id: UUID | None) -> Page[SnapshotRecord]: ...
+    async def sessions_page(
+        self, snapshot_id: UUID, after: bytes | None, limit: int, exclude_erased: bool
+    ) -> list[bytes]:
+        """Up to ``limit`` session ids of the manifest, ascending, greater than ``after``;
+        sessions of erased players are left out if ``exclude_erased``."""
+        ...
+
+    async def current_files(self, snapshot_id: UUID) -> list[CurrentFile]:
+        """Live files for the manifest's ``events`` files: a file replaced by compaction is
+        followed to its successor; a file without live successor is omitted."""
+        ...
 
 
 class LabelRepo(Protocol):

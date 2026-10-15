@@ -28,6 +28,7 @@ from .pools import (
 )
 from .ports import (
     BlockEntry,
+    CurrentFile,
     DuplicateError,
     ErasureBrief,
     ErasureRequest,
@@ -228,6 +229,35 @@ def _snapshot(r: tuple[Any, ...]) -> SnapshotRecord:
     return SnapshotRecord(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8])
 
 
+# Sessions of a manifest, ascending by id (hex order equals byte order), keyset on the id.
+SESSIONS_PAGE_SQL = (
+    "SELECT sid.session_id FROM corvus.dataset_snapshots d,"
+    " LATERAL (SELECT decode(e.value, 'hex') AS session_id"
+    "  FROM jsonb_array_elements_text(d.manifest -> 'sessions') AS e(value)) sid"
+    " WHERE d.id = %(snapshot_id)s"
+    " AND (%(after)s::bytea IS NULL OR sid.session_id > %(after)s::bytea)"
+    " AND (NOT %(exclude_erased)s OR NOT EXISTS"
+    "  (SELECT 1 FROM corvus.erased_sessions x WHERE x.session_id = sid.session_id))"
+    " ORDER BY sid.session_id LIMIT %(limit)s"
+)
+
+# Follows lake_files.replaced_by from every events file of the manifest to the live successor.
+CURRENT_FILES_SQL = (
+    "WITH RECURSIVE manifest_files AS ("
+    " SELECT (e.value ->> 'id')::bigint AS id"
+    " FROM corvus.dataset_snapshots d,"
+    " jsonb_array_elements(d.manifest -> 'files' -> 'events') AS e(value)"
+    " WHERE d.id = %(snapshot_id)s),"
+    " chain AS ("
+    " SELECT f.id AS origin, f.id, f.s3_key, f.replaced_by, f.deleted_at"
+    " FROM corvus.lake_files f JOIN manifest_files m ON m.id = f.id"
+    " UNION ALL"
+    " SELECT c.origin, n.id, n.s3_key, n.replaced_by, n.deleted_at"
+    " FROM chain c JOIN corvus.lake_files n ON n.id = c.replaced_by)"
+    " SELECT origin, id, s3_key FROM chain WHERE deleted_at IS NULL ORDER BY origin, id"
+)
+
+
 class PgSnapshotRepo:
     def __init__(self, pool: Pool) -> None:
         self._pool = pool
@@ -277,6 +307,26 @@ class PgSnapshotRepo:
             to_record=_snapshot,
             key=lambda s: (s.created_at, str(s.id)),
         )
+
+    async def sessions_page(
+        self, snapshot_id: UUID, after: bytes | None, limit: int, exclude_erased: bool
+    ) -> list[bytes]:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                SESSIONS_PAGE_SQL.encode(),
+                {
+                    "snapshot_id": snapshot_id,
+                    "after": after,
+                    "limit": limit,
+                    "exclude_erased": exclude_erased,
+                },
+            )
+            return [bytes(r[0]) for r in await cur.fetchall()]
+
+    async def current_files(self, snapshot_id: UUID) -> list[CurrentFile]:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(CURRENT_FILES_SQL.encode(), {"snapshot_id": snapshot_id})
+            return [CurrentFile(int(r[0]), int(r[1]), r[2]) for r in await cur.fetchall()]
 
 
 # --- labels -------------------------------------------------------------------------------------
