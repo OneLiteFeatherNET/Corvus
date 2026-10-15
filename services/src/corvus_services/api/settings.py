@@ -7,7 +7,7 @@ import binascii
 import re
 from typing import Literal
 
-from pydantic import AliasChoices, Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MIN_PSEUDONYM_KEY_BYTES = 16
@@ -72,6 +72,21 @@ class ApiSettings(BaseSettings):
         validation_alias=AliasChoices("CORVUS_PSEUDONYM_KEY_ID", "CORVUS_API_PSEUDONYM_KEY_ID"),
     )
 
+    # Retention of raw payloads per pool (NFR-018). The names are shared with housekeeping, which
+    # applies them; the API validates a pool's value against the maximum.
+    raw_retention_default_days: int = Field(
+        default=21,
+        ge=1,
+        validation_alias=AliasChoices(
+            "CORVUS_RAW_RETENTION_DAYS", "CORVUS_API_RAW_RETENTION_DEFAULT_DAYS"
+        ),
+    )
+    raw_retention_max_days: int = Field(
+        default=365, ge=1, validation_alias=AliasChoices(
+            "CORVUS_RAW_RETENTION_MAX_DAYS", "CORVUS_API_RAW_RETENTION_MAX_DAYS"
+        ),
+    )  # fmt: skip
+
     # Models: quality gate for promotion to ``enforce``.
     gate_max_p99_latency_ms: float = Field(default=10.0, gt=0)
 
@@ -98,6 +113,14 @@ class ApiSettings(BaseSettings):
     job_k8s_backoff_limit: int = Field(default=0, ge=0)
     # Name of a Secret that is exposed as environment (S3/DB credentials of the job); optional.
     job_k8s_env_secret: str | None = None
+
+    @model_validator(mode="after")
+    def _default_retention_within_max(self) -> ApiSettings:
+        if self.raw_retention_default_days > self.raw_retention_max_days:
+            raise ValueError(
+                "CORVUS_RAW_RETENTION_DAYS must not exceed CORVUS_RAW_RETENTION_MAX_DAYS"
+            )
+        return self
 
     @field_validator("job_tokens")
     @classmethod

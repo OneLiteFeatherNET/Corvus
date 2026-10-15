@@ -330,3 +330,62 @@ def test_preview_runs_the_pool_filter_and_returns_computed_counts(env: Env, ds):
         "label_distribution": {"legit": 3, "cheat": 2, "unlabeled": 5},
     }
     assert env.parts["catalog"].filters[-1].game_contexts == ["bedwars"]
+
+
+# --- raw retention (NFR-018) ---------------------------------------------------------------------
+
+
+def _create_with_retention(env: Env, headers, days, name="p1"):
+    return env.client.post(
+        "/api/v1/pools", json={"name": name, "raw_retention_days": days}, headers=headers
+    )
+
+
+def test_a_pool_without_retention_uses_the_default(env: Env, ds):
+    pool = _create(env, ds).json()
+
+    assert pool["raw_retention_days"] is None
+    assert pool["effective_raw_retention_days"] == 21
+
+
+def test_a_pool_keeps_its_own_raw_retention(env: Env, ds):
+    pool = _create_with_retention(env, ds, 90).json()
+
+    assert (pool["raw_retention_days"], pool["effective_raw_retention_days"]) == (90, 90)
+    got = env.client.get(f"/api/v1/pools/{pool['id']}", headers=ds).json()
+    assert got["raw_retention_days"] == 90
+
+
+def test_the_maximum_retention_is_accepted_and_one_more_day_is_not(env: Env, ds):
+    maximum = env.deps.settings.raw_retention_max_days
+
+    assert _create_with_retention(env, ds, maximum, "ok").status_code == 201
+    over = _create_with_retention(env, ds, maximum + 1, "over")
+    assert over.status_code == 422
+    assert str(maximum) in over.json()["detail"]
+
+
+@pytest.mark.parametrize("days", [0, -3])
+def test_a_retention_below_one_day_is_invalid(env: Env, ds, days):
+    assert _create_with_retention(env, ds, days).status_code == 422
+
+
+def test_replacing_a_pool_checks_the_maximum_and_can_clear_the_retention(env: Env, ds):
+    pool = _create_with_retention(env, ds, 30).json()
+
+    too_long = env.client.put(
+        f"/api/v1/pools/{pool['id']}", json={"name": "p1", "raw_retention_days": 400}, headers=ds
+    )
+    cleared = env.client.put(f"/api/v1/pools/{pool['id']}", json={"name": "p1"}, headers=ds)
+
+    assert too_long.status_code == 422
+    assert cleared.json()["raw_retention_days"] is None
+
+
+def test_the_effective_retention_is_capped_at_the_configured_maximum(env: Env, ds):
+    created = _create_with_retention(env, ds, 100).json()
+    env.deps.settings = env.deps.settings.model_copy(update={"raw_retention_max_days": 50})
+
+    got = env.client.get(f"/api/v1/pools/{created['id']}", headers=ds).json()
+
+    assert (got["raw_retention_days"], got["effective_raw_retention_days"]) == (100, 50)

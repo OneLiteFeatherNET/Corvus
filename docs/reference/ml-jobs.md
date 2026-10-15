@@ -65,6 +65,16 @@ sessions, labels, `build.json`; section 4 of [raw-byte-tokenizer.md](raw-byte-to
 `train_tokenizer` job writes `tokenizers/<snapshot_id>/<job_id>/{tokenizer.json,feature_spec.json}`.
 Raw-byte models additionally upload `models/<name>/<version>/tokenizer.json`.
 
+**Register what you write.** `features/<snapshot_id>/raw/` holds tokenised payloads, which are personal data derived from
+`raw`. After writing a prefix a job calls `POST /api/v1/snapshots/{snapshot_id}/artifacts` (job token plus
+`X-Corvus-Job-Id`; or `POST /api/v1/jobs/{job_id}/artifacts`) with
+`{"kind": "raw_features", "s3_prefix": "features/<snapshot_id>/raw/", "contains_raw": true}`; the aggregate build
+registers `features/<snapshot_id>/windows/` etc. with `contains_raw: false` (optional). Erasure and the raw retention then
+delete the prefix; see [data-lake.md](data-lake.md) section 7 and [control-plane-api.md](control-plane-api.md). `409`
+means an erasure happened after the job started: delete the prefix and let a new job rebuild. To find the raw files
+and the protocol of a session a job reads `GET /snapshots/{id}/files` (`raw`) and `client_protocol` of
+`GET /snapshots/{id}/sessions` instead of scanning partitions.
+
 A new `build_features` job replaces `features/<snapshot_id>/` completely (the raw-byte build only its `raw/` prefix). The windows and tokens
 tables are those of [features.md](features.md); the same code builds them offline and online.
 

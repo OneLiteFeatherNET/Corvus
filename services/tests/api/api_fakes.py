@@ -15,6 +15,7 @@ from corvus_services.api.jobs import JobState as JS
 from corvus_services.api.pagination import Page, PageRequest, paginate
 from corvus_services.api.pools import PoolFilter, RawPreview
 from corvus_services.api.ports import (
+    ArtifactRecord,
     BlockEntry,
     CurrentFile,
     DuplicateError,
@@ -34,6 +35,7 @@ from corvus_services.api.ports import (
     SnapshotMaterial,
     SnapshotRecord,
     SnapshotSession,
+    StaleBuildError,
     StaleError,
     Summary,
     TransitionRecord,
@@ -113,6 +115,11 @@ class FakeSnapshotRepo:
         self.session_details: dict[bytes, SnapshotSession] = {}
         # lake file id -> (key, replaced_by, deleted)
         self.lake_files: dict[int, tuple[str, int | None, bool]] = {}
+        # raw lake file id -> (key, sessions, deleted)
+        self.raw_files: dict[int, tuple[str, set[bytes], bool]] = {}
+        # (snapshot, prefix) -> artefact; snapshot -> (needs_rebuild, needs_rebuild_at)
+        self.artifacts: dict[tuple[UUID, str], ArtifactRecord] = {}
+        self.rebuild: dict[UUID, tuple[bool, datetime | None]] = {}
 
     async def insert(self, snapshot: SnapshotRecord) -> None:
         if snapshot.id in self.rows:
@@ -120,7 +127,10 @@ class FakeSnapshotRepo:
         self.rows[snapshot.id] = snapshot
 
     async def get(self, snapshot_id: UUID) -> SnapshotRecord | None:
-        return self.rows.get(snapshot_id)
+        row = self.rows.get(snapshot_id)
+        if row is None:
+            return None
+        return replace(row, needs_rebuild=self.rebuild.get(snapshot_id, (False, None))[0])
 
     async def list_page(self, req: PageRequest, pool_id: UUID | None) -> Page[SnapshotRecord]:
         rows = [s for s in self.rows.values() if pool_id is None or s.pool_id == pool_id]
@@ -148,6 +158,34 @@ class FakeSnapshotRepo:
                     out.append(CurrentFile(ref["id"], fid, key))
                 fid = replaced_by
         return out
+
+    async def current_raw_files(self, snapshot_id: UUID) -> list[CurrentFile]:
+        sessions = {bytes.fromhex(h) for h in self.rows[snapshot_id].manifest["sessions"]}
+        return [
+            CurrentFile(fid, fid, key)
+            for fid, (key, held, deleted) in sorted(self.raw_files.items())
+            if not deleted and held & sessions
+        ]
+
+    async def register_artifact(
+        self, artifact: ArtifactRecord, job_started_at: datetime | None
+    ) -> tuple[ArtifactRecord, bool]:
+        needs, at = self.rebuild.get(artifact.snapshot_id, (False, None))
+        if needs and artifact.contains_raw:
+            if at is not None and (job_started_at is None or job_started_at < at):
+                raise StaleBuildError()
+            self.rebuild[artifact.snapshot_id] = (False, at)
+        key = (artifact.snapshot_id, artifact.s3_prefix)
+        existing = self.artifacts.get(key)
+        stored = replace(artifact, id=existing.id) if existing else artifact
+        self.artifacts[key] = stored
+        return stored, existing is None
+
+    async def list_artifacts(self, snapshot_id: UUID) -> list[ArtifactRecord]:
+        return sorted(
+            (a for (sid, _), a in self.artifacts.items() if sid == snapshot_id),
+            key=lambda a: a.s3_prefix,
+        )
 
 
 class FakeLabelRepo:

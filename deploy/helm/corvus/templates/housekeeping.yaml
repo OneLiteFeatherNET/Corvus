@@ -40,6 +40,7 @@ spec:
               env:
                 {{- include "corvus.pgEnv" . | nindent 16 }}
                 {{- include "corvus.s3Env" . | nindent 16 }}
+                {{- include "corvus.rawRetentionEnv" . | nindent 16 }}
                 {{- include "corvus.extraEnv" .Values.housekeeping.env | nindent 16 }}
               resources:
                 {{- toYaml .Values.housekeeping.resources | nindent 16 }}

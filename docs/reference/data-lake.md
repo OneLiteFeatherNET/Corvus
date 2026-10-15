@@ -77,6 +77,12 @@ Rows are sorted by (`session_id`, `seq`) within a file.
 
 Only frames that carry a payload get a `raw` row.
 
+Retention is per pool (NFR-018): `pools.raw_retention_days` (default `CORVUS_RAW_RETENTION_DAYS`, 21; at most
+`CORVUS_RAW_RETENTION_MAX_DAYS`, 365). `corvus-housekeeping` deletes a `raw` file only when its date is older than the
+**longest** retention of any pool whose snapshot lists a session of the file (found through `lake_file_sessions` and
+the snapshot manifests). Sessions in no snapshot, and pools that were deleted, count with the default. So a pool can
+shorten the life of data nobody else uses, and keep a file longer than the default.
+
 ## 3. Keys and erasure
 
 - Every pseudonymised player gets a random 256-bit data encryption key (DEK) on first sight.
@@ -159,5 +165,29 @@ Repeating a run, or a repeated erasure of the same pseudonym, changes nothing.
 
 Snapshots are immutable and keep naming erased sessions and the file ids that compaction replaced. Jobs read a snapshot
 through `GET /api/v1/snapshots/{id}/sessions?exclude_erased=true` (paged) and `GET /api/v1/snapshots/{id}/files`
-(follows `replaced_by` to the live files) instead of trusting the manifest alone; see
-[control-plane-api.md](control-plane-api.md).
+(follows `replaced_by` to the live files; `raw` lists the live raw files, so a job does not scan partitions) instead of
+trusting the manifest alone; see [control-plane-api.md](control-plane-api.md).
+
+### Derived artefacts
+
+Tokenised raw-byte features (`features/<snapshot_id>/raw/`, the packet table) contain payload content: they are personal
+data derived from `raw`. A job registers every prefix it writes in `corvus.derived_artifacts` (`snapshot_id`, `job_id`,
+`kind`, `s3_prefix`, `contains_raw`, `created_at`, `deleted_at`, `deleted_reason`) with
+`POST /api/v1/snapshots/{id}/artifacts` (see [ml-jobs.md](ml-jobs.md)). Only registered prefixes are reached by erasure
+and retention; the API accepts only prefixes below `features/<snapshot_id>/` and `tokenizers/<snapshot_id>/`, and the
+deleting side refuses anything else.
+
+- **Erasure.** Before it rewrites files, `corvus-compact` finds the live `contains_raw` artefacts of the snapshots that
+  list a session of an erased player and deletes their whole prefix (not a rewrite: the packet table is a derived,
+  window-agnostic table that is cheaper to rebuild than to rewrite, and a rebuild skips erased players because their DEK
+  is gone). The artefact row gets `deleted_at` / `deleted_reason = 'erasure'` and the snapshot is marked
+  `needs_rebuild` in `corvus.snapshot_state` (a table of its own, because `dataset_snapshots` is immutable;
+  `GET /snapshots/{id}` shows `needs_rebuild`). Artefacts of jobs that started after the erasure request are kept: those
+  jobs already excluded the player. The requests complete only after this step succeeded; a failed delete is retried.
+- **Rebuild.** Registering a `contains_raw` artefact from a job that started after the erasure clears `needs_rebuild`;
+  a job that started before it is refused with `409` (its output may contain the erased player, delete its prefix).
+- **Retention.** `corvus-housekeeping` deletes a `contains_raw` artefact once its snapshot's pool retention has passed
+  since the start of the newest session of the snapshot, so derived data never outlives the raw data it comes from.
+  Expiry does not set `needs_rebuild`: the raw source is gone, a rebuild would fail.
+- Prefixes nobody registered (a job that crashed before registering) are not tracked. Register right after writing,
+  and before the long-running parts of the job where possible.

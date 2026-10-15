@@ -11,6 +11,14 @@ sessions. Per file, under a per-file advisory lock:
    the old file ``deleted_at`` (``replaced_by`` the new one, ``purge_pending``);
 4. delete the old object and clear ``purge_pending``.
 
+Registered artefacts that contain tokenised raw payloads (``derived_artifacts.contains_raw``,
+written by ``build_features`` below ``features/<snapshot>/raw/``) of a snapshot with sessions of
+the erased player are not rewritten: their whole prefix is deleted and the snapshot is marked
+``needs_rebuild`` (a rebuild skips erased players, whose DEK is gone). Artefacts of jobs that
+started after the erasure request are kept: those jobs already excluded the erased player. This
+step runs before the file rewrite and is repeated until it succeeds; the requests complete only
+afterwards.
+
 Crash safety: before step 3 the old file is still the live one (a leftover new object is an orphan
 that housekeeping removes); after step 3 only ``purge_pending`` work remains, which every run
 retries first. Once all files of the pending requests are done, the requests are marked
@@ -30,6 +38,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
+from uuid import UUID
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -37,7 +46,8 @@ import pyarrow.parquet as pq
 
 from .clock import Clock, new_ulid, system_clock
 from .config import Settings
-from .ports import FileRecord
+from .ports import FileRecord, ObjectInfo
+from .retention import delete_prefix
 
 log = logging.getLogger("corvus.compact")
 
@@ -57,6 +67,16 @@ class PurgeItem:
     s3_key: str
 
 
+@dataclass(frozen=True)
+class DerivedItem:
+    """A live raw-derived artefact of a snapshot that contains sessions of an erased player."""
+
+    id: UUID
+    snapshot_id: UUID
+    s3_prefix: str
+    erased_at: datetime  # latest erasure request that affects it
+
+
 class CompactCatalog(Protocol):
     async def pending_request_ids(self, requested_before: datetime) -> list[object]:
         """Requests with ``compaction_pending`` that were made before ``requested_before``."""
@@ -64,6 +84,16 @@ class CompactCatalog(Protocol):
 
     async def affected_files(self, request_ids: list[object]) -> list[LiveFile]:
         """Live files containing sessions of the requests' pseudonyms, ordered by id."""
+        ...
+
+    async def derived_for_requests(self, request_ids: list[object]) -> list[DerivedItem]:
+        """Live ``contains_raw`` artefacts of snapshots with sessions of the requests' players,
+        except those of jobs that started after the request (they already skipped the player)."""
+        ...
+
+    async def invalidate_artifact(self, item: DerivedItem, now: datetime) -> None:
+        """One transaction: mark the artefact deleted (reason ``erasure``) and the snapshot
+        ``needs_rebuild`` since ``item.erased_at``."""
         ...
 
     def try_lock_file(self, file_id: int) -> AbstractAsyncContextManager[bool]:
@@ -100,6 +130,7 @@ class FileStore(Protocol):
     async def upload(self, path: Path, key: str) -> None: ...
     async def copy(self, src: str, dst: str) -> None: ...
     async def delete(self, key: str) -> None: ...
+    async def list_objects(self, prefix: str) -> list[ObjectInfo]: ...
 
 
 @dataclass(frozen=True)
@@ -148,6 +179,7 @@ class CompactReport:
     files_skipped_locked: int = 0
     rows_removed: int = 0
     purged: int = 0
+    artifacts_deleted: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -161,6 +193,24 @@ async def _purge(catalog: CompactCatalog, store: FileStore, report: CompactRepor
             log.warning("could not purge %s: %s", item.s3_key, e)
         else:
             report.purged += 1
+
+
+async def _invalidate_derived(
+    request_ids: list[object],
+    catalog: CompactCatalog,
+    store: FileStore,
+    clock: Clock,
+    report: CompactReport,
+) -> None:
+    for item in await catalog.derived_for_requests(request_ids):
+        try:
+            await delete_prefix(store, item.s3_prefix)
+            await catalog.invalidate_artifact(item, clock())
+        except Exception as e:
+            report.errors.append(f"artefact {item.s3_prefix}: {e}")
+            log.warning("could not delete artefact %s: %s", item.s3_prefix, e)
+        else:
+            report.artifacts_deleted += 1
 
 
 async def _compact_file(
@@ -247,6 +297,7 @@ async def run_compaction(
     report.requests = len(request_ids)
     if not request_ids:
         return report
+    await _invalidate_derived(request_ids, catalog, store, clock, report)
     files = await catalog.affected_files(request_ids)
     with tempfile.TemporaryDirectory(dir=workdir, prefix="corvus-compact-") as tmp:
         for f in files:
@@ -259,7 +310,7 @@ async def run_compaction(
         await catalog.complete_requests(request_ids, clock())
     log.info(
         "compact: %d requests, %d files rewritten, %d dropped, %d untouched, %d locked, "
-        "%d rows removed, %d purged, %d errors",
+        "%d rows removed, %d purged, %d artefacts deleted, %d errors",
         report.requests,
         report.files_rewritten,
         report.files_dropped,
@@ -267,6 +318,7 @@ async def run_compaction(
         report.files_skipped_locked,
         report.rows_removed,
         report.purged,
+        report.artifacts_deleted,
         len(report.errors),
     )
     return report

@@ -1,0 +1,68 @@
+suite: raw payload retention
+templates:
+  - housekeeping.yaml
+  - api.yaml
+tests:
+  - it: gives housekeeping the default and the maximum retention
+    template: housekeeping.yaml
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_RAW_RETENTION_DAYS
+            value: "21"
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_RAW_RETENTION_MAX_DAYS
+            value: "365"
+
+  - it: gives the api the same two values so it validates against what housekeeping applies
+    template: api.yaml
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_RAW_RETENTION_DAYS
+            value: "21"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_RAW_RETENTION_MAX_DAYS
+            value: "365"
+
+  - it: follows the configured values in both workloads
+    set:
+      rawRetention.defaultDays: 14
+      rawRetention.maxDays: 90
+    template: housekeeping.yaml
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_RAW_RETENTION_DAYS
+            value: "14"
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_RAW_RETENTION_MAX_DAYS
+            value: "90"
+
+  - it: refuses a default above the maximum
+    template: housekeeping.yaml
+    set:
+      rawRetention.defaultDays: 400
+      rawRetention.maxDays: 365
+    asserts:
+      - failedTemplate:
+          errorMessage: rawRetention.defaultDays must not exceed rawRetention.maxDays
+
+  - it: rejects a retention below one day in the schema
+    template: housekeeping.yaml
+    set:
+      rawRetention.defaultDays: 0
+    asserts:
+      - failedTemplate: {}

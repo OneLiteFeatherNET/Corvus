@@ -28,6 +28,7 @@ from .pools import (
     snapshot_statements,
 )
 from .ports import (
+    ArtifactRecord,
     BlockEntry,
     CurrentFile,
     DuplicateError,
@@ -49,6 +50,7 @@ from .ports import (
     SnapshotMaterial,
     SnapshotRecord,
     SnapshotSession,
+    StaleBuildError,
     StaleError,
     Summary,
     TransitionRecord,
@@ -111,11 +113,13 @@ async def _list_page[R](
 
 # --- pools --------------------------------------------------------------------------------------
 
-_POOL_COLS = "id, name, description, definition, created_by, created_at, updated_at"
+_POOL_COLS = (
+    "id, name, description, definition, created_by, created_at, updated_at, raw_retention_days"
+)
 
 
 def _pool(r: tuple[Any, ...]) -> PoolRecord:
-    return PoolRecord(r[0], r[1], r[2], PoolFilter.model_validate(r[3]), r[4], r[5], r[6])
+    return PoolRecord(r[0], r[1], r[2], PoolFilter.model_validate(r[3]), r[4], r[5], r[6], r[7])
 
 
 def _pool_key(p: PoolRecord) -> tuple[datetime, str]:
@@ -131,7 +135,8 @@ class PgPoolRepo:
             async with self._pool.connection() as conn:
                 await conn.execute(
                     "INSERT INTO corvus.pools (id, name, description, definition, created_by,"
-                    " created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    " created_at, updated_at, raw_retention_days)"
+                    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
                     (
                         pool.id,
                         pool.name,
@@ -140,6 +145,7 @@ class PgPoolRepo:
                         pool.created_by,
                         pool.created_at,
                         pool.updated_at,
+                        pool.raw_retention_days,
                     ),
                 )
         except UniqueViolation as e:
@@ -171,12 +177,13 @@ class PgPoolRepo:
             async with self._pool.connection() as conn:
                 cur = await conn.execute(
                     "UPDATE corvus.pools SET name = %s, description = %s, definition = %s,"
-                    " updated_at = %s WHERE id = %s",
+                    " updated_at = %s, raw_retention_days = %s WHERE id = %s",
                     (
                         pool.name,
                         pool.description,
                         Jsonb(pool.filter.model_dump(mode="json")),
                         pool.updated_at,
+                        pool.raw_retention_days,
                         pool.id,
                     ),
                 )
@@ -224,13 +231,18 @@ class PgPoolCatalog:
 
 # --- snapshots ----------------------------------------------------------------------------------
 
+_NEEDS_REBUILD = (
+    "COALESCE((SELECT x.needs_rebuild FROM corvus.snapshot_state x"
+    " WHERE x.snapshot_id = dataset_snapshots.id), false)"
+)
 _SNAP_COLS = (
-    "id, pool_id, pool_name, manifest, sha256, session_count, file_count, created_by, created_at"
+    "id, pool_id, pool_name, manifest, sha256, session_count, file_count, created_by, created_at,"
+    f" {_NEEDS_REBUILD}"
 )
 
 
 def _snapshot(r: tuple[Any, ...]) -> SnapshotRecord:
-    return SnapshotRecord(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8])
+    return SnapshotRecord(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], bool(r[9]))
 
 
 # Sessions of a manifest with pseudonym, start, segments, applicable labels and the erased flag,
@@ -244,7 +256,8 @@ SESSIONS_PAGE_SQL = (
     "  'confidence', l.confidence, 'valid_from', l.valid_from, 'valid_to', l.valid_to)"
     "  ORDER BY l.created_at, l.id)"
     f"  FROM corvus.labels l WHERE {LABEL_MATCH}), '[]'::jsonb),"
-    " EXISTS (SELECT 1 FROM corvus.erased_sessions x WHERE x.session_id = sid.session_id)"
+    " EXISTS (SELECT 1 FROM corvus.erased_sessions x WHERE x.session_id = sid.session_id),"
+    " s.client_protocol"
     " FROM corvus.dataset_snapshots d,"
     " LATERAL (SELECT decode(e.value, 'hex') AS session_id"
     "  FROM jsonb_array_elements_text(d.manifest -> 'sessions') AS e(value)) sid"
@@ -273,6 +286,51 @@ CURRENT_FILES_SQL = (
 )
 
 
+# Live raw files with payloads of the manifest's sessions. The manifest lists events files only; raw
+# files are found through lake_file_sessions, where compaction already moved the sessions to the
+# replacement file, so no replaced_by chain has to be followed.
+CURRENT_RAW_FILES_SQL = (
+    "SELECT DISTINCT f.id, f.s3_key"
+    " FROM corvus.dataset_snapshots d,"
+    " LATERAL (SELECT decode(e.value, 'hex') AS session_id"
+    "  FROM jsonb_array_elements_text(d.manifest -> 'sessions') AS e(value)) sid"
+    " JOIN corvus.lake_file_sessions fs ON fs.session_id = sid.session_id"
+    " JOIN corvus.lake_files f ON f.id = fs.file_id"
+    " WHERE d.id = %(snapshot_id)s AND f.table_name = 'raw' AND f.deleted_at IS NULL"
+    " ORDER BY f.id"
+)
+
+# Insert or revive the artefact of (snapshot, prefix). Revival (deleted_at back to NULL) is the
+# rebuild of a prefix that erasure or retention had removed; created_at restarts with it.
+UPSERT_ARTIFACT_SQL = (
+    "INSERT INTO corvus.derived_artifacts (id, snapshot_id, job_id, kind, s3_prefix,"
+    " contains_raw, created_at)"
+    " VALUES (%(id)s, %(snapshot_id)s, %(job_id)s, %(kind)s, %(s3_prefix)s, %(contains_raw)s,"
+    " %(created_at)s)"
+    " ON CONFLICT (snapshot_id, s3_prefix) DO UPDATE SET"
+    " job_id = EXCLUDED.job_id, kind = EXCLUDED.kind, contains_raw = EXCLUDED.contains_raw,"
+    " created_at = EXCLUDED.created_at, deleted_at = NULL, deleted_reason = NULL"
+    " RETURNING id, snapshot_id, job_id, kind, s3_prefix, contains_raw, created_at,"
+    " (xmax = 0) AS inserted"
+)
+
+SNAPSHOT_REBUILD_SQL = (
+    "SELECT needs_rebuild, needs_rebuild_at FROM corvus.snapshot_state"
+    " WHERE snapshot_id = %(snapshot_id)s FOR UPDATE"
+)
+
+CLEAR_REBUILD_SQL = (
+    "UPDATE corvus.snapshot_state SET needs_rebuild = false, reason = ''"
+    " WHERE snapshot_id = %(snapshot_id)s"
+)
+
+LIST_ARTIFACTS_SQL = (
+    "SELECT id, snapshot_id, job_id, kind, s3_prefix, contains_raw, created_at"
+    " FROM corvus.derived_artifacts WHERE snapshot_id = %(snapshot_id)s AND deleted_at IS NULL"
+    " ORDER BY s3_prefix"
+)
+
+
 def _snapshot_session(r: tuple[Any, ...]) -> SnapshotSession:
     return SnapshotSession(
         session_id=bytes(r[0]),
@@ -290,6 +348,7 @@ def _snapshot_session(r: tuple[Any, ...]) -> SnapshotSession:
             for lb in r[4]
         ],
         erased=bool(r[5]),
+        client_protocol=int(r[6]) if r[6] is not None else None,
     )
 
 
@@ -337,7 +396,7 @@ class PgSnapshotRepo:
         return await _list_page(
             self._pool,
             "SELECT id, pool_id, pool_name, '{}'::jsonb, sha256, session_count, file_count,"
-            " created_by, created_at FROM corvus.dataset_snapshots",
+            f" created_by, created_at, {_NEEDS_REBUILD} FROM corvus.dataset_snapshots",
             where,
             params,
             req,
@@ -366,6 +425,45 @@ class PgSnapshotRepo:
         async with self._pool.connection() as conn:
             cur = await conn.execute(CURRENT_FILES_SQL.encode(), {"snapshot_id": snapshot_id})
             return [CurrentFile(int(r[0]), int(r[1]), r[2]) for r in await cur.fetchall()]
+
+    async def current_raw_files(self, snapshot_id: UUID) -> list[CurrentFile]:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(CURRENT_RAW_FILES_SQL.encode(), {"snapshot_id": snapshot_id})
+            return [CurrentFile(int(r[0]), int(r[0]), r[1]) for r in await cur.fetchall()]
+
+    async def register_artifact(
+        self, artifact: ArtifactRecord, job_started_at: datetime | None
+    ) -> tuple[ArtifactRecord, bool]:
+        params = {
+            "id": artifact.id,
+            "snapshot_id": artifact.snapshot_id,
+            "job_id": artifact.job_id,
+            "kind": artifact.kind,
+            "s3_prefix": artifact.s3_prefix,
+            "contains_raw": artifact.contains_raw,
+            "created_at": artifact.created_at,
+        }
+        async with self._pool.connection() as conn, conn.transaction():
+            cur = await conn.execute(SNAPSHOT_REBUILD_SQL.encode(), params)
+            state = await cur.fetchone()
+            invalidated_at = state[1] if state is not None and state[0] else None
+            if invalidated_at is not None and artifact.contains_raw:
+                if job_started_at is None or job_started_at < invalidated_at:
+                    raise StaleBuildError(invalidated_at.isoformat())
+                await conn.execute(CLEAR_REBUILD_SQL.encode(), params)
+            cur = await conn.execute(UPSERT_ARTIFACT_SQL.encode(), params)
+            row = await cur.fetchone()
+        assert row is not None
+        return _artifact(tuple(row)), bool(row[7])
+
+    async def list_artifacts(self, snapshot_id: UUID) -> list[ArtifactRecord]:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(LIST_ARTIFACTS_SQL.encode(), {"snapshot_id": snapshot_id})
+            return [_artifact(tuple(r)) for r in await cur.fetchall()]
+
+
+def _artifact(r: tuple[Any, ...]) -> ArtifactRecord:
+    return ArtifactRecord(r[0], r[1], r[2], r[3], r[4], r[5], r[6])
 
 
 # --- labels -------------------------------------------------------------------------------------

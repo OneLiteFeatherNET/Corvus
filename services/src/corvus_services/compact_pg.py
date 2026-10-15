@@ -10,11 +10,26 @@ from uuid import UUID
 
 from psycopg_pool import AsyncConnectionPool
 
-from .compact import LiveFile, PurgeItem
+from .compact import DerivedItem, LiveFile, PurgeItem
 from .ports import FileRecord
 
 _LOCK_NAMESPACE = 0x434F << 40
 """Advisory-lock keys of compaction: namespace plus file id (migrations use another key)."""
+
+
+# Live raw-derived artefacts of snapshots that list a session of an erased player. Artefacts of jobs
+# that started after the request are clean (the job skipped the player), the others are not.
+DERIVED_FOR_REQUESTS_SQL = (
+    "SELECT a.id, a.snapshot_id, a.s3_prefix, max(r.requested_at)"
+    " FROM corvus.erasure_requests r"
+    " JOIN corvus.sessions s ON s.pseudonym = r.pseudonym"
+    " JOIN corvus.derived_artifacts a ON a.contains_raw AND a.deleted_at IS NULL"
+    " JOIN corvus.dataset_snapshots d ON d.id = a.snapshot_id"
+    "  AND d.manifest -> 'sessions' ? encode(s.session_id, 'hex')"
+    " LEFT JOIN corvus.jobs j ON j.id = a.job_id"
+    " WHERE r.id = ANY(%s) AND (j.created_at IS NULL OR j.created_at < r.requested_at)"
+    " GROUP BY a.id, a.snapshot_id, a.s3_prefix ORDER BY a.id"
+)
 
 
 def lock_key(file_id: int) -> int:
@@ -59,6 +74,29 @@ class PgCompactCatalog:
                 (ids,),
             )
             return [LiveFile(int(r[0]), r[1], r[2], r[3], int(r[4])) for r in await cur.fetchall()]
+
+    async def derived_for_requests(self, request_ids: list[object]) -> list[DerivedItem]:
+        ids: list[UUID] = [i for i in request_ids if isinstance(i, UUID)]
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(DERIVED_FOR_REQUESTS_SQL.encode(), (ids,))
+            return [DerivedItem(r[0], r[1], r[2], r[3]) for r in await cur.fetchall()]
+
+    async def invalidate_artifact(self, item: DerivedItem, now: datetime) -> None:
+        async with self._pool.connection() as conn, conn.transaction():
+            await conn.execute(
+                "UPDATE corvus.derived_artifacts SET deleted_at = %s, deleted_reason = 'erasure'"
+                " WHERE id = %s AND deleted_at IS NULL",
+                (now, item.id),
+            )
+            await conn.execute(
+                "INSERT INTO corvus.snapshot_state (snapshot_id, needs_rebuild, needs_rebuild_at,"
+                " reason) VALUES (%s, true, %s, 'erasure')"
+                " ON CONFLICT (snapshot_id) DO UPDATE SET needs_rebuild = true,"
+                " needs_rebuild_at = GREATEST(EXCLUDED.needs_rebuild_at,"
+                "  COALESCE(corvus.snapshot_state.needs_rebuild_at, EXCLUDED.needs_rebuild_at)),"
+                " reason = 'erasure'",
+                (item.snapshot_id, item.erased_at),
+            )
 
     @asynccontextmanager
     async def try_lock_file(self, file_id: int) -> AsyncIterator[bool]:

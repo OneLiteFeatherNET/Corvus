@@ -41,6 +41,10 @@ Operator or SealedSecrets) and point the values at them:
 | `api.extraSecret` (optional) | none | every key becomes an env var, e.g. `CORVUS_API_PLUGIN_TOKENS` (comma separated proxy tokens) | api |
 | `api.jobs.envSecret` (optional) | none | S3 / database credentials exposed to training job pods | jobs started by the api |
 
+Raw payload retention is not a secret: `rawRetention.defaultDays` (21) and `rawRetention.maxDays` (365) reach
+housekeeping, which applies them, and the api, which validates a pool's `raw_retention_days` against them
+(`CORVUS_RAW_RETENTION_DAYS`, `CORVUS_RAW_RETENTION_MAX_DAYS`). The default must not exceed the maximum.
+
 **Database, object store and NATS variants.**
 
 - *CloudNativePG with separate keys:* set `database.host` (for example `corvus-db-rw`), `database.name`,

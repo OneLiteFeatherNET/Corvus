@@ -119,6 +119,18 @@ topologySpreadConstraints:
       key: {{ .key }}
 {{- end }}
 
+{{/* Raw payload retention: default and maximum, shared by housekeeping and the api. */}}
+{{- define "corvus.rawRetentionEnv" -}}
+{{- $r := .Values.rawRetention }}
+{{- if gt (int $r.defaultDays) (int $r.maxDays) }}
+{{- fail "rawRetention.defaultDays must not exceed rawRetention.maxDays" }}
+{{- end }}
+- name: CORVUS_RAW_RETENTION_DAYS
+  value: {{ $r.defaultDays | quote }}
+- name: CORVUS_RAW_RETENTION_MAX_DAYS
+  value: {{ $r.maxDays | quote }}
+{{- end }}
+
 {{/* Either one Secret key with the full DSN, or separate libpq settings (CloudNativePG style). */}}
 {{- define "corvus.pgEnv" -}}
 {{- $db := .Values.database }}

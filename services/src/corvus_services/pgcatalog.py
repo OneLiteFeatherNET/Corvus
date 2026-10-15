@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any
+from uuid import UUID
 
 from psycopg_pool import AsyncConnectionPool
 
@@ -14,6 +15,43 @@ from .ports import (
     SessionData,
     SessionInfo,
     WrappedDek,
+)
+from .retention import LiveArtifact
+
+# Raw files past the longest retention of any pool whose snapshot references one of their sessions.
+# A session in no snapshot (or a file without sessions) counts with the default; a pool's value is
+# capped at the maximum. Snapshots are expanded once (manifest sessions) and joined by session id.
+EXPIRED_RAW_FILES_SQL = (
+    "WITH snap AS ("
+    " SELECT decode(e.value, 'hex') AS session_id,"
+    "  LEAST(COALESCE(p.raw_retention_days, %(default_days)s::int), %(max_days)s::int) AS days"
+    " FROM corvus.dataset_snapshots d"
+    " LEFT JOIN corvus.pools p ON p.id = d.pool_id"
+    " CROSS JOIN LATERAL jsonb_array_elements_text(d.manifest -> 'sessions') AS e(value)),"
+    " snap_days AS (SELECT session_id, max(days) AS days FROM snap GROUP BY session_id),"
+    " per_file AS ("
+    " SELECT f.id, f.s3_key, f.date,"
+    "  COALESCE(max(COALESCE(sd.days, %(default_days)s::int)), %(default_days)s::int) AS days"
+    " FROM corvus.lake_files f"
+    " LEFT JOIN corvus.lake_file_sessions fs ON fs.file_id = f.id"
+    " LEFT JOIN snap_days sd ON sd.session_id = fs.session_id"
+    " WHERE f.table_name = 'raw' AND f.deleted_at IS NULL AND f.date < %(today)s::date"
+    " GROUP BY f.id, f.s3_key, f.date)"
+    " SELECT id, s3_key FROM per_file WHERE date < %(today)s::date - days ORDER BY id"
+)
+
+# Live raw-derived artefacts with what their expiry depends on: the start of the newest session of
+# the snapshot and the retention of its pool (NULL: default, also when the pool was deleted).
+LIVE_RAW_ARTIFACTS_SQL = (
+    "SELECT a.id, a.s3_prefix,"
+    " COALESCE((SELECT max(s.started_at)"
+    "  FROM jsonb_array_elements_text(d.manifest -> 'sessions') AS e(value)"
+    "  JOIN corvus.sessions s ON s.session_id = decode(e.value, 'hex')), d.created_at),"
+    " p.raw_retention_days"
+    " FROM corvus.derived_artifacts a"
+    " JOIN corvus.dataset_snapshots d ON d.id = a.snapshot_id"
+    " LEFT JOIN corvus.pools p ON p.id = d.pool_id"
+    " WHERE a.contains_raw AND a.deleted_at IS NULL ORDER BY a.created_at, a.id"
 )
 
 
@@ -213,14 +251,28 @@ class PgCatalog:
             )
             return {r[0] for r in await cur.fetchall()}
 
-    async def live_raw_files_before(self, day: date) -> list[tuple[int, str]]:
+    async def expired_raw_files(
+        self, today: date, default_days: int, max_days: int
+    ) -> list[tuple[int, str]]:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT id, s3_key FROM corvus.lake_files"
-                " WHERE table_name = 'raw' AND date < %s AND deleted_at IS NULL ORDER BY id",
-                (day,),
+                EXPIRED_RAW_FILES_SQL.encode(),
+                {"today": today, "default_days": default_days, "max_days": max_days},
             )
             return [(int(r[0]), r[1]) for r in await cur.fetchall()]
+
+    async def live_raw_artifacts(self) -> list[LiveArtifact]:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(LIVE_RAW_ARTIFACTS_SQL.encode())
+            return [LiveArtifact(r[0], r[1], r[2], r[3]) for r in await cur.fetchall()]
+
+    async def mark_artifact_deleted(self, artifact_id: UUID, at: datetime, reason: str) -> None:
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                "UPDATE corvus.derived_artifacts SET deleted_at = %s, deleted_reason = %s"
+                " WHERE id = %s AND deleted_at IS NULL",
+                (at, reason, artifact_id),
+            )
 
     async def mark_deleted(self, file_id: int, at: datetime) -> None:
         async with self._pool.connection() as conn:

@@ -51,9 +51,9 @@ types, clientbound frames outside the allowlist, empty payloads) keep their head
 
 Sessions come from `GET /api/v1/snapshots/{id}/sessions`. The raw-byte build additionally reads
 `client_protocol` (integer, optional) of each item for the protocol token; see
-[ml-jobs.md](ml-jobs.md). The `raw` files are taken from `manifest.files.raw` if present; the
-manifest of the API lists `events` files only, so the job falls back to the `lake/raw/date=...`
-partitions of the days the snapshot's sessions started on.
+[ml-jobs.md](ml-jobs.md). The live `raw` files come from `raw` of `GET /api/v1/snapshots/{id}/files`
+(found through `lake_file_sessions`, compaction replacements followed); only without that field does
+the job fall back to the `lake/raw/date=...` partitions of the days the snapshot's sessions started on.
 
 ## 3. Token layout
 
@@ -334,7 +334,9 @@ the limit.
 - `raw` has a short retention (21 days by default). A raw-byte build of an old snapshot fails with "no raw
   files"; the packet table in `features/` survives, the encrypted source does not.
 - Erasure: the packet table contains tokenized payload content. It is derived data of the `raw` table and
-  must be deleted with it (a rebuild of the snapshot drops erased players, whose DEK is gone); the
-  tokenizer itself is trained on a payload sample and contains no player identifier.
-- Players erased after a build are still in `features/<snapshot>/raw/` until that prefix is rebuilt or
-  deleted; the aggregate build has the same property.
+  is deleted with it: the job registers the prefix (`POST /api/v1/snapshots/{id}/artifacts`,
+  `contains_raw: true`), `corvus-compact` deletes the registered prefix when a player of the snapshot is
+  erased and marks the snapshot `needs_rebuild`, and `corvus-housekeeping` deletes it with the pool's raw
+  retention. A rebuild drops erased players, whose DEK is gone. The tokenizer itself is trained on a payload
+  sample and contains no player identifier.
+- An unregistered prefix is invisible to erasure and retention, so register every build.

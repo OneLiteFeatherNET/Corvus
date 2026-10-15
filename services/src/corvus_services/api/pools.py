@@ -71,6 +71,9 @@ class PoolIn(_Strict):
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=2000)
     filter: PoolFilter = Field(default_factory=PoolFilter)
+    # NFR-018: how long raw payloads of the pool's sessions are kept (the upper limit is a setting
+    # and is checked by the endpoint). null: the deployment default.
+    raw_retention_days: int | None = Field(default=None, ge=1)
 
 
 @dataclass(frozen=True)

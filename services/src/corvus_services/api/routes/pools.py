@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response
 
+from ...retention import effective_raw_retention
 from ..auth import Principal, Role, require
 from ..deps import Deps, get_deps, get_page
 from ..pagination import PageRequest
@@ -23,6 +24,22 @@ _DS_OR_JOB = Depends(require(Role.DATA_SCIENTIST, allow_jobs=True))
 _NOT_FOUND: dict[int | str, dict[str, Any]] = {404: {"description": "Pool not found"}}
 
 
+def _out(deps: Deps, pool: PoolRecord) -> PoolOut:
+    s = deps.settings
+    return PoolOut.of(
+        pool,
+        effective_raw_retention(
+            pool.raw_retention_days, s.raw_retention_default_days, s.raw_retention_max_days
+        ),
+    )
+
+
+def _check_retention(deps: Deps, days: int | None) -> None:
+    limit = deps.settings.raw_retention_max_days
+    if days is not None and days > limit:
+        raise ProblemError(422, f"raw_retention_days must not exceed {limit}", slug="validation")
+
+
 async def _pool_or_404(deps: Deps, pool_id: UUID) -> PoolRecord:
     pool = await deps.repos.pools.get(pool_id)
     if pool is None:
@@ -34,15 +51,17 @@ async def _pool_or_404(deps: Deps, pool_id: UUID) -> PoolRecord:
 async def create_pool(
     body: PoolIn, who: Principal = _DS, deps: Deps = Depends(get_deps)
 ) -> PoolOut:
+    _check_retention(deps, body.raw_retention_days)
     now = deps.clock()
     pool = PoolRecord(
-        deps.new_id(), body.name, body.description, body.filter, who.subject, now, now
-    )
+        deps.new_id(), body.name, body.description, body.filter, who.subject, now, now,
+        body.raw_retention_days,
+    )  # fmt: skip
     try:
         await deps.repos.pools.create(pool)
     except DuplicateError as e:
         raise ProblemError(409, "a pool with this name already exists", slug="conflict") from e
-    return PoolOut.of(pool)
+    return _out(deps, pool)
 
 
 @router.get("/pools", response_model=Paged[PoolOut], summary="List pools, newest first")
@@ -51,13 +70,13 @@ async def list_pools(
 ) -> Paged[PoolOut]:
     result = await deps.repos.pools.list_page(page)
     return Paged[PoolOut](
-        items=[PoolOut.of(p) for p in result.items], next_cursor=result.next_cursor
+        items=[_out(deps, p) for p in result.items], next_cursor=result.next_cursor
     )
 
 
 @router.get("/pools/{pool_id}", response_model=PoolOut, responses=_NOT_FOUND, summary="Get a pool")
 async def get_pool(pool_id: UUID, _: Principal = _DS, deps: Deps = Depends(get_deps)) -> PoolOut:
-    return PoolOut.of(await _pool_or_404(deps, pool_id))
+    return _out(deps, await _pool_or_404(deps, pool_id))
 
 
 @router.put(
@@ -66,6 +85,7 @@ async def get_pool(pool_id: UUID, _: Principal = _DS, deps: Deps = Depends(get_d
 async def update_pool(
     pool_id: UUID, body: PoolIn, _: Principal = _DS, deps: Deps = Depends(get_deps)
 ) -> PoolOut:
+    _check_retention(deps, body.raw_retention_days)
     old = await _pool_or_404(deps, pool_id)
     new = PoolRecord(
         old.id,
@@ -75,13 +95,14 @@ async def update_pool(
         old.created_by,
         old.created_at,
         deps.clock(),
+        body.raw_retention_days,
     )
     try:
         if not await deps.repos.pools.update(new):
             raise ProblemError(404, "pool not found", slug="not-found")
     except DuplicateError as e:
         raise ProblemError(409, "a pool with this name already exists", slug="conflict") from e
-    return PoolOut.of(new)
+    return _out(deps, new)
 
 
 @router.delete(
