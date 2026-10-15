@@ -1,29 +1,16 @@
-import type { Job, Model, Paged } from '~/types'
+import type { Summary } from '~/types'
 
 export const STAGES = ['registered', 'shadow', 'canary', 'enforce', 'archived'] as const
 
-export interface Count {
-  value: number
-  /** More pages exist, so `value` is a lower bound. */
-  partial: boolean
+/** Per stage count including stages the summary leaves out. */
+export function stageCounts(summary: Pick<Summary, 'models_by_stage'>): Record<string, number> {
+  return Object.fromEntries(STAGES.map(s => [s, summary.models_by_stage[s] ?? 0]))
 }
 
-/** The API has no aggregate endpoint; counts come from the first page (size 200). */
-export function countOf<T>(page: Paged<T>): Count {
-  return { value: page.items.length, partial: page.next_cursor !== null }
+export function modelTotal(summary: Pick<Summary, 'models_by_stage'>): number {
+  return Object.values(summary.models_by_stage).reduce((a, b) => a + b, 0)
 }
 
-export function modelsPerStage(models: Pick<Model, 'stage'>[]): Record<string, number> {
-  const out: Record<string, number> = Object.fromEntries(STAGES.map(s => [s, 0]))
-  for (const m of models) out[m.stage] = (out[m.stage] ?? 0) + 1
-  return out
-}
-
-export function runningJobs(jobs: Pick<Job, 'status'>[]): number {
-  return jobs.filter(j => j.status === 'running' || j.status === 'queued').length
-}
-
-/** List responses are newest first already; this keeps the contract explicit and bounded. */
-export function recent<T>(items: T[], n = 5): T[] {
-  return items.slice(0, n)
+export function runningJobs(summary: Pick<Summary, 'jobs_by_status'>): number {
+  return (summary.jobs_by_status.running ?? 0) + (summary.jobs_by_status.queued ?? 0)
 }

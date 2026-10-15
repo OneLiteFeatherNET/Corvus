@@ -3,6 +3,7 @@ import type { ApiClient } from '~/lib/api-client'
 import { createOidcAuth, createTokenAuth } from '~/lib/auth'
 import type { AuthProvider, Session } from '~/lib/auth'
 import { readBasePath } from '~/lib/base'
+import { withServerIdentity } from '~/lib/identity'
 import { ConfigError, loadConfig } from '~/lib/config'
 import type { AppConfig } from '~/lib/config'
 
@@ -51,15 +52,22 @@ export default defineNuxtPlugin({
       },
     })
 
-    session.value = await auth.init().catch(() => null)
-    auth.onChange((s) => {
+    // The token claims give the roles at once; GET /me then replaces them with the roles the API sees. If /me
+    // fails, the claim roles stay.
+    const adopt = async (s: Session | null) => {
       session.value = s
+      if (!s) return
+      const resolved = await withServerIdentity(api, s)
+      if (session.value?.token === s.token) session.value = resolved
+    }
+
+    await adopt(await auth.init().catch(() => null))
+    auth.onChange((s) => {
+      void adopt(s)
     })
     // Another tab logged in or out (the token login and the OIDC user both live in localStorage).
     window.addEventListener('storage', () => {
-      void auth.init().then((s) => {
-        session.value = s
-      }).catch(() => {})
+      void auth.init().then(adopt).catch(() => {})
     })
 
     return { provide: { corvus: { config, auth, api } } }

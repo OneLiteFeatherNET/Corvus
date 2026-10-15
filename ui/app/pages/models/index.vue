@@ -14,18 +14,20 @@
     </PageHeader>
 
     <v-row dense>
-      <v-col cols="12" sm="6" md="3"><v-text-field v-model="name" :label="$t('models.name')" prepend-inner-icon="mdi-magnify" clearable hide-details /></v-col>
-      <v-col cols="12" sm="6" md="3"><v-select v-model="gameContext" :items="gameContextItems" :label="$t('models.gameContext')" hide-details /></v-col>
-      <v-col cols="12" sm="6" md="3"><v-select v-model="domain" :items="domainItems" :label="$t('models.domain')" hide-details /></v-col>
-      <v-col cols="12" sm="6" md="3"><v-select v-model="stage" :items="stageItems" :label="$t('models.stageLabel')" hide-details /></v-col>
+      <v-col cols="12" sm="6" md="2"><v-text-field v-model="name" :label="$t('models.name')" prepend-inner-icon="mdi-magnify" clearable hide-details /></v-col>
+      <v-col cols="12" sm="6" md="2"><v-text-field v-model="version" :label="$t('models.version')" clearable hide-details /></v-col>
+      <v-col cols="12" sm="6" md="3"><v-text-field v-model="gameContext" :label="$t('models.gameContext')" clearable hide-details /></v-col>
+      <v-col cols="12" sm="6" md="3"><v-text-field v-model="domain" :label="$t('models.domain')" clearable hide-details /></v-col>
+      <v-col cols="12" sm="6" md="2"><v-select v-model="stage" :items="stageItems" :label="$t('models.stageLabel')" hide-details /></v-col>
     </v-row>
+    <p class="text-body-small text-on-surface-variant mt-1">{{ $t('models.filterHint') }}</p>
 
     <AppProblem :error="list.error.value" />
     <p class="text-body-medium text-on-surface-variant mt-3">{{ $t('models.compareHint') }}</p>
     <v-data-table
       v-model="selected"
       :headers="headers"
-      :items="rows"
+      :items="list.items.value"
       :loading="list.loading.value"
       :no-data-text="$t('common.empty')"
       item-value="id"
@@ -48,34 +50,42 @@
 <script setup lang="ts">
 import { formatDateTime } from '~/lib/format'
 import { formatMetric, metricValue } from '~/lib/metrics'
-import { compareQuery, distinctValues, filterModels } from '~/lib/model-list'
+import { debounce } from '~/lib/debounce'
+import { compareQuery } from '~/lib/model-list'
 import type { Model, Stage } from '~/types'
 
 const { t, locale } = useI18n()
 const models = useModels()
 
 const name = useQueryState('q')
+const version = useQueryState('version')
 const gameContext = useQueryState('game_context')
 const domain = useQueryState('domain')
 const stage = useQueryState('stage')
 const selected = ref<Model[]>([])
 
-// The stage filter is applied by the API, everything else on the loaded pages.
-const list = usePagedList(cursor => models.list({ limit: 200, cursor, stage: (stage.value || undefined) as Stage | undefined }))
-onMounted(list.load)
-watch(stage, () => {
+// Every filter is applied by the API (exact match, combined with AND); typing is debounced.
+const list = usePagedList(cursor => models.list({
+  limit: 200,
+  cursor,
+  name: name.value?.trim(),
+  version: version.value?.trim(),
+  gameContext: gameContext.value?.trim(),
+  domain: domain.value?.trim(),
+  stage: (stage.value || undefined) as Stage | undefined,
+}))
+const reload = debounce(() => {
   selected.value = []
   void list.load()
+}, 300)
+onMounted(list.load)
+onBeforeUnmount(reload.cancel)
+watch([name, version, gameContext, domain], reload)
+watch(stage, () => {
+  reload()
+  reload.flush()
 })
 
-const rows = computed(() => filterModels(list.items.value, {
-  name: name.value ?? '',
-  gameContext: gameContext.value,
-  domain: domain.value,
-  stage: stage.value,
-}))
-const gameContextItems = computed(() => [{ value: '', title: t('common.all') }, ...distinctValues(list.items.value, 'game_context')])
-const domainItems = computed(() => [{ value: '', title: t('common.all') }, ...distinctValues(list.items.value, 'domain')])
 const stageItems = computed(() => [
   { value: '', title: t('common.all') },
   ...(['registered', 'shadow', 'canary', 'enforce', 'archived'] as const).map(v => ({ value: v, title: t(`models.stage.${v}`) })),
