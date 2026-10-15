@@ -9,7 +9,11 @@ uv run corvus-eval run --config eval.toml --out reports/<name>
 ```
 
 The output directory gets `report.json`, `report.md` and `onnx/<game_context>/<candidate>.onnx`
-(plus `.int8.onnx` for the torch models). `ml/eval.synthetic.toml` is a ready-to-run smoke config.
+with `<candidate>.calibration.json` and `<candidate>.raw.onnx` (the graph without the calibration;
+torch models also get `.int8.onnx`). `ml/eval.synthetic.toml` is a ready-to-run smoke config.
+
+The control plane runs the same harness as the `evaluate` and `train` jobs; see
+[ml-jobs.md](../reference/ml-jobs.md).
 
 ## 1. Inputs
 
@@ -49,6 +53,7 @@ seed = 1337              # numpy, torch, sklearn and the split
 threads = 1              # torch.set_num_threads and ONNX Runtime intra-op threads
 seq_len = 256            # frames per window fed to sequence models (longer: cut, shorter: padded)
 unlabelled = "exclude"   # or "assume_legit"
+calibration = "auto"     # auto | isotonic | platt | ecdf | none, see "Calibration" below
 contexts = []            # empty = every game_context in the data
 split = [0.6, 0.2, 0.2]  # train / val / test share of players
 fpr_targets = [0.01, 0.001]
@@ -96,6 +101,25 @@ windows and are skipped when the training split lacks one of the classes; unsupe
 (`isolation_forest`, `gru_autoencoder`) on windows that are legit (or assumed legit). Early
 stopping uses the validation split. Scores are "higher = more likely cheat".
 
+### Calibration
+
+Every exported graph outputs a score in [0, 1], not the raw model output. The calibration is fitted
+on the **validation** split and embedded in the ONNX graph, which then has one output named
+`score`:
+
+| Candidate | Method (`auto`) | Meaning of the score |
+|---|---|---|
+| supervised (`gradient_boosting`, `cnn1d`) | isotonic regression with at least 20 windows per class and 200 in total, else Platt scaling | estimated P(cheating, window) |
+| unsupervised (`isolation_forest`, `gru_autoencoder`) | empirical CDF of the raw score of the legit (or assumed legit) validation windows | share of legit windows that score lower: 0.99 is higher than 99 % of legit windows |
+
+The map is monotone, so it never reorders windows; isotonic regression and the CDF can merge
+neighbouring raw values into ties. All metrics in the report (including ECE and the confusion
+matrices) are computed on the calibrated score, the thing that is deployed. `none` exports the
+raw graph (benchmark use only; the jobs refuse it). Without legit validation windows an
+unsupervised candidate is calibrated on its training windows (`fit_on: "train"` in the report).
+The calibration, its method and the number of windows it was fitted on are in
+`<candidate>.calibration.json` and the `calibration` entry of the candidate in `report.json`.
+
 ## 3. Reading the report
 
 Per `game_context` one table row per candidate, all on the **test** split:
@@ -106,12 +130,13 @@ Per `game_context` one table row per candidate, all on the **test** split:
   marks an operating point that the test split cannot resolve (fewer than 1 / FPR legit windows
   or players). Do not trust those cells beyond "upper bound".
 - `ECE`: expected calibration error, 10 equal-width bins, supervised candidates only (the
-  unsupervised scores are not probabilities).
+  unsupervised scores are percentiles of the legit distribution, not probabilities).
 - `p50 ms`, `p99 ms`: single-window ONNX Runtime CPU latency at the configured thread count; the
   target is under 10 ms p99. `batch w/s`: throughput at the batch size. `RSS MB`: peak resident
   set of the benchmark process (`model RSS delta` in the JSON is the growth caused by the model).
-- `ONNX diff`: maximum absolute difference between ONNX and native scores on the test windows;
-  `parity_ok` in the JSON applies `rtol=1e-3, atol=1e-4`.
+- `ONNX diff`: maximum absolute difference between ONNX and native (calibrated) scores on the test
+  windows; `parity_ok` in the JSON applies `rtol=1e-3, atol=2e-3` (the calibration interpolates in
+  float32 next to steep steps). The raw graph is checked separately (`onnx_raw`).
 
 Further sections: the int8 variant (metric deltas against fp32, latency, file size), the confusion
 matrix on test at the threshold that gives the target FPR **on validation**, and the learning

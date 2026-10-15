@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Response
 from ..auth import Principal, Role, require
 from ..deps import Deps, get_deps, get_page
 from ..pagination import PageRequest
-from ..pools import PoolIn, PreviewOut, compute_preview
+from ..pools import PoolFilter, PoolIn, PreviewOut, compute_preview
 from ..ports import DuplicateError, PoolRecord, SnapshotRecord
 from ..problems import ProblemError
 from ..schemas import Paged, PoolOut, SnapshotOut
@@ -18,6 +18,7 @@ from ..snapshots import build_manifest, manifest_sha256
 
 router = APIRouter(tags=["pools"])
 _DS = Depends(require(Role.DATA_SCIENTIST))
+_DS_OR_JOB = Depends(require(Role.DATA_SCIENTIST, allow_jobs=True))
 
 _NOT_FOUND: dict[int | str, dict[str, Any]] = {404: {"description": "Pool not found"}}
 
@@ -98,6 +99,18 @@ async def delete_pool(
 
 
 @router.post(
+    "/pools/preview",
+    response_model=PreviewOut,
+    summary="Counts for a pool filter that is not saved (live preview)",
+    description="The body is a pool `filter`, validated like on create. Nothing is stored.",
+)
+async def preview_filter(
+    body: PoolFilter, _: Principal = _DS, deps: Deps = Depends(get_deps)
+) -> PreviewOut:
+    return compute_preview(await deps.repos.catalog.preview(body))
+
+
+@router.post(
     "/pools/{pool_id}/preview",
     response_model=PreviewOut,
     responses=_NOT_FOUND,
@@ -165,7 +178,7 @@ async def list_pool_snapshots(
 
 @router.get("/snapshots", response_model=Paged[SnapshotOut], summary="List all snapshots")
 async def list_snapshots(
-    _: Principal = _DS, page: PageRequest = Depends(get_page), deps: Deps = Depends(get_deps)
+    _: Principal = _DS_OR_JOB, page: PageRequest = Depends(get_page), deps: Deps = Depends(get_deps)
 ) -> Paged[SnapshotOut]:
     result = await deps.repos.snapshots.list_page(page, None)
     return Paged[SnapshotOut](
@@ -180,7 +193,7 @@ async def list_snapshots(
     summary="Get a snapshot including its manifest",
 )
 async def get_snapshot(
-    snapshot_id: UUID, _: Principal = _DS, deps: Deps = Depends(get_deps)
+    snapshot_id: UUID, _: Principal = _DS_OR_JOB, deps: Deps = Depends(get_deps)
 ) -> SnapshotOut:
     snapshot = await deps.repos.snapshots.get(snapshot_id)
     if snapshot is None:

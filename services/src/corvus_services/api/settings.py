@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import re
 from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
@@ -15,7 +16,10 @@ MIN_PSEUDONYM_KEY_BYTES = 16
 
 class ApiSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix="CORVUS_API_", extra="ignore", populate_by_name=True
+        env_prefix="CORVUS_API_",
+        extra="ignore",
+        populate_by_name=True,
+        hide_input_in_errors=True,
     )
 
     host: str = "0.0.0.0"
@@ -47,6 +51,16 @@ class ApiSettings(BaseSettings):
 
     # Machine tokens of the proxies for GET /api/v1/plugin/blocklist, comma separated.
     plugin_tokens: SecretStr = SecretStr("")
+
+    # Claim holding the display name shown in the UI (falls back to ``preferred_username``).
+    display_name_claim: str = "name"
+
+    # Machine tokens of ML jobs, comma separated ``<sha256 hex of the token>:<job name>``.
+    # Only the hash is configured; the plain token lives in the job's own secret.
+    job_tokens: SecretStr = SecretStr("")
+
+    # Browser origins allowed by CORS, comma separated (``*`` allows any). Empty disables CORS.
+    cors_origins: str = ""
 
     # Pseudonym key, identical to the plugin's (base64, at least 16 bytes).
     pseudonym_key: SecretStr = Field(
@@ -85,6 +99,12 @@ class ApiSettings(BaseSettings):
     # Name of a Secret that is exposed as environment (S3/DB credentials of the job); optional.
     job_k8s_env_secret: str | None = None
 
+    @field_validator("job_tokens")
+    @classmethod
+    def _job_tokens_are_well_formed(cls, v: SecretStr) -> SecretStr:
+        parse_job_tokens(v.get_secret_value())
+        return v
+
     @field_validator("pseudonym_key")
     @classmethod
     def _pseudonym_key_is_base64(cls, v: SecretStr) -> SecretStr:
@@ -106,3 +126,31 @@ class ApiSettings(BaseSettings):
 
     def plugin_token_list(self) -> list[str]:
         return [t.strip() for t in self.plugin_tokens.get_secret_value().split(",") if t.strip()]
+
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    def job_token_list(self) -> list[tuple[str, str]]:
+        """``(sha256 hex, job name)`` pairs."""
+        return parse_job_tokens(self.job_tokens.get_secret_value())
+
+
+_JOB_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+
+
+def parse_job_tokens(raw: str) -> list[tuple[str, str]]:
+    """Parse ``CORVUS_API_JOB_TOKENS``. Errors never echo the configured value."""
+    entries: list[tuple[str, str]] = []
+    for index, item in enumerate(i.strip() for i in raw.split(",")):
+        if not item:
+            continue
+        digest, sep, name = item.partition(":")
+        digest = digest.lower()
+        if not sep or not _SHA256_HEX.match(digest) or not _JOB_NAME.match(name):
+            raise ValueError(
+                f"CORVUS_API_JOB_TOKENS entry {index + 1} must be <sha256 hex>:<name> "
+                "(name: letters, digits, . _ -, at most 64 characters)"
+            )
+        entries.append((digest, name))
+    return entries

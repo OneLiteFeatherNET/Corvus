@@ -23,7 +23,7 @@ from corvus_ml.features.constants import (
 )
 from corvus_ml.features.featurizer import CompletedWindow, SessionFeaturizer
 from corvus_ml.features.frames import Frame
-from corvus_ml.features.reader import EventReader, open_dataset
+from corvus_ml.features.reader import EventFiles, EventReader, open_dataset
 from corvus_ml.features.schema import (
     SESSION_ID_TYPE,
     TOKEN_FEATURES,
@@ -248,7 +248,11 @@ _STATE: dict[str, object] = {}
 
 
 def _init_worker(
-    events: str, s3: S3Config | None, segmap: SegmentMap, cfg: FeatureConfig, out_dir: str
+    events: str | EventFiles,
+    s3: S3Config | None,
+    segmap: SegmentMap,
+    cfg: FeatureConfig,
+    out_dir: str,
 ) -> None:
     pa.set_cpu_count(1)
     pa.set_io_thread_count(1)
@@ -269,7 +273,7 @@ def _run_task(task: tuple[int, tuple[bytes, ...]]) -> GroupStats:
 
 
 def build(
-    events: str | Path,
+    events: str | Path | EventFiles,
     segmap: SegmentMap,
     out_dir: Path,
     cfg: FeatureConfig,
@@ -292,6 +296,12 @@ def build(
         max_workers=min(workers, len(tasks)),
         mp_context=ctx,
         initializer=_init_worker,
-        initargs=(str(events), s3, segmap, cfg, str(out_dir)),
+        initargs=(
+            events if isinstance(events, EventFiles) else str(events),
+            s3,
+            segmap,
+            cfg,
+            str(out_dir),
+        ),
     ) as pool:
         return list(pool.map(_run_task, tasks))

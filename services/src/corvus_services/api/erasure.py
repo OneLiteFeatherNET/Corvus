@@ -22,7 +22,8 @@ async def erase_player(
     1. delete the ``player_keys`` row (the player's ``raw`` payloads become unreadable),
     2. set ``players.erased_at`` (ingest then stops storing data for the pseudonym),
     3. add the pseudonym to the blocklist (the plugin stops capturing),
-    4. record the audit row with ``compaction_pending`` (the ``events`` rewrite is a later job).
+    4. delete the player's rows in ``scores_latest`` and ``score_history``,
+    5. record the audit row with ``compaction_pending`` (the ``events`` rewrite is a later job).
 
     A pseudonym that was never captured is still blocklisted and audited.
     """
@@ -34,6 +35,7 @@ async def erase_player(
         await tx.block(
             BlockEntry(pseudonym, "block", "erasure", "erasure request", requested_by, now)
         )
+        await tx.delete_scores(pseudonym)
         request = ErasureRequest(
             id=new_id(),
             pseudonym=pseudonym,

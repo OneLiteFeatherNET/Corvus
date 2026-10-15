@@ -31,7 +31,7 @@ pnpm test         # vitest, 2 workers
 ```
 
 For `pnpm dev` the API must be reachable from the browser: either point `apiBaseUrl` in `public/config.json` at an API with CORS
-enabled or at a reverse proxy. The API itself does not send CORS headers.
+enabled (`CORVUS_API_CORS_ORIGINS=http://localhost:3000`, off by default) or at a reverse proxy.
 
 After the API schema changes, regenerate the types:
 
@@ -95,12 +95,18 @@ Styles allow `unsafe-inline` because Vuetify injects its theme styles at runtime
 `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`. `config.json` is served with `no-store`,
 `/_nuxt/` assets are immutable, every other path falls back to `index.html`.
 
-## What the API does not offer
+## What the API offers for the UI
 
-The UI works around these gaps; closing them in the API would simplify it:
+These endpoints exist so the UI does not have to work around the API (see
+[control-plane-api.md](../reference/control-plane-api.md)); the UI still uses the workarounds it was built with until it
+is switched over:
 
-- **Live preview of an unsaved filter.** `POST /pools/{id}/preview` previews the saved pool, so the editor offers "save and preview".
-- **Aggregates and recent items.** The dashboard counts the first page (200 items, shown as `200+` when more exist).
-- **Erasure request list.** Only `GET /players/erasure/{id}` exists; the UI remembers the ids of requests made from this browser.
-- **Model lookup by name and version.** The UI scans `GET /models` pages; name, game context and domain filters run client-side (the API filters `stage` only).
-- **CORS.** The API sends no CORS headers; use the proxy (`CORVUS_UI_API_UPSTREAM`) or a reverse proxy in front of both.
+- **Live preview of an unsaved filter:** `POST /pools/preview` with the pool filter as body.
+- **Aggregates and recent items:** `GET /summary` (counts, jobs by status, models by stage, labels, pending erasures,
+  the 10 newest jobs and erasure requests).
+- **Erasure request list:** `GET /erasure-requests` (admin, paginated, `status` filter).
+- **Model lookup:** `GET /models` filters on `name`, `version`, `game_context`, `domain` and `stage`;
+  `GET /models/{name}/{version}` returns one model.
+- **Identity:** `GET /me` returns the subject, display name and mapped roles.
+- **CORS:** `CORVUS_API_CORS_ORIGINS` lists the browser origins that may call the API (credentials stay off); the
+  same-origin proxy (`CORVUS_UI_API_UPSTREAM`) still avoids the need for it.

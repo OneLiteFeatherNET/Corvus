@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 
 from ..clock import system_clock
 from .auth import build_authenticator
@@ -17,7 +18,7 @@ from .jobs import build_runner
 from .pg import open_repos
 from .problems import install_problem_handlers
 from .pseudonym import Pseudonymizer
-from .routes import jobs, labels, models, players, pools, scores, system
+from .routes import jobs, labels, me, models, players, pools, scores, system
 from .settings import ApiSettings
 
 log = logging.getLogger("corvus.api")
@@ -102,7 +103,20 @@ def create_app(settings: ApiSettings | None = None, deps: Deps | None = None) ->
             m.requests.labels(template, request.method, str(status)).inc()
             m.latency.labels(template, request.method).observe(time.perf_counter() - started)
 
-    for router in (pools.router, labels.router, players.router, players.plugin_router,
+    origins = cfg.cors_origin_list()
+    if origins:
+        # Bearer tokens travel in a header, never in cookies: credentials stay off.
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+            allow_headers=["Authorization", "Content-Type"],
+            expose_headers=[],  # pagination is part of the JSON body
+            max_age=600,
+        )
+
+    for router in (me.router, pools.router, labels.router, players.router, players.plugin_router,
                    models.router, jobs.router, scores.router):  # fmt: skip
         app.include_router(router, prefix=API_PREFIX)
     app.include_router(system.router)

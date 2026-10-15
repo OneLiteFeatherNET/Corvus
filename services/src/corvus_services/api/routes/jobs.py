@@ -6,19 +6,30 @@ import json
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from ..auth import Principal, Role, require
+from ..auth import JOB_ID_HEADER, Principal, Role, enforce_job_scope, require
 from ..deps import Deps, get_deps, get_page
-from ..jobs import JobState, JobType, SnapshotMissingError, create_job, refresh_job
+from ..jobs import (
+    REPORTABLE,
+    JobFinishedError,
+    JobState,
+    JobType,
+    SnapshotMissingError,
+    create_job,
+    refresh_job,
+    report_job,
+)
 from ..pagination import PageRequest
 from ..problems import ProblemError
 from ..schemas import JobOut, Paged
 
 router = APIRouter(tags=["jobs"])
 _DS = Depends(require(Role.DATA_SCIENTIST))
+_DS_OR_JOB = Depends(require(Role.DATA_SCIENTIST, allow_jobs=True))
 MAX_PARAMS_BYTES = 16 * 1024
+MAX_MESSAGE_CHARS = 2000
 
 
 class JobIn(BaseModel):
@@ -36,6 +47,31 @@ class JobIn(BaseModel):
     def _small(cls, v: dict[str, Any]) -> dict[str, Any]:
         if len(json.dumps(v)) > MAX_PARAMS_BYTES:
             raise ValueError(f"params exceed {MAX_PARAMS_BYTES} bytes")
+        return v
+
+
+class JobReportIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: JobState
+    message: str = Field(default="", max_length=MAX_MESSAGE_CHARS)
+    result: dict[str, Any] | None = Field(
+        default=None,
+        description="Result document (metrics, artefact keys); must not contain secrets",
+    )
+
+    @field_validator("status")
+    @classmethod
+    def _reportable(cls, v: JobState) -> JobState:
+        if v not in REPORTABLE:
+            raise ValueError("status must be one of running, succeeded, failed")
+        return v
+
+    @field_validator("result")
+    @classmethod
+    def _small(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        if v is not None and len(json.dumps(v)) > MAX_PARAMS_BYTES:
+            raise ValueError(f"result exceeds {MAX_PARAMS_BYTES} bytes")
         return v
 
 
@@ -82,8 +118,55 @@ async def list_jobs(
     responses={404: {"description": "Job not found"}},
     summary="Get a job; a running job's status is refreshed from the runner",
 )
-async def get_job(job_id: UUID, _: Principal = _DS, deps: Deps = Depends(get_deps)) -> JobOut:
+async def get_job(
+    job_id: UUID,
+    who: Principal = _DS_OR_JOB,
+    job_header: str | None = Header(default=None, alias=JOB_ID_HEADER),
+    deps: Deps = Depends(get_deps),
+) -> JobOut:
+    enforce_job_scope(who, job_id, job_header)
     job = await deps.repos.jobs.get(job_id)
     if job is None:
         raise ProblemError(404, "job not found", slug="not-found")
     return JobOut.of(await refresh_job(deps.repos.jobs, deps.runner, job, deps.clock()))
+
+
+@router.patch(
+    "/jobs/{job_id}",
+    response_model=JobOut,
+    responses={
+        403: {"description": f"A job token needs `{JOB_ID_HEADER}` equal to the path id"},
+        404: {"description": "Job not found"},
+        409: {"description": "The job already finished with a different status"},
+    },
+    summary="Report status, message and result of a job",
+    description=(
+        "Called by the job process with its machine token (`CORVUS_API_URL`, `CORVUS_API_TOKEN`). "
+        f"A job token may only update its own job: the header `{JOB_ID_HEADER}` (the job's "
+        "`CORVUS_JOB_ID`) must equal the id in the path. `succeeded` and `failed` are final; "
+        "repeating the identical report is accepted."
+    ),
+)
+async def report_job_status(
+    job_id: UUID,
+    body: JobReportIn,
+    who: Principal = _DS_OR_JOB,
+    job_header: str | None = Header(default=None, alias=JOB_ID_HEADER),
+    deps: Deps = Depends(get_deps),
+) -> JobOut:
+    enforce_job_scope(who, job_id, job_header)
+    job = await deps.repos.jobs.get(job_id)
+    if job is None:
+        raise ProblemError(404, "job not found", slug="not-found")
+    try:
+        updated = await report_job(
+            deps.repos.jobs,
+            job,
+            status=body.status,
+            message=body.message,
+            result=body.result,
+            now=deps.clock(),
+        )
+    except JobFinishedError as e:
+        raise ProblemError(409, f"the job already finished as {e}", slug="conflict") from e
+    return JobOut.of(updated)
