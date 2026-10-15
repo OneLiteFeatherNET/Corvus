@@ -2,6 +2,8 @@ package net.onelitefeather.corvus.plugin.capture;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.UnsafeByteOperations;
+import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
+import net.onelitefeather.corvus.plugin.privacy.PayloadPolicy;
 import net.onelitefeather.corvus.plugin.privacy.PlayerFilter;
 import net.onelitefeather.corvus.plugin.privacy.PrivacyFilter;
 import net.onelitefeather.corvus.plugin.privacy.Pseudonymizer;
@@ -26,10 +28,11 @@ import java.util.function.Supplier;
  */
 public final class CaptureEngine {
 
-    public record Settings(boolean rawPayloads, int maxPayloadBytes, String proxyId, String pluginVersion) {
+    public record Settings(PayloadMode payloadMode, int maxPayloadBytes, String proxyId, String pluginVersion) {
     }
 
     private final Settings settings;
+    private final PayloadPolicy payloadPolicy;
     private final Pseudonymizer pseudonymizer; // null: fail closed, nothing is captured
     private final PlayerFilter playerFilter;
     private final GameContextMapper contexts;
@@ -46,6 +49,7 @@ public final class CaptureEngine {
                          GameContextMapper contexts, CaptureSink sink, NanoClock nanoClock, InstantSource wallClock,
                          Supplier<byte[]> sessionIds, Metrics metrics, Consumer<String> info) {
         this.settings = settings;
+        this.payloadPolicy = new PayloadPolicy(settings.payloadMode());
         this.pseudonymizer = pseudonymizer;
         this.playerFilter = playerFilter;
         this.contexts = contexts;
@@ -125,7 +129,7 @@ public final class CaptureEngine {
                 .setState(state)
                 .setWirePacketId(view.wirePacketId())
                 .setPacketType(CorvusPacket.idOf(view.packetType()));
-        if (settings.rawPayloads()) {
+        if (payloadPolicy.recordsPayload(view.packetType(), view.direction(), state)) {
             frame.setPayload(UnsafeByteOperations.unsafeWrap(view.copyPayload(settings.maxPayloadBytes())));
             frame.setPayloadOriginalSize(view.payloadSize());
         }

@@ -43,6 +43,11 @@ public final class PrivacyFilter {
     private PrivacyFilter() {
     }
 
+    /** The packet types that are always dropped (play and configuration). */
+    public static Set<PacketTypeCommon> privateTypes() {
+        return PRIVATE_TYPES;
+    }
+
     /** True if a frame of this type/state must not be recorded at all (counted as dropped_privacy). */
     public static boolean isPrivate(PacketTypeCommon type, ConnectionState state) {
         if (state != ConnectionState.CONNECTION_STATE_PLAY && state != ConnectionState.CONNECTION_STATE_CONFIGURATION) {

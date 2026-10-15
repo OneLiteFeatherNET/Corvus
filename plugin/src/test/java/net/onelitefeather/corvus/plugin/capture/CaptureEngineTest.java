@@ -3,6 +3,7 @@ package net.onelitefeather.corvus.plugin.capture;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import net.onelitefeather.corvus.plugin.config.CorvusConfig;
 import net.onelitefeather.corvus.plugin.privacy.PlayerFilter;
+import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
 import net.onelitefeather.corvus.plugin.support.EngineFixture;
 import net.onelitefeather.corvus.plugin.support.FakePacketView;
 import net.onelitefeather.corvus.plugin.support.RecordingSink;
@@ -135,7 +136,7 @@ class CaptureEngineTest {
     void allowlistModeCapturesOnlyListedPlayers() {
         RecordingSink sink = new RecordingSink();
         PlayerFilter filter = new PlayerFilter(CorvusConfig.ListMode.ALLOWLIST, Set.of(FakePacketView.PLAYER), Set.of());
-        EngineFixture f = new EngineFixture().build(sink, EngineFixture.KEY, true, 2048, filter);
+        EngineFixture f = new EngineFixture().build(sink, EngineFixture.KEY, PayloadMode.SERVERBOUND, 2048, filter);
 
         f.engine.onPacket(new FakePacketView().player(OTHER));
         f.engine.onPacket(new FakePacketView());
@@ -148,7 +149,7 @@ class CaptureEngineTest {
     void blocklistExcludesPlayerInAllMode() {
         RecordingSink sink = new RecordingSink();
         PlayerFilter filter = new PlayerFilter(CorvusConfig.ListMode.ALL, Set.of(), Set.of(OTHER));
-        EngineFixture f = new EngineFixture().build(sink, EngineFixture.KEY, true, 2048, filter);
+        EngineFixture f = new EngineFixture().build(sink, EngineFixture.KEY, PayloadMode.SERVERBOUND, 2048, filter);
 
         f.engine.onPacket(new FakePacketView().player(OTHER));
 
@@ -157,9 +158,9 @@ class CaptureEngineTest {
     }
 
     @Test
-    void rawPayloadIsOmittedWhenDisabled() {
+    void rawPayloadIsOmittedInModeNone() {
         RecordingSink sink = new RecordingSink();
-        EngineFixture f = new EngineFixture().build(sink, EngineFixture.KEY, false, 2048);
+        EngineFixture f = new EngineFixture().build(sink, EngineFixture.KEY, PayloadMode.NONE, 2048);
 
         f.engine.onPacket(new FakePacketView().payload(new byte[]{9, 9}));
 
@@ -170,17 +171,64 @@ class CaptureEngineTest {
     @Test
     void payloadIsTruncatedToConfiguredMaximum() {
         RecordingSink sink = new RecordingSink();
-        EngineFixture f = new EngineFixture().build(sink, EngineFixture.KEY, true, 4);
+        EngineFixture f = new EngineFixture().build(sink, EngineFixture.KEY, PayloadMode.SERVERBOUND, 4);
 
         f.engine.onPacket(new FakePacketView().payload(new byte[100]));
 
         assertEquals(4, ((WriteItem.FrameItem) sink.frames.get(0)).frame().getPayload().size());
     }
 
+    private Frame onlyFrame(RecordingSink sink) {
+        return ((WriteItem.FrameItem) sink.frames.get(0)).frame();
+    }
+
+    @Test
+    void clientboundScoreboardPayloadIsStrippedButTheFrameIsKept() {
+        RecordingSink sink = new RecordingSink();
+        EngineFixture f = EngineFixture.withSink(sink);
+
+        f.engine.onPacket(new FakePacketView().type(PacketType.Play.Server.TEAMS).clientbound().payload(new byte[]{1}));
+
+        assertTrue(onlyFrame(sink).getPayload().isEmpty());
+        assertEquals(0, onlyFrame(sink).getPayloadOriginalSize());
+    }
+
+    @Test
+    void clientboundMotionPayloadIsRecordedInDefaultMode() {
+        RecordingSink sink = new RecordingSink();
+        EngineFixture f = EngineFixture.withSink(sink);
+
+        f.engine.onPacket(new FakePacketView().type(PacketType.Play.Server.ENTITY_VELOCITY).clientbound()
+                .payload(new byte[]{1, 2}));
+
+        assertEquals(2, onlyFrame(sink).getPayload().size());
+    }
+
+    @Test
+    void signUpdatePayloadIsStrippedButTheFrameIsKept() {
+        RecordingSink sink = new RecordingSink();
+        EngineFixture f = EngineFixture.withSink(sink);
+
+        f.engine.onPacket(new FakePacketView().type(PacketType.Play.Client.UPDATE_SIGN).payload(new byte[]{1, 2}));
+
+        assertTrue(onlyFrame(sink).getPayload().isEmpty());
+        assertEquals(CorvusPacket.C_UPDATE_SIGN.id(), onlyFrame(sink).getPacketType());
+    }
+
+    @Test
+    void modeAllRecordsClientboundPayloadForDebugging() {
+        RecordingSink sink = new RecordingSink();
+        EngineFixture f = new EngineFixture().build(sink, EngineFixture.KEY, PayloadMode.ALL, 2048);
+
+        f.engine.onPacket(new FakePacketView().type(PacketType.Play.Server.TEAMS).clientbound().payload(new byte[]{1}));
+
+        assertEquals(1, onlyFrame(sink).getPayload().size());
+    }
+
     @Test
     void truncatedPayloadKeepsItsOriginalSize() {
         RecordingSink sink = new RecordingSink();
-        EngineFixture f = new EngineFixture().build(sink, EngineFixture.KEY, true, 4);
+        EngineFixture f = new EngineFixture().build(sink, EngineFixture.KEY, PayloadMode.SERVERBOUND, 4);
 
         f.engine.onPacket(new FakePacketView().payload(new byte[100]));
 
@@ -190,7 +238,7 @@ class CaptureEngineTest {
     @Test
     void payloadOriginalSizeIsZeroWhenNoPayloadIsRecorded() {
         RecordingSink sink = new RecordingSink();
-        EngineFixture f = new EngineFixture().build(sink, EngineFixture.KEY, false, 2048);
+        EngineFixture f = new EngineFixture().build(sink, EngineFixture.KEY, PayloadMode.NONE, 2048);
 
         f.engine.onPacket(new FakePacketView().payload(new byte[100]));
 

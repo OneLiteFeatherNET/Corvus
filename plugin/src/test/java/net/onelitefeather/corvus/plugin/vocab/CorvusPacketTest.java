@@ -1,6 +1,8 @@
 package net.onelitefeather.corvus.plugin.vocab;
 
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
+import net.onelitefeather.corvus.plugin.privacy.PayloadPolicy;
+import net.onelitefeather.corvus.plugin.privacy.PrivacyFilter;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
@@ -31,7 +33,24 @@ class CorvusPacketTest {
     @Test
     void lookupReturnsStableIdAndZeroForUnmapped() {
         assertEquals(CorvusPacket.C_CLIENT_TICK_END.id(), CorvusPacket.idOf(PacketType.Play.Client.CLIENT_TICK_END));
-        assertEquals(0, CorvusPacket.idOf(PacketType.Play.Client.CHAT_MESSAGE), "chat has no vocabulary id");
+        assertEquals(0, CorvusPacket.idOf(PacketType.Play.Client.QUERY_BLOCK_NBT), "unmapped type");
+    }
+
+    @Test
+    void everyPrivacyDroppedTypeHasAVocabularyId() {
+        for (var type : PrivacyFilter.privateTypes()) {
+            assertTrue(CorvusPacket.idOf(type) > 0, type.getName() + " is privacy-dropped but has no vocabulary id");
+        }
+    }
+
+    @Test
+    void everyPayloadStrippedOrAllowlistedTypeHasAVocabularyId() {
+        for (var type : PayloadPolicy.strippedServerboundTypes()) {
+            assertTrue(CorvusPacket.idOf(type) > 0, type.getName() + " is payload-stripped but has no vocabulary id");
+        }
+        for (var type : PayloadPolicy.clientboundAllowlist()) {
+            assertTrue(CorvusPacket.idOf(type) > 0, type.getName() + " is allowlisted but has no vocabulary id");
+        }
     }
 
     @Test

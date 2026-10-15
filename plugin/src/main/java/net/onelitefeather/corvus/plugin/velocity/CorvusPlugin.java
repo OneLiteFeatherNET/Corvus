@@ -24,6 +24,7 @@ import net.onelitefeather.corvus.plugin.capture.WriterThread;
 import net.onelitefeather.corvus.plugin.config.CorvusConfig;
 import net.onelitefeather.corvus.plugin.pe.CorvusPacketListener;
 import net.onelitefeather.corvus.plugin.privacy.KeyLoader;
+import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
 import net.onelitefeather.corvus.plugin.privacy.PlayerFilter;
 import net.onelitefeather.corvus.plugin.privacy.PseudonymKey;
 import net.onelitefeather.corvus.plugin.privacy.Pseudonymizer;
@@ -85,6 +86,12 @@ public final class CorvusPlugin {
         }
         CorvusConfig config = CorvusConfig.parse(Files.readString(configFile, StandardCharsets.UTF_8));
 
+        if (config.payloadMode() == PayloadMode.ALL) {
+            logger.warn("capture.raw_payloads = \"all\": payloads of clientbound packets that may contain names "
+                    + "and UUIDs of other players are recorded. Use for local debugging only, never for data "
+                    + "that reaches the data lake.");
+        }
+
         Optional<PseudonymKey> key = KeyLoader.load(System::getenv, config.keyFile(), dataDirectory,
                 config.keyId(), logger::warn);
 
@@ -93,7 +100,7 @@ public final class CorvusPlugin {
         ByteBoundedQueue queue = new ByteBoundedQueue(config.queueMaxBytes());
         SecureRandom random = new SecureRandom();
         engine = new CaptureEngine(
-                new CaptureEngine.Settings(config.rawPayloads(), config.maxPayloadBytes(), config.proxyId(),
+                new CaptureEngine.Settings(config.payloadMode(), config.maxPayloadBytes(), config.proxyId(),
                         BuildConstants.VERSION),
                 key.map(Pseudonymizer::new).orElse(null),
                 new PlayerFilter(config.listMode(), config.allowlist(), config.blocklist()),

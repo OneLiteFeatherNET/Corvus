@@ -5,6 +5,7 @@ import net.onelitefeather.corvus.plugin.capture.CaptureSink;
 import net.onelitefeather.corvus.plugin.capture.GameContextMapper;
 import net.onelitefeather.corvus.plugin.capture.Metrics;
 import net.onelitefeather.corvus.plugin.config.CorvusConfig;
+import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
 import net.onelitefeather.corvus.plugin.privacy.PlayerFilter;
 import net.onelitefeather.corvus.plugin.privacy.PseudonymKey;
 import net.onelitefeather.corvus.plugin.privacy.Pseudonymizer;
@@ -33,23 +34,23 @@ public final class EngineFixture {
     public CaptureEngine engine;
 
     public static EngineFixture withSink(CaptureSink sink) {
-        return new EngineFixture().build(sink, KEY, true, 2048);
+        return new EngineFixture().build(sink, KEY, PayloadMode.SERVERBOUND, 2048);
     }
 
     public static EngineFixture withoutKey(CaptureSink sink) {
-        return new EngineFixture().build(sink, null, true, 2048);
+        return new EngineFixture().build(sink, null, PayloadMode.SERVERBOUND, 2048);
     }
 
-    public EngineFixture build(CaptureSink sink, PseudonymKey key, boolean rawPayloads, int maxPayload) {
-        return build(sink, key, rawPayloads, maxPayload,
+    public EngineFixture build(CaptureSink sink, PseudonymKey key, PayloadMode payloadMode, int maxPayload) {
+        return build(sink, key, payloadMode, maxPayload,
                 new PlayerFilter(CorvusConfig.ListMode.ALL, Set.of(), Set.of()));
     }
 
-    public EngineFixture build(CaptureSink sink, PseudonymKey key, boolean rawPayloads, int maxPayload,
+    public EngineFixture build(CaptureSink sink, PseudonymKey key, PayloadMode payloadMode, int maxPayload,
                                PlayerFilter filter) {
         this.sink = sink;
         this.engine = new CaptureEngine(
-                new CaptureEngine.Settings(rawPayloads, maxPayload, "proxy-test", "0.0.0-test"),
+                new CaptureEngine.Settings(payloadMode, maxPayload, "proxy-test", "0.0.0-test"),
                 key == null ? null : new Pseudonymizer(key),
                 filter,
                 new GameContextMapper(Map.of("lobby", "lobby"), "unknown"),

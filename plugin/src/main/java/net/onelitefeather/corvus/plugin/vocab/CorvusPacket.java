@@ -49,6 +49,27 @@ public enum CorvusPacket {
     C_CHUNK_BATCH_ACK(34, PacketType.Play.Client.CHUNK_BATCH_ACK),
     C_RESOURCE_PACK_STATUS(35, PacketType.Play.Client.RESOURCE_PACK_STATUS),
     C_PLAYER_LOADED(36, PacketType.Play.Client.PLAYER_LOADED),
+    // text-bearing types: recorded without payload (see PayloadPolicy)
+    C_EDIT_BOOK(37, PacketType.Play.Client.EDIT_BOOK),
+    C_NAME_ITEM(38, PacketType.Play.Client.NAME_ITEM),
+    C_UPDATE_COMMAND_BLOCK(39, PacketType.Play.Client.UPDATE_COMMAND_BLOCK),
+    C_UPDATE_COMMAND_BLOCK_MINECART(40, PacketType.Play.Client.UPDATE_COMMAND_BLOCK_MINECART),
+    C_UPDATE_STRUCTURE_BLOCK(41, PacketType.Play.Client.UPDATE_STRUCTURE_BLOCK),
+    C_UPDATE_JIGSAW_BLOCK(42, PacketType.Play.Client.UPDATE_JIGSAW_BLOCK),
+    C_UPDATE_SIGN(43, PacketType.Play.Client.UPDATE_SIGN),
+    C_COOKIE_RESPONSE(44, PacketType.Play.Client.COOKIE_RESPONSE),
+    C_SET_TEST_BLOCK(45, PacketType.Play.Client.SET_TEST_BLOCK),
+    C_TEST_INSTANCE_BLOCK_ACTION(46, PacketType.Play.Client.TEST_INSTANCE_BLOCK_ACTION),
+    C_CUSTOM_CLICK_ACTION(47, PacketType.Play.Client.CUSTOM_CLICK_ACTION),
+    C_SET_GAME_RULE(48, PacketType.Play.Client.SET_GAME_RULE),
+    // privacy-dropped types (never recorded; ids exist so the analyzer can deny them)
+    C_CHAT_PREVIEW(49, PacketType.Play.Client.CHAT_PREVIEW),
+    C_CHAT_MESSAGE(50, PacketType.Play.Client.CHAT_MESSAGE),
+    C_TAB_COMPLETE(51, PacketType.Play.Client.TAB_COMPLETE),
+    C_CHAT_COMMAND(52, PacketType.Play.Client.CHAT_COMMAND),
+    C_CHAT_COMMAND_UNSIGNED(53, PacketType.Play.Client.CHAT_COMMAND_UNSIGNED),
+    C_CHAT_ACK(54, PacketType.Play.Client.CHAT_ACK),
+    C_CHAT_SESSION_UPDATE(55, PacketType.Play.Client.CHAT_SESSION_UPDATE),
 
     // clientbound play
     S_ENTITY_RELATIVE_MOVE(100, PacketType.Play.Server.ENTITY_RELATIVE_MOVE),
@@ -97,6 +118,21 @@ public enum CorvusPacket {
     S_BUNDLE(143, PacketType.Play.Server.BUNDLE),
     S_TIME_UPDATE(144, PacketType.Play.Server.TIME_UPDATE),
     S_SET_COOLDOWN(145, PacketType.Play.Server.SET_COOLDOWN),
+    // privacy-dropped types (never recorded; ids exist so the analyzer can deny them)
+    S_CHAT_PREVIEW_PACKET(146, PacketType.Play.Server.CHAT_PREVIEW_PACKET),
+    S_PLAYER_CHAT_HEADER(147, PacketType.Play.Server.PLAYER_CHAT_HEADER),
+    S_TAB_COMPLETE(148, PacketType.Play.Server.TAB_COMPLETE),
+    S_DECLARE_COMMANDS(149, PacketType.Play.Server.DECLARE_COMMANDS),
+    S_CHAT_MESSAGE(150, PacketType.Play.Server.CHAT_MESSAGE),
+    S_SYSTEM_CHAT_MESSAGE(151, PacketType.Play.Server.SYSTEM_CHAT_MESSAGE),
+    S_DELETE_CHAT(152, PacketType.Play.Server.DELETE_CHAT),
+    S_DISGUISED_CHAT(153, PacketType.Play.Server.DISGUISED_CHAT),
+    S_DISPLAY_CHAT_PREVIEW(154, PacketType.Play.Server.DISPLAY_CHAT_PREVIEW),
+    S_CUSTOM_CHAT_COMPLETIONS(155, PacketType.Play.Server.CUSTOM_CHAT_COMPLETIONS),
+    S_SERVER_DATA(156, PacketType.Play.Server.SERVER_DATA),
+    S_PLAYER_INFO(157, PacketType.Play.Server.PLAYER_INFO),
+    S_PLAYER_INFO_UPDATE(158, PacketType.Play.Server.PLAYER_INFO_UPDATE),
+    S_PLAYER_INFO_REMOVE(159, PacketType.Play.Server.PLAYER_INFO_REMOVE),
 
     // configuration
     CFG_C_CLIENT_SETTINGS(200, PacketType.Configuration.Client.CLIENT_SETTINGS),
@@ -113,7 +149,8 @@ public enum CorvusPacket {
     CFG_S_PING(224, PacketType.Configuration.Server.PING),
     CFG_S_REGISTRY_DATA(225, PacketType.Configuration.Server.REGISTRY_DATA),
     CFG_S_UPDATE_TAGS(226, PacketType.Configuration.Server.UPDATE_TAGS),
-    CFG_S_SELECT_KNOWN_PACKS(227, PacketType.Configuration.Server.SELECT_KNOWN_PACKS);
+    CFG_S_SELECT_KNOWN_PACKS(227, PacketType.Configuration.Server.SELECT_KNOWN_PACKS),
+    CFG_S_RESET_CHAT(228, PacketType.Configuration.Server.RESET_CHAT);
 
     private static final Map<PacketTypeCommon, CorvusPacket> BY_TYPE = new HashMap<>();
 

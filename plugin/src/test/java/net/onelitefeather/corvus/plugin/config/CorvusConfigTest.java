@@ -1,5 +1,6 @@
 package net.onelitefeather.corvus.plugin.config;
 
+import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
 import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
@@ -15,7 +16,7 @@ class CorvusConfigTest {
         CorvusConfig c = CorvusConfig.parse(CorvusConfig.DEFAULT_TOML);
 
         assertEquals(CorvusConfig.ListMode.ALL, c.listMode());
-        assertTrue(c.rawPayloads());
+        assertEquals(PayloadMode.SERVERBOUND, c.payloadMode());
         assertEquals(64L * 1024 * 1024, c.queueMaxBytes());
         assertEquals("unknown", c.defaultGameContext());
         assertEquals("lobby", c.serverContexts().get("lobby"));
@@ -32,6 +33,33 @@ class CorvusConfigTest {
         assertEquals(CorvusConfig.ListMode.ALLOWLIST, c.listMode());
         assertTrue(c.allowlist().contains(a));
         assertTrue(c.blocklist().contains(b));
+    }
+
+    @Test
+    void rawPayloadsStringIsParsed() {
+        assertEquals(PayloadMode.ALL, CorvusConfig.parse("[capture]\nraw_payloads = \"all\"\n").payloadMode());
+        assertEquals(PayloadMode.NONE, CorvusConfig.parse("[capture]\nraw_payloads = \"none\"\n").payloadMode());
+    }
+
+    @Test
+    void legacyBooleanTrueMeansServerbound() {
+        assertEquals(PayloadMode.SERVERBOUND, CorvusConfig.parse("[capture]\nraw_payloads = true\n").payloadMode());
+    }
+
+    @Test
+    void legacyBooleanFalseMeansNone() {
+        assertEquals(PayloadMode.NONE, CorvusConfig.parse("[capture]\nraw_payloads = false\n").payloadMode());
+    }
+
+    @Test
+    void missingRawPayloadsKeyDefaultsToServerbound() {
+        assertEquals(PayloadMode.SERVERBOUND, CorvusConfig.parse("proxy_id = \"x\"\n").payloadMode());
+    }
+
+    @Test
+    void unknownRawPayloadsValueIsRejected() {
+        assertThrows(IllegalArgumentException.class,
+                () -> CorvusConfig.parse("[capture]\nraw_payloads = \"clientbound\"\n"));
     }
 
     @Test

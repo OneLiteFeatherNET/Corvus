@@ -1,6 +1,7 @@
 package net.onelitefeather.corvus.plugin.config;
 
 import com.moandjiezana.toml.Toml;
+import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -18,7 +19,7 @@ public record CorvusConfig(
         ListMode listMode,
         Set<UUID> allowlist,
         Set<UUID> blocklist,
-        boolean rawPayloads,
+        PayloadMode payloadMode,
         int maxPayloadBytes,
         long queueMaxBytes,
         int batchSize,
@@ -45,7 +46,12 @@ public record CorvusConfig(
             blocklist = []
 
             [capture]
-            raw_payloads = true
+            # Raw packet bytes to store: "none", "serverbound" or "all" (true = serverbound, false = none).
+            # "serverbound": serverbound play packets except text-bearing ones (signs, books, anvil names,
+            # plugin messages, command blocks...) plus a few clientbound motion packets. Other clientbound
+            # packets carry names and UUIDs of other players and never keep their payload.
+            # "all" is for local debugging only and logs a warning at startup.
+            raw_payloads = "serverbound"
             # Payloads longer than this are truncated (chunk data etc. are not useful and expensive).
             max_payload_bytes = 2048
             # Upper bound of the in-memory queue between the Netty threads and the writer thread.
@@ -91,13 +97,18 @@ public record CorvusConfig(
                 listMode,
                 uuids(toml.getList("players.allowlist")),
                 uuids(toml.getList("players.blocklist")),
-                toml.getBoolean("capture.raw_payloads", true),
+                PayloadMode.parse(rawPayloadsValue(toml)),
                 Math.max(0, maxPayload),
                 Math.max(1024L, toml.getLong("capture.queue_max_bytes", 64L * 1024 * 1024)),
                 (int) Math.max(1L, toml.getLong("capture.batch_size", 200L)),
                 Math.max(100L, toml.getLong("capture.flush_interval_seconds", 5L) * 1000L),
                 toml.getString("game_context.default", "unknown"),
                 contexts);
+    }
+
+    private static Object rawPayloadsValue(Toml toml) {
+        Toml capture = toml.getTable("capture");
+        return capture == null ? null : capture.toMap().get("raw_payloads");
     }
 
     private static Set<UUID> uuids(List<Object> raw) {
