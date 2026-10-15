@@ -1,0 +1,3 @@
+# Generated protobuf bindings (see scripts/gen_proto.sh)
+src/corvus_ml/_gen/
+.venv/
