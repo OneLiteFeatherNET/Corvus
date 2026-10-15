@@ -71,7 +71,12 @@ def infer(model: LoadedModel, windows: list[PendingWindow]) -> tuple[np.ndarray,
     started = time.perf_counter()
     x = model_inputs([w.window for w in windows], model.input_kind, model.spec)
     outputs = model.session.run(x)
-    scores = scores_from_outputs(model.entry.candidate_type, outputs)
+    scores = scores_from_outputs(
+        model.entry.candidate_type,
+        outputs,
+        getattr(model.session, "output_names", None),
+        model.semantics,
+    )
     if len(scores) != len(windows):
         raise ValueError(f"model returned {len(scores)} scores for {len(windows)} windows")
     return scores, time.perf_counter() - started

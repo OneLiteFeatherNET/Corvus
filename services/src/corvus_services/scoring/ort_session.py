@@ -21,6 +21,11 @@ class OrtSession:
         first = self._session.get_inputs()[0]
         self._input = first.name
         self._shape: tuple[int | str | None, ...] = tuple(first.shape)
+        self._outputs = tuple(o.name for o in self._session.get_outputs())
+
+    @property
+    def output_names(self) -> tuple[str, ...]:
+        return self._outputs
 
     @property
     def input_shape(self) -> tuple[int | str | None, ...]:

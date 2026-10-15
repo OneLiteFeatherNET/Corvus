@@ -9,12 +9,13 @@ validation is not loaded (metric, error log); all other models keep running.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import posixpath
 import shutil
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -69,13 +70,58 @@ def input_kind_of(shape: tuple[int | str | None, ...], spec: FeatureSpec) -> Inp
     raise ModelRejectedError(f"unsupported model input shape {shape}")
 
 
-def scores_from_outputs(candidate_type: str, outputs: list[np.ndarray]) -> np.ndarray:
-    """One score per window, higher = more likely cheating, clipped to [0, 1].
+CALIBRATED_SUFFIX = "_calibrated"
+SCORE_OUTPUT = "score"
+MODEL_CARD_FILE = "model_card.json"
 
-    Mirrors ``Candidate.onnx_to_score`` of ``corvus_ml.eval`` (which needs torch and so cannot be
+
+@dataclass(frozen=True)
+class OutputSemantics:
+    """What the model declares about its output (``model_card.json`` / registered type)."""
+
+    output_name: str | None = None
+    calibrated: bool = False
+
+
+def output_semantics(candidate_type: str, card: dict[str, object] | None) -> OutputSemantics:
+    """Calibrated models are announced by the ``_calibrated`` candidate type suffix or by a
+    ``model_card.json`` whose ``output_semantics.range`` is ``[0, 1]``; the card also names the
+    ONNX output (``onnx_output``). Anything else is a legacy graph."""
+    name: str | None = None
+    calibrated = candidate_type.endswith(CALIBRATED_SUFFIX)
+    sem = card.get("output_semantics") if isinstance(card, dict) else None
+    if isinstance(sem, dict):
+        out = sem.get("onnx_output")
+        if isinstance(out, str) and out:
+            name = out
+        if sem.get("range") == [0, 1] or sem.get("range") == [0.0, 1.0]:
+            calibrated = True
+    if calibrated and name is None:
+        name = SCORE_OUTPUT
+    return OutputSemantics(name, calibrated)
+
+
+def scores_from_outputs(
+    candidate_type: str,
+    outputs: list[np.ndarray],
+    output_names: tuple[str, ...] | None = None,
+    semantics: OutputSemantics | None = None,
+) -> np.ndarray:
+    """One score per window, higher = more likely cheating.
+
+    A model that declares a calibrated output (see :func:`output_semantics`) is read from the
+    output of that name (``score``) and used as it is. Legacy graphs are clipped to [0, 1] and
+    follow ``Candidate.onnx_to_score`` of ``corvus_ml.eval`` (which needs torch and so cannot be
     imported here): the scikit-learn candidates have two outputs (label, scores), every other
     graph exports a single ``score`` output.
     """
+    sem = semantics or OutputSemantics(None, candidate_type.endswith(CALIBRATED_SUFFIX))
+    if sem.calibrated:
+        index = 0
+        if output_names and (sem.output_name or SCORE_OUTPUT) in output_names:
+            index = output_names.index(sem.output_name or SCORE_OUTPUT)
+        out = np.asarray(outputs[index], dtype=np.float64)
+        return out.reshape(len(out), -1)[:, 0]
     if candidate_type == "isolation_forest":
         raw = -np.asarray(outputs[1], dtype=np.float64).reshape(-1)
     elif candidate_type == "gradient_boosting":
@@ -93,6 +139,7 @@ class LoadedModel:
     session: ModelSession
     input_kind: InputKind
     intra_op_threads: int
+    semantics: OutputSemantics = field(default_factory=OutputSemantics)
 
     @property
     def id(self) -> str:
@@ -128,6 +175,11 @@ class ModelSet:
 
     def matching(self, game_context: str, window: FeaturizerConfig) -> list[LoadedModel]:
         return [m for m in self.for_context(game_context) if m.window == window]
+
+
+def card_key(onnx_key: str) -> str:
+    """The ``model_card.json`` next to the ONNX file."""
+    return posixpath.join(posixpath.dirname(onnx_key), MODEL_CARD_FILE)
 
 
 def spec_key(onnx_key: str) -> str:
@@ -194,9 +246,7 @@ class ModelManager:
                 keep.append(
                     existing
                     if existing.entry == entry
-                    else LoadedModel(
-                        entry, existing.spec, existing.session, existing.input_kind, intra
-                    )
+                    else replace(existing, entry=entry, intra_op_threads=intra)
                 )
                 continue
             if (entry.id, entry.onnx_key) in self._rejected:
@@ -248,7 +298,23 @@ class ModelManager:
             session = self._factory(directory / ONNX_FILE, intra)
         except Exception as e:
             raise ModelRejectedError(f"ONNX Runtime cannot load the model: {e}") from e
-        return LoadedModel(entry, spec, session, input_kind_of(session.input_shape, spec), intra)
+        card = self._read_card(directory)
+        return LoadedModel(
+            entry,
+            spec,
+            session,
+            input_kind_of(session.input_shape, spec),
+            intra,
+            output_semantics(entry.candidate_type, card),
+        )
+
+    @staticmethod
+    def _read_card(directory: Path) -> dict[str, object] | None:
+        try:
+            doc = json.loads((directory / MODEL_CARD_FILE).read_text())
+        except (OSError, ValueError):
+            return None
+        return doc if isinstance(doc, dict) else None
 
     async def _download(self, entry: ModelEntry) -> Path:
         final = self._cache / entry.id
@@ -256,16 +322,22 @@ class ModelManager:
             return final
         onnx = await self._files.get(entry.onnx_key)
         spec = await self._files.get(spec_key(entry.onnx_key))
-        await asyncio.to_thread(self._publish_dir, final, onnx, spec)
+        try:  # optional: legacy models have no model card
+            card: bytes | None = await self._files.get(card_key(entry.onnx_key))
+        except Exception:
+            card = None
+        await asyncio.to_thread(self._publish_dir, final, onnx, spec, card)
         return final
 
-    def _publish_dir(self, final: Path, onnx: bytes, spec: bytes) -> None:
+    def _publish_dir(self, final: Path, onnx: bytes, spec: bytes, card: bytes | None) -> None:
         self._cache.mkdir(parents=True, exist_ok=True)
         tmp = self._cache / f".{final.name}.{uuid.uuid4().hex}.tmp"
         tmp.mkdir()
         try:
             (tmp / ONNX_FILE).write_bytes(onnx)
             (tmp / SPEC_FILE).write_bytes(spec)
+            if card is not None:
+                (tmp / MODEL_CARD_FILE).write_bytes(card)
             shutil.rmtree(final, ignore_errors=True)
             os.replace(tmp, final)
         finally:
