@@ -1,3 +1,5 @@
 # Generated protobuf bindings (see scripts/gen_proto.sh)
 src/corvus_ml/_gen/
 .venv/
+# Evaluation reports (corvus-eval run --out reports/<name>)
+reports/
