@@ -26,6 +26,19 @@ queue_max_bytes = 67108864
 batch_size = 200
 flush_interval_seconds = 5
 
+[sink]
+# "file" (pilot): captures are written to plugins/corvus/captures.
+# "nats": publish every envelope to NATS JetStream instead (contract: docs/reference/data-lake.md, section 1).
+# The stream CORVUS_CAPTURE (subjects corvus.capture.v1.>) must already exist; the plugin never creates it.
+# To switch, set type = "nats" and add a [nats] table with these keys (all optional):
+#   [nats]
+#   url = ["nats://nats.example:4222"]      # one URL or a list
+#   creds_file = "/path/to/corvus.creds"    # empty = no authentication
+#   subject_prefix = "corvus.capture.v1"    # published to <subject_prefix>.<proxy_id>
+#   max_in_flight_bytes = 33554432          # unacknowledged bytes; beyond this batches are dropped
+#   publish_timeout_seconds = 5             # no ack after this long = failed, counted as dropped_transport
+type = "file"
+
 [game_context]
 default = "unknown"
 

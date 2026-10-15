@@ -3,6 +3,7 @@ package net.onelitefeather.corvus.plugin.config;
 import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -65,5 +66,53 @@ class CorvusConfigTest {
     @Test
     void unknownListModeIsRejected() {
         assertThrows(IllegalArgumentException.class, () -> CorvusConfig.parse("[players]\nmode = \"everyone\"\n"));
+    }
+
+    @Test
+    void sinkDefaultsToFileAndNatsDefaultsAreDocumented() {
+        CorvusConfig c = CorvusConfig.parse("proxy_id = \"p\"\n");
+
+        assertEquals(CorvusConfig.SinkType.FILE, c.sinkType());
+        assertEquals(List.of("nats://localhost:4222"), c.nats().urls());
+        assertEquals("", c.nats().credsFile());
+        assertEquals("corvus.capture.v1", c.nats().subjectPrefix());
+        assertEquals(32L * 1024 * 1024, c.nats().maxInFlightBytes());
+        assertEquals(5_000L, c.nats().publishTimeoutMillis());
+    }
+
+    @Test
+    void natsSinkWithUrlListAndCredsIsParsed() {
+        CorvusConfig c = CorvusConfig.parse("""
+                [sink]
+                type = "NATS"
+                [nats]
+                url = ["nats://a:4222", "nats://b:4222"]
+                creds_file = "/etc/corvus.creds"
+                subject_prefix = "x.y"
+                max_in_flight_bytes = 1048576
+                publish_timeout_seconds = 2
+                """);
+
+        assertEquals(CorvusConfig.SinkType.NATS, c.sinkType());
+        assertEquals(List.of("nats://a:4222", "nats://b:4222"), c.nats().urls());
+        assertEquals("/etc/corvus.creds", c.nats().credsFile());
+        assertEquals("x.y", c.nats().subjectPrefix());
+        assertEquals(1_048_576L, c.nats().maxInFlightBytes());
+        assertEquals(2_000L, c.nats().publishTimeoutMillis());
+    }
+
+    @Test
+    void singleStringUrlIsAccepted() {
+        CorvusConfig c = CorvusConfig.parse("[nats]\nurl = \"nats://only:4222\"\n");
+
+        assertEquals(List.of("nats://only:4222"), c.nats().urls());
+    }
+
+    @Test
+    void invalidSinkTypeIsRejected() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> CorvusConfig.parse("[sink]\ntype = \"kafka\"\n"));
+
+        assertTrue(e.getMessage().contains("sink.type"), e.getMessage());
     }
 }

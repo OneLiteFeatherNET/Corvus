@@ -3,6 +3,7 @@ package net.onelitefeather.corvus.plugin.config;
 import com.moandjiezana.toml.Toml;
 import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -25,9 +26,28 @@ public record CorvusConfig(
         int batchSize,
         long flushIntervalMillis,
         String defaultGameContext,
-        Map<String, String> serverContexts) {
+        Map<String, String> serverContexts,
+        SinkType sinkType,
+        Nats nats) {
 
     public enum ListMode { ALL, ALLOWLIST }
+
+    public enum SinkType { FILE, NATS }
+
+    /** Settings of the NATS JetStream sink; only used when {@code sink.type = "nats"}. */
+    public record Nats(
+            List<String> urls,
+            String credsFile,
+            String subjectPrefix,
+            long maxInFlightBytes,
+            long publishTimeoutMillis) {
+
+        public static final String DEFAULT_SUBJECT_PREFIX = "corvus.capture.v1";
+
+        public Nats {
+            urls = List.copyOf(urls);
+        }
+    }
 
     public static final String DEFAULT_TOML = """
             # Corvus capture plugin. The HMAC pseudonym key is read from the environment variable
@@ -59,6 +79,23 @@ public record CorvusConfig(
             batch_size = 200
             flush_interval_seconds = 5
 
+            [sink]
+            # "file" writes captures/<date>/<session>.cvc below the plugin directory (pilot).
+            # "nats" publishes every envelope to NATS JetStream (see [nats]); the stream is owned by ops.
+            type = "file"
+
+            [nats]
+            # One URL or a list of URLs. Connects in the background; an outage never delays the proxy.
+            url = ["nats://localhost:4222"]
+            # Optional NATS credentials file (.creds); empty = no authentication.
+            creds_file = ""
+            # Envelopes go to <subject_prefix>.<proxy_id>.
+            subject_prefix = "corvus.capture.v1"
+            # Unacknowledged bytes allowed in flight; further batches are dropped (dropped_transport).
+            max_in_flight_bytes = 33554432
+            # A publish without an acknowledgement after this long counts as failed.
+            publish_timeout_seconds = 5
+
             [game_context]
             default = "unknown"
 
@@ -89,6 +126,12 @@ public record CorvusConfig(
                 contexts.put(e.getKey().toLowerCase(Locale.ROOT), String.valueOf(e.getValue()));
             }
         }
+        String sink = toml.getString("sink.type", "file").toLowerCase(Locale.ROOT);
+        SinkType sinkType = switch (sink) {
+            case "file" -> SinkType.FILE;
+            case "nats" -> SinkType.NATS;
+            default -> throw new IllegalArgumentException("sink.type must be 'file' or 'nats', got: " + sink);
+        };
         int maxPayload = (int) Math.min(Integer.MAX_VALUE, toml.getLong("capture.max_payload_bytes", 2048L));
         return new CorvusConfig(
                 toml.getString("proxy_id", "proxy-1"),
@@ -103,7 +146,33 @@ public record CorvusConfig(
                 (int) Math.max(1L, toml.getLong("capture.batch_size", 200L)),
                 Math.max(100L, toml.getLong("capture.flush_interval_seconds", 5L) * 1000L),
                 toml.getString("game_context.default", "unknown"),
-                contexts);
+                contexts,
+                sinkType,
+                parseNats(toml));
+    }
+
+    private static Nats parseNats(Toml toml) {
+        List<String> urls = new ArrayList<>();
+        Toml nats = toml.getTable("nats");
+        Object rawUrl = nats == null ? null : nats.toMap().get("url");
+        if (rawUrl instanceof List<?> list) {
+            for (Object o : list) {
+                urls.add(String.valueOf(o).trim());
+            }
+        } else if (rawUrl != null) {
+            urls.add(String.valueOf(rawUrl).trim());
+        }
+        urls.removeIf(String::isEmpty);
+        if (urls.isEmpty()) {
+            urls.add("nats://localhost:4222");
+        }
+        String prefix = toml.getString("nats.subject_prefix", Nats.DEFAULT_SUBJECT_PREFIX).trim();
+        return new Nats(
+                urls,
+                toml.getString("nats.creds_file", "").trim(),
+                prefix.isEmpty() ? Nats.DEFAULT_SUBJECT_PREFIX : prefix,
+                Math.max(1024L, toml.getLong("nats.max_in_flight_bytes", 32L * 1024 * 1024)),
+                Math.max(1L, toml.getLong("nats.publish_timeout_seconds", 5L)) * 1000L);
     }
 
     private static Object rawPayloadsValue(Toml toml) {

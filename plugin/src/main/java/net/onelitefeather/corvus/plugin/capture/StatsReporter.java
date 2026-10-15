@@ -36,10 +36,11 @@ public final class StatsReporter {
         double fill = queue.maxBytes() == 0 ? 0 : 100.0 * queue.bytes() / queue.maxBytes();
         return String.format(Locale.ROOT,
                 "capturing=%s sessions=%d frames/s=%.1f bytes/s=%.0f queue=%.1f%% (%d/%d B) "
-                        + "dropped_queue_full=%d dropped_privacy=%d listener_errors=%d writer_errors=%d "
+                        + "dropped_queue_full=%d dropped_privacy=%d dropped_transport=%d listener_errors=%d writer_errors=%d "
                         + "sessions_via_before_pe=%d sessions_multi_channel=%d frames_total=%d",
                 engine.isCapturing(), engine.activeSessions(), fps, bps, fill, queue.bytes(), queue.maxBytes(),
-                metrics.droppedQueueFull.sum(), metrics.droppedPrivacy.sum(), metrics.listenerErrors.sum(),
+                metrics.droppedQueueFull.sum(), metrics.droppedPrivacy.sum(), metrics.droppedTransport.sum(),
+                metrics.listenerErrors.sum(),
                 metrics.writerErrors.sum(), metrics.sessionsViaBeforePacketEvents.sum(),
                 metrics.sessionsWithMultipleChannels.sum(), frames);
     }

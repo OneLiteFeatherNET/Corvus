@@ -25,6 +25,7 @@ sourceSets.main {
 
 dependencies {
     implementation(project(":proto-java"))
+    implementation("io.nats:jnats:2.26.4")
     implementation("com.moandjiezana.toml:toml4j:0.7.2") {
         exclude(group = "com.google.code.gson")
     }
@@ -62,8 +63,12 @@ tasks.test {
 tasks.shadowJar {
     archiveBaseName = "corvus-velocity"
     archiveClassifier = ""
+    mergeServiceFiles()
     relocate("com.google.protobuf", "net.onelitefeather.corvus.shaded.protobuf")
     relocate("com.moandjiezana.toml", "net.onelitefeather.corvus.shaded.toml")
+    relocate("io.nats", "net.onelitefeather.corvus.shaded.nats")
+    relocate("org.bouncycastle", "net.onelitefeather.corvus.shaded.bouncycastle")
+    relocate("org.jspecify", "net.onelitefeather.corvus.shaded.jspecify")
 }
 
 tasks.build { dependsOn(tasks.shadowJar) }
