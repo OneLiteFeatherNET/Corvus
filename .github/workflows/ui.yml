@@ -26,8 +26,10 @@ jobs:
       # This workflow lands before the ui does; every later step is skipped until ui/package.json exists.
       - name: Detect ui project
         id: detect
+        # ui/ does not exist yet on a branch without the ui, so the default working directory is unusable here.
+        working-directory: .
         run: |
-          if [ -f package.json ]; then
+          if [ -f ui/package.json ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
