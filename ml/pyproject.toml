@@ -10,11 +10,17 @@ dependencies = [
     "grpcio-tools>=1.74",
     "pyarrow>=26.0.0",
     "numpy>=2.5.4",
+    "scikit-learn>=1.7",
+    "torch>=2.8",
+    "onnx>=1.19",
+    "onnxruntime>=1.22",
+    "skl2onnx>=1.19",
 ]
 
 [project.scripts]
 corvus-pilot = "corvus_ml.pilot:main"
 corvus-features = "corvus_ml.features.cli:main"
+corvus-eval = "corvus_ml.eval.cli:main"
 
 [dependency-groups]
 dev = [
@@ -41,3 +47,12 @@ extend-exclude = ["src/corvus_ml/_gen"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C4", "PT"]
+
+# CPU-only torch wheels: no CUDA runtime is pulled into CI or inference images.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
