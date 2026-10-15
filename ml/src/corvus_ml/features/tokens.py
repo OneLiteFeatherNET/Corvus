@@ -1,4 +1,4 @@
-"""Per-frame token features for one segment of one session.
+"""Per-frame token features for one segment run of one session (incremental, numpy only).
 
 All formulas are documented in ``docs/reference/features.md``.
 """
@@ -6,13 +6,13 @@ All formulas are documented in ``docs/reference/features.md``.
 from __future__ import annotations
 
 import math
+from bisect import bisect_right
 from collections import OrderedDict
-from dataclasses import dataclass
 
 import numpy as np
 
-from corvus_ml.features.config import FeatureConfig
-from corvus_ml.features.schema import (
+from corvus_ml.features.config import FeaturizerConfig
+from corvus_ml.features.constants import (
     ACTION_ATTACK,
     DIRECTION_CLIENTBOUND,
     DIRECTION_SERVERBOUND,
@@ -30,13 +30,28 @@ from corvus_ml.features.schema import (
     MOTION_RELATIVE,
     MOTION_SPAWN,
     MOTION_TELEPORT,
+    PACKET_CLIENT_TICK_END,
     TIME_SINCE_CAP_S,
-    TOKEN_FEATURES,
+    TOKEN_INDEX,
+    TOKEN_NAMES,
 )
+from corvus_ml.features.frames import Frame
 
 EYE_HEIGHT = 1.62
 ENTITY_AIM_HEIGHT = 0.9
 _NS = 1e9
+
+_PACKET_TYPE, _DIRECTION, _EVENT_KIND, _DOMAIN, _ACTION = (
+    TOKEN_INDEX[n] for n in ("packet_type", "direction", "event_kind", "domain", "action")
+)
+_DT_BUCKET, _LOG_DT = TOKEN_INDEX["dt_bucket"], TOKEN_INDEX["log_dt"]
+_HAS_POS_DELTA, _DX, _DY, _DZ = (TOKEN_INDEX[n] for n in ("has_pos_delta", "dx", "dy", "dz"))
+_HAS_ROT_DELTA, _DYAW, _DPITCH = (TOKEN_INDEX[n] for n in ("has_rot_delta", "dyaw", "dpitch"))
+_ROT_SPEED, _ROT_ACCEL, _ON_GROUND = (
+    TOKEN_INDEX[n] for n in ("rot_speed", "rot_accel", "on_ground")
+)
+_T_SINCE_SWING, _T_SINCE_MOVE = TOKEN_INDEX["t_since_swing"], TOKEN_INDEX["t_since_move"]
+_TARGET_DIST, _TARGET_ANGLE = TOKEN_INDEX["target_dist"], TOKEN_INDEX["target_angle"]
 
 _DOMAIN_OF_EVENT = {
     EVENT_MOVEMENT: DOMAIN_MOVEMENT,
@@ -77,119 +92,105 @@ def target_geometry(
     return dist, math.degrees(math.acos(cos))
 
 
-@dataclass
-class TokenArrays:
-    """Token features of the serverbound frames of one segment, plus frame identity."""
+class TokenExtractor:
+    """Incremental token computation for one segment run (all state lives here).
 
-    seq: np.ndarray
-    offset_nanos: np.ndarray
-    features: dict[str, np.ndarray]
-
-    def __len__(self) -> int:
-        return len(self.seq)
-
-
-def extract_tokens(cols: dict[str, np.ndarray], cfg: FeatureConfig) -> TokenArrays:
-    """Compute tokens for one segment run. ``cols`` holds all directions, ordered by seq.
-
-    Required keys: seq, offset_nanos, direction, packet_type, event_kind, has_position,
-    has_rotation, on_ground (int8, -1 = null), x, y, z, yaw, pitch (NaN = null), entity_id, action.
+    Feed the frames of a run in ``seq`` order; :meth:`step` writes the token row of a serverbound
+    frame into ``out`` (a float32 row in ``TOKEN_NAMES`` order) and returns True. Clientbound
+    ``entity_motion`` frames only update the entity positions and return False.
     """
-    direction = cols["direction"]
-    n_out = int((direction == DIRECTION_SERVERBOUND).sum())
-    feats = {name: np.zeros(n_out, dtype=typ.to_pandas_dtype()) for name, typ in TOKEN_FEATURES}
-    seq_out = np.zeros(n_out, dtype=np.uint64)
-    off_out = np.zeros(n_out, dtype=np.uint64)
-    edges_ns = np.asarray(cfg.dt_edges_ms, dtype=np.float64) * 1e6
-    no_previous = len(cfg.dt_edges_ms) + 1
 
-    seq, off = cols["seq"].tolist(), cols["offset_nanos"].tolist()
-    dirs, ptype = direction.tolist(), cols["packet_type"].tolist()
-    ekind, act = cols["event_kind"].tolist(), cols["action"].tolist()
-    has_pos, has_rot = cols["has_position"].tolist(), cols["has_rotation"].tolist()
-    ground = cols["on_ground"].tolist()
-    xs, ys, zs = cols["x"].tolist(), cols["y"].tolist(), cols["z"].tolist()
-    yaws, pitches = cols["yaw"].tolist(), cols["pitch"].tolist()
-    eids = cols["entity_id"].tolist()
+    def __init__(self, cfg: FeaturizerConfig) -> None:
+        self._edges_ns = [e * 1e6 for e in cfg.dt_edges_ms]
+        self._no_previous = len(cfg.dt_edges_ms) + 1
+        self._cache = cfg.entity_cache
+        self.saw_tick_end = False
+        self._last_sb: int | None = None
+        self._last_swing: int | None = None
+        self._last_move: int | None = None
+        self._pos: tuple[float, float, float] | None = None
+        self._rot: tuple[float, float] | None = None
+        self._last_rot_off: int | None = None
+        self._last_rot_speed: float | None = None
+        self._entities: OrderedDict[int, tuple[float, float, float]] = OrderedDict()
 
-    last_sb: int | None = None
-    last_swing: int | None = None
-    last_move: int | None = None
-    pos: tuple[float, float, float] | None = None
-    rot: tuple[float, float] | None = None
-    last_rot_off: int | None = None
-    last_rot_speed: float | None = None
-    entities: OrderedDict[int, tuple[float, float, float]] = OrderedDict()
-
-    j = 0
-    for i in range(len(seq)):
-        d = dirs[i]
-        ek = ekind[i]
+    def step(self, fr: Frame, out: np.ndarray) -> bool:
+        d, ek = fr.direction, fr.event_kind
         if d == DIRECTION_CLIENTBOUND:
             if ek == EVENT_ENTITY_MOTION:
-                _update_entity(entities, eids[i], act[i], xs[i], ys[i], zs[i], cfg.entity_cache)
-            continue
+                _update_entity(
+                    self._entities, fr.entity_id, fr.action, fr.x, fr.y, fr.z, self._cache
+                )
+            return False
         if d != DIRECTION_SERVERBOUND:
-            continue
+            return False
 
-        seq_out[j], off_out[j] = seq[i], off[i]
-        f = feats
-        f["packet_type"][j] = ptype[i]
-        f["direction"][j] = d
-        f["event_kind"][j] = ek
-        f["domain"][j] = _DOMAIN_OF_EVENT.get(ek, DOMAIN_OTHER)
-        f["action"][j] = act[i]
-        f["on_ground"][j] = -1
+        now = fr.offset_nanos
+        row = [0.0] * len(TOKEN_NAMES)
+        row[_PACKET_TYPE] = fr.packet_type
+        row[_DIRECTION] = d
+        row[_EVENT_KIND] = ek
+        row[_DOMAIN] = _DOMAIN_OF_EVENT.get(ek, DOMAIN_OTHER)
+        row[_ACTION] = fr.action
+        row[_ON_GROUND] = -1
+        if fr.packet_type == PACKET_CLIENT_TICK_END:
+            self.saw_tick_end = True
 
-        if last_sb is None:
-            f["dt_bucket"][j] = no_previous
+        if self._last_sb is None:
+            row[_DT_BUCKET] = self._no_previous
         else:
-            dt = off[i] - last_sb
-            f["dt_bucket"][j] = int(np.searchsorted(edges_ns, dt, side="right"))
-            f["log_dt"][j] = math.log1p(dt / 1e6)
-        last_sb = off[i]
+            dt = now - self._last_sb
+            row[_DT_BUCKET] = bisect_right(self._edges_ns, dt)
+            row[_LOG_DT] = math.log1p(dt / 1e6)
+        self._last_sb = now
 
         if ek == EVENT_MOVEMENT:
-            if has_pos[i] and not math.isnan(xs[i]):
-                cur = (xs[i], ys[i], zs[i])
-                if pos is not None:
-                    f["has_pos_delta"][j] = 1
-                    f["dx"][j] = cur[0] - pos[0]
-                    f["dy"][j] = cur[1] - pos[1]
-                    f["dz"][j] = cur[2] - pos[2]
-                pos = cur
-            if has_rot[i] and not math.isnan(yaws[i]):
-                yaw, pitch = yaws[i], pitches[i]
-                if rot is not None and last_rot_off is not None:
-                    dyaw = wrap_degrees(yaw - rot[0])
-                    dpitch = pitch - rot[1]
-                    dt_s = (off[i] - last_rot_off) / _NS
-                    speed = math.hypot(dyaw, dpitch) / dt_s if dt_s > 0 else 0.0
-                    accel = 0.0
-                    if last_rot_speed is not None and dt_s > 0:
-                        accel = (speed - last_rot_speed) / dt_s
-                    f["has_rot_delta"][j] = 1
-                    f["dyaw"][j], f["dpitch"][j] = dyaw, dpitch
-                    f["rot_speed"][j], f["rot_accel"][j] = speed, accel
-                    last_rot_speed = speed
-                rot, last_rot_off = (yaw, pitch), off[i]
-            if ground[i] >= 0:
-                f["on_ground"][j] = ground[i]
-            last_move = off[i]
+            self._movement(fr, now, row)
         elif ek == EVENT_SWING:
-            last_swing = off[i]
-        elif ek == EVENT_INTERACT and act[i] == ACTION_ATTACK:
-            f["t_since_swing"][j] = _since(off[i], last_swing)
-            f["t_since_move"][j] = _since(off[i], last_move)
-            target = entities.get(eids[i])
-            if target is not None and pos is not None and rot is not None:
-                f["target_dist"][j], f["target_angle"][j] = target_geometry(
-                    pos, rot[0], rot[1], target
+            self._last_swing = now
+        elif ek == EVENT_INTERACT and fr.action == ACTION_ATTACK:
+            row[_T_SINCE_SWING] = _since(now, self._last_swing)
+            row[_T_SINCE_MOVE] = _since(now, self._last_move)
+            target = self._entities.get(fr.entity_id)
+            if target is not None and self._pos is not None and self._rot is not None:
+                row[_TARGET_DIST], row[_TARGET_ANGLE] = target_geometry(
+                    self._pos, self._rot[0], self._rot[1], target
                 )
             else:
-                f["target_dist"][j] = f["target_angle"][j] = -1.0
-        j += 1
-    return TokenArrays(seq_out, off_out, feats)
+                row[_TARGET_DIST] = row[_TARGET_ANGLE] = -1.0
+        out[:] = row
+        return True
+
+    def _movement(self, fr: Frame, now: int, row: list[float]) -> None:
+        if fr.has_position and not math.isnan(fr.x):
+            cur = (fr.x, fr.y, fr.z)
+            pos = self._pos
+            if pos is not None:
+                row[_HAS_POS_DELTA] = 1
+                row[_DX] = cur[0] - pos[0]
+                row[_DY] = cur[1] - pos[1]
+                row[_DZ] = cur[2] - pos[2]
+            self._pos = cur
+        if fr.has_rotation and not math.isnan(fr.yaw):
+            yaw, pitch = fr.yaw, fr.pitch
+            rot = self._rot
+            if rot is not None and self._last_rot_off is not None:
+                dyaw = wrap_degrees(yaw - rot[0])
+                dpitch = pitch - rot[1]
+                dt_s = (now - self._last_rot_off) / _NS
+                speed = math.hypot(dyaw, dpitch) / dt_s if dt_s > 0 else 0.0
+                accel = 0.0
+                if self._last_rot_speed is not None and dt_s > 0:
+                    accel = (speed - self._last_rot_speed) / dt_s
+                row[_HAS_ROT_DELTA] = 1
+                row[_DYAW], row[_DPITCH] = dyaw, dpitch
+                row[_ROT_SPEED], row[_ROT_ACCEL] = speed, accel
+                self._last_rot_speed = speed
+            self._rot, self._last_rot_off = (yaw, pitch), now
+        ground = -1 if fr.on_ground is None else int(fr.on_ground)
+        if ground >= 0:
+            row[_ON_GROUND] = ground
+        self._last_move = now
 
 
 def _since(now: int, then: int | None) -> float:

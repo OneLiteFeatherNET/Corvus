@@ -4,33 +4,30 @@ from __future__ import annotations
 
 import pyarrow as pa
 
-DIRECTION_SERVERBOUND = 1
-DIRECTION_CLIENTBOUND = 2
-
-EVENT_NONE = 0
-EVENT_MOVEMENT = 1
-EVENT_INTERACT = 2
-EVENT_SWING = 3
-EVENT_DIG = 4
-EVENT_PLACE = 5
-EVENT_HELD_ITEM = 6
-EVENT_ENTITY_MOTION = 7
-
-ACTION_ATTACK = 2
-MOTION_RELATIVE = 1
-MOTION_TELEPORT = 2
-MOTION_SPAWN = 4
-
-# Vocabulary id of C_CLIENT_TICK_END (checked against vocabulary.json in the tests).
-PACKET_CLIENT_TICK_END = 27
-
-DOMAIN_OTHER = 0
-DOMAIN_MOVEMENT = 1
-DOMAIN_COMBAT = 2
-DOMAIN_INTERACTION = 3
-
-# Seconds; "time since" features saturate here, also used when the reference event never happened.
-TIME_SINCE_CAP_S = 10.0
+from corvus_ml.features.constants import (  # noqa: F401 - re-exported
+    ACTION_ATTACK,
+    AGGREGATE_NAMES,
+    DIRECTION_CLIENTBOUND,
+    DIRECTION_SERVERBOUND,
+    DOMAIN_COMBAT,
+    DOMAIN_INTERACTION,
+    DOMAIN_MOVEMENT,
+    DOMAIN_OTHER,
+    EVENT_DIG,
+    EVENT_ENTITY_MOTION,
+    EVENT_HELD_ITEM,
+    EVENT_INTERACT,
+    EVENT_MOVEMENT,
+    EVENT_NONE,
+    EVENT_PLACE,
+    EVENT_SWING,
+    MOTION_RELATIVE,
+    MOTION_SPAWN,
+    MOTION_TELEPORT,
+    PACKET_CLIENT_TICK_END,
+    TIME_SINCE_CAP_S,
+    TOKEN_NAMES,
+)
 
 # Columns the reader must project from ``events``.
 EVENT_COLUMNS = (
@@ -79,7 +76,6 @@ TOKEN_FEATURES: tuple[tuple[str, pa.DataType], ...] = (
     ("target_dist", pa.float32()),
     ("target_angle", pa.float32()),
 )
-TOKEN_NAMES = tuple(name for name, _ in TOKEN_FEATURES)
 
 AGGREGATES: tuple[tuple[str, pa.DataType], ...] = (
     ("cps", pa.float64()),
