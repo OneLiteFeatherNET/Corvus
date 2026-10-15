@@ -1,0 +1,61 @@
+# Rendered by the nginx entrypoint (envsubst) into /etc/nginx/conf.d/default.conf.
+# Variables: CORVUS_UI_BASE_PATH, CORVUS_UI_CONNECT_SRC, CORVUS_UI_SCRIPT_HASHES (set by 15-corvus-ui.sh).
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+    server_tokens off;
+    absolute_redirect off;
+
+    # The base path is injected into the shell, so the build does not depend on where it is served.
+    sub_filter_once on;
+    sub_filter '<head>' '<head><base href="${CORVUS_UI_BASE_PATH}">';
+
+    add_header Content-Security-Policy "default-src 'none'; script-src 'self' ${CORVUS_UI_SCRIPT_HASHES}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ${CORVUS_UI_CONNECT_SRC}; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+
+    # Optional same-origin proxy to the control-plane API (CORVUS_UI_API_UPSTREAM); empty when not configured.
+    include /tmp/corvus-api-proxy.conf;
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # Runtime configuration: never cached, so a changed mount takes effect on reload.
+    location = /config.json {
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        try_files $uri =404;
+    }
+
+    # Hashed build assets are immutable.
+    location /_nuxt/ {
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        try_files $uri =404;
+    }
+
+    location = /logo.png {
+        add_header Cache-Control "public, max-age=86400" always;
+        try_files $uri =404;
+    }
+
+    # SPA fallback: every other path is a client-side route (history mode).
+    location / {
+        add_header Cache-Control "no-store" always;
+        add_header Content-Security-Policy "default-src 'none'; script-src 'self' ${CORVUS_UI_SCRIPT_HASHES}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ${CORVUS_UI_CONNECT_SRC}; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        try_files /index.html =404;
+    }
+}

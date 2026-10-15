@@ -1,0 +1,7 @@
+# The build context is the repository root (see .github/workflows/images.yml); only ui/ is needed.
+*
+!ui
+**/node_modules
+**/.nuxt
+**/.output
+**/dist
