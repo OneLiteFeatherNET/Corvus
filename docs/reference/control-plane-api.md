@@ -48,7 +48,7 @@ token=$(openssl rand -hex 32)
 echo "$(printf %s "$token" | sha256sum | cut -d' ' -f1):train"   # goes into CORVUS_API_JOB_TOKENS
 ```
 
-A job token is accepted only where a job needs it: `GET /snapshots`, `GET /snapshots/{id}`, `POST /models`,
+A job token is accepted only where a job needs it: `GET /snapshots`, `GET /snapshots/{id}`, `GET /snapshots/{id}/sessions`, `GET /snapshots/{id}/files`, `POST /models`,
 `GET /models`, `GET /models/{id}`, `GET /models/{name}/{version}`, `GET /jobs/{id}` and `PATCH /jobs/{id}`. It cannot
 submit jobs, promote models or reach pools, labels, players, erasure, blocklist, scores, `/me` or `/summary` (`403`).
 On `GET` and `PATCH /jobs/{id}` a job token additionally needs the header `X-Corvus-Job-Id` to equal the id in the
@@ -161,7 +161,7 @@ payloads; (2) set `players.erased_at` (ingest stops storing data for that pseudo
 blocklist with `source = erasure`; (4) delete the player's rows in `scores_latest` and `score_history`; (5) insert an `erasure_requests` row (who, when,
 pseudonym, `status = completed`, `player_known`, `key_deleted`, `compaction_pending = true`). If any step fails nothing is changed. A pseudonym that was
 never captured is still blocklisted and audited. Erasure can be repeated. `events` files are not rewritten here:
-`compaction_pending` stays `true` until `corvus-compact` clears it (see [data-lake.md](data-lake.md) section 7). Blocklist entries created by an erasure
+`compaction_pending` stays `true` until `corvus-compact` clears it and sets `compacted_at` (see [data-lake.md](data-lake.md) section 7). Blocklist entries created by an erasure
 are permanent: changing or deleting them is `409`. Snapshots keep the (random) session ids they were built from; a
 training job reads them through `GET /snapshots/{id}/sessions?exclude_erased=true` and `GET /snapshots/{id}/files`.
 
