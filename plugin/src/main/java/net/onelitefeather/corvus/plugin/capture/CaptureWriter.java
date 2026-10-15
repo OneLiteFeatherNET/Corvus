@@ -6,14 +6,8 @@ import net.onelitefeather.corvus.proto.capture.v1.Envelope;
 import net.onelitefeather.corvus.proto.capture.v1.Frame;
 import net.onelitefeather.corvus.proto.capture.v1.SessionEnd;
 
-import java.io.BufferedOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -22,16 +16,14 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * Drains the queue and writes one {@code captures/<yyyy-MM-dd>/<session-id-hex>.cvc} file per session
- * (length-delimited {@link Envelope}s). Not thread-safe: exactly one writer thread (or a test) calls it.
+ * Drains the queue, batches frames per session and hands the resulting {@link Envelope}s to an
+ * {@link EnvelopeTransport}. Not thread-safe: exactly one writer thread (or a test) calls it.
  */
 public final class CaptureWriter {
 
-    private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneOffset.UTC);
-
     private static final class Target {
         final SessionState session;
-        OutputStream out;
+        boolean opened;
         boolean failed;
         final List<Frame> pending = new ArrayList<>();
         int pendingSegment;
@@ -42,7 +34,7 @@ public final class CaptureWriter {
         }
     }
 
-    private final Path capturesDir;
+    private final EnvelopeTransport transport;
     private final ByteBoundedQueue queue;
     private final int batchSize;
     private final long flushIntervalNanos;
@@ -51,9 +43,15 @@ public final class CaptureWriter {
     private final Consumer<String> warn;
     private final Map<SessionState, Target> targets = new HashMap<>();
 
+    /** File sink: one {@code .cvc} file per session below {@code capturesDir}. */
     public CaptureWriter(Path capturesDir, ByteBoundedQueue queue, int batchSize, long flushIntervalMillis,
                          NanoClock clock, Metrics metrics, Consumer<String> warn) {
-        this.capturesDir = capturesDir;
+        this(new FileTransport(capturesDir), queue, batchSize, flushIntervalMillis, clock, metrics, warn);
+    }
+
+    public CaptureWriter(EnvelopeTransport transport, ByteBoundedQueue queue, int batchSize,
+                         long flushIntervalMillis, NanoClock clock, Metrics metrics, Consumer<String> warn) {
+        this.transport = transport;
         this.queue = queue;
         this.batchSize = batchSize;
         this.flushIntervalNanos = flushIntervalMillis * 1_000_000L;
@@ -94,7 +92,7 @@ public final class CaptureWriter {
         }
     }
 
-    /** Drains everything that is queued, flushes and closes all files. */
+    /** Drains everything that is queued, flushes and closes all sessions and the transport. */
     public void closeAll() {
         while (drain(1024) > 0) {
             // keep draining
@@ -109,20 +107,20 @@ public final class CaptureWriter {
             close(t);
             it.remove();
         }
+        transport.close();
     }
 
     private void handle(WriteItem item) throws IOException {
         Target t = targetFor(item.session());
         switch (item) {
             case WriteItem.Start s -> {
-                open(t, s.session());
-                write(t, s.envelope());
-                t.out.flush();
+                transport.begin(t.session, s.envelope());
+                t.opened = true;
                 t.lastFlushNanos = clock.nanoTime();
             }
             case WriteItem.Segment s -> {
                 flushPending(t);
-                write(t, s.envelope());
+                send(t, s.envelope(), 0);
             }
             case WriteItem.FrameItem f -> {
                 if (t.failed) {
@@ -146,7 +144,7 @@ public final class CaptureWriter {
                         .setEndedAtUnixMillis(e.endedAtMillis())
                         .setCounters(e.session().takeCounters())
                         .build();
-                write(t, Envelope.newBuilder().setSessionEnd(end).build());
+                send(t, Envelope.newBuilder().setSessionEnd(end).build(), 0);
                 close(t);
                 targets.remove(e.session());
             }
@@ -161,21 +159,15 @@ public final class CaptureWriter {
         });
     }
 
-    private void open(Target t, SessionState session) throws IOException {
-        Path dir = capturesDir.resolve(DAY.format(Instant.ofEpochMilli(session.startedAtMillis())));
-        Files.createDirectories(dir);
-        t.out = new BufferedOutputStream(Files.newOutputStream(dir.resolve(session.idHex() + ".cvc")), 64 * 1024);
-    }
-
-    private void write(Target t, Envelope envelope) throws IOException {
-        if (t.failed || t.out == null) {
+    private void send(Target t, Envelope envelope, int frameCount) throws IOException {
+        if (t.failed || !t.opened) {
             return;
         }
-        envelope.writeDelimitedTo(t.out);
+        transport.send(t.session, envelope, frameCount);
     }
 
     private void flushPending(Target t) throws IOException {
-        if (t.pending.isEmpty() || t.failed || t.out == null) {
+        if (t.pending.isEmpty() || t.failed || !t.opened) {
             t.pending.clear();
             return;
         }
@@ -186,8 +178,7 @@ public final class CaptureWriter {
                 .setCounters(t.session.takeCounters())
                 .build();
         t.pending.clear();
-        write(t, Envelope.newBuilder().setBatch(batch).build());
-        t.out.flush();
+        send(t, Envelope.newBuilder().setBatch(batch).build(), batch.getFramesCount());
         t.lastFlushNanos = clock.nanoTime();
     }
 
@@ -195,20 +186,17 @@ public final class CaptureWriter {
         if (!t.failed) {
             t.failed = true;
             metrics.writerErrors.increment();
-            warn.accept("Capture file of session " + t.session.idHex() + " failed, dropping the rest of it: " + cause);
+            warn.accept("Capture output of session " + t.session.idHex() + " failed, dropping the rest of it: "
+                    + cause);
         }
         t.pending.clear();
         close(t);
     }
 
     private void close(Target t) {
-        if (t.out != null) {
-            try {
-                t.out.close();
-            } catch (IOException ignored) {
-                // nothing sensible left to do
-            }
-            t.out = null;
+        if (t.opened) {
+            t.opened = false;
+            transport.end(t.session);
         }
     }
 }
