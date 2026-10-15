@@ -41,9 +41,11 @@ public record CorvusConfig(
             String subjectPrefix,
             long maxInFlightBytes,
             long publishTimeoutMillis,
-            long reconnectBufferBytes) {
+            long reconnectBufferBytes,
+            int partitions) {
 
         public static final String DEFAULT_SUBJECT_PREFIX = "corvus.capture.v1";
+        public static final int DEFAULT_PARTITIONS = 16;
 
         public Nats {
             urls = List.copyOf(urls);
@@ -91,8 +93,11 @@ public record CorvusConfig(
             url = ["nats://localhost:4222"]
             # Optional NATS credentials file (.creds); empty = no authentication.
             creds_file = ""
-            # Envelopes go to <subject_prefix>.<proxy_id>.
+            # Envelopes go to <subject_prefix>.<proxy_id>.<partition>.
             subject_prefix = "corvus.capture.v1"
+            # Number of partitions: first 4 bytes of the session id (big-endian, unsigned) mod partitions, written
+            # with at least two digits (00..15). Must be identical on all proxies and match the scorers.
+            partitions = 16
             # Unacknowledged bytes allowed in flight; further batches are dropped (dropped_transport).
             max_in_flight_bytes = 33554432
             # A publish without an acknowledgement after this long counts as failed.
@@ -177,7 +182,8 @@ public record CorvusConfig(
                 prefix.isEmpty() ? Nats.DEFAULT_SUBJECT_PREFIX : prefix,
                 Math.max(1024L, toml.getLong("nats.max_in_flight_bytes", 32L * 1024 * 1024)),
                 Math.max(1L, toml.getLong("nats.publish_timeout_seconds", 5L)) * 1000L,
-                Math.max(64L * 1024, toml.getLong("nats.reconnect_buffer_bytes", 8L * 1024 * 1024)));
+                Math.max(64L * 1024, toml.getLong("nats.reconnect_buffer_bytes", 8L * 1024 * 1024)),
+                (int) Math.min(100_000L, Math.max(1L, toml.getLong("nats.partitions", (long) Nats.DEFAULT_PARTITIONS))));
     }
 
     private static Object rawPayloadsValue(Toml toml) {

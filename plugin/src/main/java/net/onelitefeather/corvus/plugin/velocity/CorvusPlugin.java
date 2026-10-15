@@ -129,10 +129,11 @@ public final class CorvusPlugin {
         EnvelopeTransport transport;
         if (config.sinkType() == CorvusConfig.SinkType.NATS) {
             CorvusConfig.Nats nats = config.nats();
-            logger.info("Corvus sink: NATS JetStream {} -> {}.{} (connecting in the background)", nats.urls(),
-                    nats.subjectPrefix(), config.proxyId());
+            logger.info("Corvus sink: NATS JetStream {} -> {}.{}.<partition> (connecting in the background)",
+                    nats.urls(), nats.subjectPrefix(), config.proxyId());
             transport = new NatsTransport(new JetStreamEnvelopePublisher(nats, logger::info, logger::warn),
-                    nats.subjectPrefix(), config.proxyId(), nats.maxInFlightBytes(), nano, metrics, logger::warn);
+                    nats.subjectPrefix(), config.proxyId(), nats.partitions(), nats.maxInFlightBytes(), nano, metrics,
+                    logger::warn);
         } else {
             transport = new FileTransport(dataDirectory.resolve("captures"));
         }

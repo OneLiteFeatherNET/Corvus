@@ -134,4 +134,11 @@ class CorvusConfigTest {
 
         assertTrue(e.getMessage().contains("sink.type"), e.getMessage());
     }
+
+    @Test
+    void natsPartitionsDefaultToSixteenAndAreConfigurable() {
+        assertEquals(16, CorvusConfig.parse("").nats().partitions());
+        assertEquals(64, CorvusConfig.parse("[nats]\npartitions = 64\n").nats().partitions());
+        assertEquals(1, CorvusConfig.parse("[nats]\npartitions = 0\n").nats().partitions());
+    }
 }

@@ -34,7 +34,9 @@ flush_interval_seconds = 5
 #   [nats]
 #   url = ["nats://nats.example:4222"]      # required for type = "nats": one URL or a list
 #   creds_file = "/path/to/corvus.creds"    # empty = no authentication
-#   subject_prefix = "corvus.capture.v1"    # published to <subject_prefix>.<proxy_id>
+#   subject_prefix = "corvus.capture.v1"    # published to <subject_prefix>.<proxy_id>.<partition>
+#   partitions = 16                         # partition = first 4 bytes of session id (big-endian) mod this,
+#                                           # two digits (00..15); identical on all proxies and the scorers
 #   max_in_flight_bytes = 33554432          # unacknowledged bytes; beyond this batches are dropped
 #   publish_timeout_seconds = 5             # no ack after this long = failed, counted as dropped_transport
 #   reconnect_buffer_bytes = 8388608        # bytes buffered while reconnecting

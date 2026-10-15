@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
- * Publishes envelopes to {@code <prefix>.<proxy_id>} through an {@link EnvelopePublisher}, following the
+ * Publishes envelopes to {@code <prefix>.<proxy_id>.<partition>} through an {@link EnvelopePublisher}, following the
  * contract in docs/reference/data-lake.md. Never blocks: when the in-flight byte budget is exhausted or a
  * publish fails, the envelope is dropped and its frames are counted as {@code dropped_transport}.
  */
@@ -38,7 +38,10 @@ public final class NatsTransport implements EnvelopeTransport {
     private static final long WARN_INTERVAL_NANOS = 60_000_000_000L;
 
     private final EnvelopePublisher publisher;
-    private final String subject;
+    private final String subjectBase;
+    private final Partitioner partitioner;
+    private final String proxyId;
+    private final String subjectPrefix;
     private final long maxInFlightBytes;
     private final NanoClock clock;
     private final Metrics metrics;
@@ -58,9 +61,14 @@ public final class NatsTransport implements EnvelopeTransport {
 
     /** Per-session transport state. */
     private static final class Sess {
+        final String subject;
         long next;
         /** True once the SessionStart was handed to the publisher; reset when that publish fails. */
         volatile boolean startSent;
+
+        Sess(String subject) {
+            this.subject = subject;
+        }
     }
 
     private enum Kind { START, SEGMENT, END }
@@ -68,19 +76,22 @@ public final class NatsTransport implements EnvelopeTransport {
     private record Lifecycle(SessionState session, Sess sess, Kind kind, long n, byte[] body) {
     }
 
-    public NatsTransport(EnvelopePublisher publisher, String subjectPrefix, String proxyId, long maxInFlightBytes,
-                         NanoClock clock, Metrics metrics, Consumer<String> warn) {
-        this(publisher, subjectPrefix, proxyId, maxInFlightBytes, DEFAULT_BACKLOG_MAX_COUNT,
+    public NatsTransport(EnvelopePublisher publisher, String subjectPrefix, String proxyId, int partitions,
+                         long maxInFlightBytes, NanoClock clock, Metrics metrics, Consumer<String> warn) {
+        this(publisher, subjectPrefix, proxyId, partitions, maxInFlightBytes, DEFAULT_BACKLOG_MAX_COUNT,
                 DEFAULT_BACKLOG_MAX_BYTES, clock, metrics, warn);
     }
 
-    public NatsTransport(EnvelopePublisher publisher, String subjectPrefix, String proxyId, long maxInFlightBytes,
-                         int backlogMaxCount, long backlogMaxBytes, NanoClock clock, Metrics metrics,
+    public NatsTransport(EnvelopePublisher publisher, String subjectPrefix, String proxyId, int partitions,
+                         long maxInFlightBytes, int backlogMaxCount, long backlogMaxBytes, NanoClock clock, Metrics metrics,
                          Consumer<String> warn) {
         this.backlogMaxCount = backlogMaxCount;
         this.backlogMaxBytes = backlogMaxBytes;
         this.publisher = publisher;
-        this.subject = subjectPrefix + "." + proxyId;
+        this.subjectPrefix = subjectPrefix;
+        this.proxyId = proxyId;
+        this.partitioner = new Partitioner(partitions);
+        this.subjectBase = subjectPrefix + "." + proxyId + ".*";
         this.maxInFlightBytes = maxInFlightBytes;
         this.clock = clock;
         this.metrics = metrics;
@@ -93,14 +104,14 @@ public final class NatsTransport implements EnvelopeTransport {
 
     @Override
     public void begin(SessionState session, Envelope sessionStart) {
-        Sess sess = new Sess();
+        Sess sess = newSess(session);
         sessions.put(session, sess);
         enqueueLifecycle(session, sess, Kind.START, sessionStart);
     }
 
     @Override
     public void send(SessionState session, Envelope envelope, int frameCount) {
-        Sess sess = sessions.computeIfAbsent(session, s -> new Sess());
+        Sess sess = sessions.computeIfAbsent(session, this::newSess);
         if (!envelope.hasBatch()) {
             enqueueLifecycle(session, sess, envelope.hasSessionEnd() ? Kind.END : Kind.SEGMENT, envelope);
             return;
@@ -114,6 +125,10 @@ public final class NatsTransport implements EnvelopeTransport {
             publishBatch(session, sess, Envelope.newBuilder().setBatch(part).build(), part.getFramesCount(),
                     carried);
         }
+    }
+
+    private Sess newSess(SessionState session) {
+        return new Sess(partitioner.subject(subjectPrefix, proxyId, session.idBytes().toByteArray()));
     }
 
     @Override
@@ -189,7 +204,7 @@ public final class NatsTransport implements EnvelopeTransport {
             l.sess().startSent = true;
         }
         try {
-            publisher.publish(subject, headers(l.session(), l.n()), l.body()).whenComplete((v, error) -> {
+            publisher.publish(l.sess().subject, headers(l.session(), l.n()), l.body()).whenComplete((v, error) -> {
                 inFlightBytes.addAndGet(-l.body().length);
                 if (error != null) {
                     requeue(l, error);
@@ -225,7 +240,7 @@ public final class NatsTransport implements EnvelopeTransport {
             return;
         }
         try {
-            publisher.publish(subject, headers(session, n), body).whenComplete((v, error) -> {
+            publisher.publish(sess.subject, headers(session, n), body).whenComplete((v, error) -> {
                 inFlightBytes.addAndGet(-body.length);
                 if (error != null) {
                     drop(session, frames, carried, "publish failed", error);
@@ -270,10 +285,10 @@ public final class NatsTransport implements EnvelopeTransport {
         }
         String cause = error == null ? "" : ": " + rootMessage(error);
         String hint = looksLikeMissingStream(error)
-                ? " (does the JetStream stream CORVUS_CAPTURE with subject " + subject + " exist? "
+                ? " (does the JetStream stream CORVUS_CAPTURE with subject " + subjectBase + " exist? "
                 + "ingest/ops own it, the plugin does not create it)"
                 : "";
-        warn.accept("NATS " + reason + cause + ", dropped " + frames + " frame(s) on " + subject + hint
+        warn.accept("NATS " + reason + cause + ", dropped " + frames + " frame(s) on " + subjectBase + hint
                 + (suppressedWarnings > 0 ? " [" + suppressedWarnings + " more since the last warning]" : ""));
         warned = true;
         lastWarnNanos = now;

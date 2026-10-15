@@ -67,7 +67,7 @@ writable for the proxy user (uid 1000).
 
 `sink.type = "file"` (the pilot default) writes the `.cvc` files described above. `sink.type = "nats"`
 publishes every envelope to NATS JetStream instead, following the transport contract in
-[`docs/reference/data-lake.md`](reference/data-lake.md) section 1: subject `<nats.subject_prefix>.<proxy_id>`,
+[`docs/reference/data-lake.md`](reference/data-lake.md) section 1: subject `<nats.subject_prefix>.<proxy_id>.<partition>` (`nats.partitions`, default 16, two-digit decimal),
 body = one serialized `Envelope`, headers `Nats-Msg-Id` (`<session-id-hex>-<n>`) and `Corvus-Schema`, each
 envelope below 512 KiB. The keys are `nats.url` (one URL or a list), `nats.creds_file` (optional),
 `nats.subject_prefix` (default `corvus.capture.v1`), `nats.max_in_flight_bytes` (default 32 MiB) and
