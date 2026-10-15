@@ -1,4 +1,4 @@
-# Local development stack for the Corvus ingest service and control-plane API.
+# Local development stack for the Corvus ingest service, online scoring and control-plane API.
 # See docs/how-to/run-ingest-locally.md.
 #   cp .env.example .env   (fill in the generated values; credentials are read from .env)
 #   cp .env.api.example .env.api   (optional, only for the api service; holds its tokens and keys)
@@ -135,6 +135,39 @@ services:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+
+  # Online scoring (docs/how-to/run-scoring-locally.md). One replica owns every partition; with more
+  # replicas set CORVUS_SCORE_REPLICAS and give each its own CORVUS_SCORE_REPLICA_INDEX.
+  score:
+    build:
+      context: ../..
+      dockerfile: services/Dockerfile
+    image: corvus-services:dev
+    command: ["corvus-score"]
+    env_file: .env
+    environment:
+      <<: *ingest-env
+      CORVUS_SCORE_REPLICAS: "1"
+      CORVUS_SCORE_REPLICA_INDEX: "0"
+      CORVUS_SCORE_CPUS: "2"
+    ports:
+      - "127.0.0.1:9465:9464"
+    tmpfs:
+      - /tmp:size=512M,uid=10001,gid=10001
+    depends_on:
+      nats:
+        condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    stop_grace_period: 60s
     deploy:
       resources:
         limits:
