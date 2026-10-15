@@ -75,12 +75,12 @@ services:
         condition: service_healthy
     environment:
       TYPE: VELOCITY
-      VELOCITY_VERSION: 3.5.1
-      VELOCITY_BUILD_ID: "615"
+      VELOCITY_VERSION: 4.2.0
+      VELOCITY_BUILD_ID: "30"
       MEMORY: 512M
       # Pinned, immutable Modrinth CDN URLs (version id is part of the path).
-      # PacketEvents 2.14.0, ViaVersion 5.12.1, ViaBackwards 5.12.1; see docs/pilot.md.
-      PLUGINS: "https://cdn.modrinth.com/data/HYKaKraK/versions/p0asH9aC/packetevents-velocity-2.14.0.jar,https://cdn.modrinth.com/data/P1OZGk5p/versions/5WgnasGG/ViaVersion-5.12.1.jar,https://cdn.modrinth.com/data/NpvuJQoq/versions/dWw67APC/ViaBackwards-5.12.1.jar"
+      # PacketEvents 2.14.0 (sha256 0772f64b51aaf79132c76bb1503707ea0d35433713d5312e67401eaa599d271b), ViaVersion 5.12.1, ViaBackwards 5.12.1; see docs/pilot.md.
+      PLUGINS: "https://github.com/retrooper/packetevents/releases/download/v2.14.0/packetevents-velocity-2.14.0.jar,https://cdn.modrinth.com/data/P1OZGk5p/versions/5WgnasGG/ViaVersion-5.12.1.jar,https://cdn.modrinth.com/data/NpvuJQoq/versions/dWw67APC/ViaBackwards-5.12.1.jar"
       VELOCITY_FORWARDING_SECRET: ${VELOCITY_FORWARDING_SECRET:?set VELOCITY_FORWARDING_SECRET in .env}
       CORVUS_PSEUDONYM_KEY: ${CORVUS_PSEUDONYM_KEY:?set CORVUS_PSEUDONYM_KEY in .env}
     ports:
