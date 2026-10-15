@@ -89,8 +89,24 @@ because pagination is part of the JSON body.
 | `POST /pools/preview` | DS | Live preview without saving: the body is a pool filter (the `filter` object of a pool), validated exactly like on create; nothing is stored. |
 | `POST /pools/{id}/snapshots` | DS | Materialise an immutable snapshot. |
 | `GET /pools/{id}/snapshots`, `GET /snapshots`, `GET /snapshots/{id}` | DS | List and detail (the detail view includes the manifest). |
-| `GET /snapshots/{id}/sessions` | DS | Sessions of the manifest, ascending by id. Items: `session_id` (32 hex), `pseudonym` (64 hex or `null`), `started_at`, `segments` (`segment`, `game_context`), `labels` (`label`, `source`, `confidence`, `valid_from`, `valid_to`; those applicable at the session start) and `erased`. `exclude_erased=true` leaves out sessions of erased players; `limit` (server maximum applies), `cursor` (the previous page's `next_cursor`, the last session id). |
-| `GET /snapshots/{id}/files` | DS | `{"items": [{"manifest_file_id", "id", "key"}]}`: the live `events` files for the manifest's files; a file replaced by compaction is followed to its successor, a file that vanished entirely is omitted. |
+| `GET /snapshots/{id}/sessions` | DS | Sessions of the manifest, ascending by id. Items: `session_id` (32 hex), `pseudonym` (64 hex or `null`), `started_at`, `client_protocol` (integer or `null`), `segments` (`segment`, `game_context`), `labels` (`label`, `source`, `confidence`, `valid_from`, `valid_to`; those applicable at the session start) and `erased`. `exclude_erased=true` leaves out sessions of erased players; `limit` (server maximum applies), `cursor` (the previous page's `next_cursor`, the last session id). |
+| `GET /snapshots/{id}/files` | DS | `{"items": [...], "raw": [...]}`, entries `{"manifest_file_id", "id", "key"}`: `items` are the live `events` files for the manifest's files; a file replaced by compaction is followed to its successor, a file that vanished entirely is omitted. `raw` are the live `raw` files that list a session of the manifest (the manifest lists no raw files; `manifest_file_id` equals `id`), so jobs do not scan partitions. |
+| `POST /snapshots/{id}/artifacts`, `POST /jobs/{job_id}/artifacts` | DS or job token | Register a prefix a job wrote (derived artefacts, see below). `201` new, `200` repeated. |
+| `GET /snapshots/{id}/artifacts` | DS or job token | The snapshot's live registered artefacts. |
+
+A pool also has `raw_retention_days` (integer 1 to `CORVUS_RAW_RETENTION_MAX_DAYS`, default 365, `null` = the
+deployment default `CORVUS_RAW_RETENTION_DAYS`, 21; a larger value is `422`). The response adds
+`effective_raw_retention_days` (the value that applies, capped at the maximum). Snapshots show `needs_rebuild`
+(erasure deleted their raw-derived artefacts).
+
+**Derived artefacts.** Body of both registration endpoints: `{"kind": "raw_features", "s3_prefix":
+"features/<snapshot_id>/raw/", "contains_raw": true, "job_id": "<uuid, optional>"}`. `kind` is `[a-z][a-z0-9_]{0,39}`;
+`s3_prefix` ends with `/` and lies below `features/<snapshot_id>/` or `tokenizers/<snapshot_id>/` (no `.`/`..`/empty
+segments); `contains_raw` marks tokenised payload content. A job token sends `X-Corvus-Job-Id` (its own job, which must
+belong to the snapshot, otherwise `403`); `POST /jobs/{job_id}/artifacts` takes the snapshot from the job. Registration
+is idempotent per (snapshot, prefix): repeating it updates the row (also reviving one that erasure removed) and answers
+`200`. `409` means an erasure invalidated the snapshot's raw-derived artefacts after the job started. Response:
+`{"id", "snapshot_id", "job_id", "kind", "s3_prefix", "contains_raw", "created_at"}`.
 
 Pool filter (`filter` in the body; all parts optional, combined with AND):
 
@@ -251,9 +267,11 @@ unauthenticated; keep it on the cluster network.
 | `CORVUS_API_DISPLAY_NAME_CLAIM` | `name` | Token claim shown by `GET /me` (fallback `preferred_username`). |
 | `CORVUS_PSEUDONYM_KEY`, `CORVUS_PSEUDONYM_KEY_ID` | unset, `k1` | Same as the plugin. |
 | `CORVUS_API_DEFAULT_PAGE_SIZE`, `CORVUS_API_MAX_PAGE_SIZE` | `50`, `200` | |
+| `CORVUS_RAW_RETENTION_DAYS`, `CORVUS_RAW_RETENTION_MAX_DAYS` | `21`, `365` | Default and maximum of a pool's `raw_retention_days`; the same variables configure housekeeping (aliases `CORVUS_API_RAW_RETENTION_DEFAULT_DAYS`, `CORVUS_API_RAW_RETENTION_MAX_DAYS`). |
 
 ## Data model
 
 `0002_control_plane.sql` adds `pools`, `dataset_snapshots` (with the immutability trigger), `labels`, `blocklist`,
 `erasure_requests`, `models`, `model_transitions` and `jobs` to the `corvus` schema; `0003_scores.sql` adds
-`scores_latest` and `score_history`; `0004_job_result.sql` adds the nullable `jobs.result`. Run `corvus-migrate` before starting the API.
+`scores_latest` and `score_history`; `0004_job_result.sql` adds the nullable `jobs.result`; `0006_derived_artifacts.sql`
+adds `derived_artifacts` and `snapshot_state`; `0007_pool_raw_retention.sql` adds `pools.raw_retention_days`. Run `corvus-migrate` before starting the API.
