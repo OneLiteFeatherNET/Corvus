@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +19,7 @@ from corvus_ml.eval.data import LABEL_CHEAT, LABEL_LEGIT, LABEL_UNLABELLED, Eval
 from corvus_ml.eval.dataset import build_eval_data, load_dataset
 from corvus_ml.eval.split import group_split, subsample_groups
 from corvus_ml.eval.synthetic import generate
+from corvus_ml.features.spec import SPEC_FILE, FeatureSpec
 
 log = logging.getLogger(__name__)
 
@@ -97,11 +99,33 @@ def _scores_and_labels(cand: Candidate, data: EvalData, idx: np.ndarray):
     return (sub.label == LABEL_CHEAT).astype(np.int8), cand.score(sub), sub.group_codes()
 
 
+def resolve_spec(cfg: EvalConfig) -> FeatureSpec:
+    """The feature spec of the evaluated data.
+
+    ``corvus-features build`` writes ``feature_spec.json`` next to its ``windows`` /
+    ``window_tokens`` directories; it is validated against this checkout (a mismatch is an error).
+    Without it (synthetic data, older builds) the default windowing parameters are assumed.
+    """
+    if cfg.windows is not None:
+        candidate = cfg.windows.parent / SPEC_FILE
+        if candidate.is_file():
+            return replace(FeatureSpec.load(candidate), seq_len=cfg.seq_len)
+        log.warning("no %s next to %s; assuming default window parameters", SPEC_FILE, cfg.windows)
+    return FeatureSpec.current(seq_len=cfg.seq_len)
+
+
 def _export_and_bench(
-    cand: Candidate, cfg: EvalConfig, data: EvalData, test_idx: np.ndarray, out: Path, fprs
+    cand: Candidate,
+    cfg: EvalConfig,
+    data: EvalData,
+    test_idx: np.ndarray,
+    out: Path,
+    fprs,
+    spec: FeatureSpec,
 ) -> dict:
     res: dict = {}
     out.mkdir(parents=True, exist_ok=True)
+    spec.write(out)  # the exported graphs are only meaningful together with this layout
     test = data.take(test_idx[data.label[test_idx] != LABEL_UNLABELLED])
     if len(test) == 0:
         return {"error": "no labelled test windows"}
@@ -166,7 +190,13 @@ def _learning_curve(name, cfg, data, split, fprs) -> list[dict]:
 
 
 def run_candidate(
-    name: str, cfg: EvalConfig, data: EvalData, split, out_dir: Path, ctx: str
+    name: str,
+    cfg: EvalConfig,
+    data: EvalData,
+    split,
+    out_dir: Path,
+    ctx: str,
+    spec: FeatureSpec | None = None,
 ) -> dict:
     fprs = cfg.fpr_targets
     cls = cand_pkg.REGISTRY[name]
@@ -196,7 +226,8 @@ def run_candidate(
             "lr": cand.lr_used,
             "lr_range_suggested": cand.lr_range.suggested_lr if cand.lr_range else None,
         }
-    res.update(_export_and_bench(cand, cfg, data, split.test, out_dir / "onnx" / ctx, fprs))
+    spec = spec or FeatureSpec.current(seq_len=cfg.seq_len)
+    res.update(_export_and_bench(cand, cfg, data, split.test, out_dir / "onnx" / ctx, fprs, spec))
     if cfg.learning_curve:
         res["learning_curve"] = _learning_curve(name, cfg, data, split, fprs)
     return res
@@ -210,6 +241,7 @@ def run(cfg: EvalConfig, out_dir: Path) -> dict:
     unknown = [n for n in cfg.candidates if n not in cand_pkg.REGISTRY]
     if unknown:
         raise ValueError(f"unknown candidates {unknown}; known: {sorted(cand_pkg.REGISTRY)}")
+    spec = resolve_spec(cfg)
     data, synthetic = load_data(cfg)
     assumed = 0
     if cfg.unlabelled == "assume_legit":
@@ -251,6 +283,6 @@ def run(cfg: EvalConfig, out_dir: Path) -> dict:
         }
         for name in cfg.candidates:
             log.info("context %s: %s", ctx, name)
-            info["candidates"][name] = run_candidate(name, cfg, sub, split, out_dir, ctx)
+            info["candidates"][name] = run_candidate(name, cfg, sub, split, out_dir, ctx, spec)
         report["contexts"][ctx] = info
     return report

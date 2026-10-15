@@ -7,12 +7,16 @@ Adding a candidate is one class: subclass :class:`Candidate`, set the class attr
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from pathlib import Path
 from typing import ClassVar, Literal
 
 import numpy as np
 
 from corvus_ml.eval.data import EvalData
+from corvus_ml.features.featurizer import CompletedWindow
+from corvus_ml.features.model_input import model_inputs
+from corvus_ml.features.spec import FeatureSpec
 
 REGISTRY: dict[str, type[Candidate]] = {}
 
@@ -40,6 +44,15 @@ class Candidate(ABC):
         if arr is None:
             raise ValueError(f"{self.name} needs {self.input_kind} inputs")
         return np.ascontiguousarray(arr, dtype=np.float32)
+
+    def inputs_for_windows(
+        self, windows: Sequence[CompletedWindow], spec: FeatureSpec | None = None
+    ) -> np.ndarray:
+        """The same array as :meth:`inputs`, built from freshly featurized windows (serving).
+
+        Both paths use ``corvus_ml.features.model_input`` so they cannot drift apart.
+        """
+        return model_inputs(windows, self.input_kind, spec)
 
     @abstractmethod
     def fit(self, train: EvalData, val: EvalData | None = None) -> None:

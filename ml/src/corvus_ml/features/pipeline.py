@@ -31,6 +31,7 @@ from corvus_ml.features.schema import (
     WINDOWS_SCHEMA,
 )
 from corvus_ml.features.segments import SegmentMap
+from corvus_ml.features.spec import FeatureSpec
 
 WINDOWS_DIR = "windows"
 TOKENS_DIR = "window_tokens"
@@ -132,7 +133,7 @@ def _frames(run: dict[str, np.ndarray]) -> Iterator[Frame]:
     )
 
 
-def _window_tables(
+def window_tables(
     sid: bytes, context: str, windows: Sequence[CompletedWindow]
 ) -> tuple[pa.Table, pa.Table]:
     """Arrow rows of the completed windows of one segment run."""
@@ -228,7 +229,7 @@ def build_group(
                 completed.extend(featurizer.flush())
                 if not completed:
                     continue
-                table_w, table_t = _window_tables(sid, context, completed)
+                table_w, table_t = window_tables(sid, context, completed)
                 n_windows += table_w.num_rows
                 pending_w.append(table_w)
                 pending_t.append(table_t)
@@ -280,6 +281,9 @@ def build(
     groups = make_groups(segmap.sessions(), group_size)
     tasks = list(enumerate(groups))
     out_dir.mkdir(parents=True, exist_ok=True)
+    # Lets the evaluation harness (and, via the model export, the scorer) know how these windows
+    # were cut and validate the feature definitions.
+    FeatureSpec.current(cfg.featurizer()).write(out_dir)
     if workers <= 1 or len(tasks) <= 1:
         reader = EventReader(open_dataset(events, s3), cfg.batch_rows)
         return [build_group(reader, segmap, cfg, i, ids, out_dir) for i, ids in tasks]
