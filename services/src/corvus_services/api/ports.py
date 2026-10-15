@@ -108,6 +108,17 @@ class ModelRecord:
 
 
 @dataclass(frozen=True)
+class ModelFilter:
+    """Exact-match filters of the model list; ``None`` means no restriction."""
+
+    name: str | None = None
+    version: str | None = None
+    game_context: str | None = None
+    domain: str | None = None
+    stage: str | None = None
+
+
+@dataclass(frozen=True)
 class TransitionRecord:
     id: UUID
     model_id: UUID
@@ -133,6 +144,7 @@ class JobRecord:
     created_at: datetime
     updated_at: datetime
     finished_at: datetime | None = None
+    result: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +193,10 @@ class ErasureTx(Protocol):
 
     async def lock_player(self, pseudonym: bytes) -> PlayerInfo | None: ...
     async def delete_player_key(self, pseudonym: bytes) -> bool: ...
+    async def delete_scores(self, pseudonym: bytes) -> int:
+        """Delete the player's rows in ``scores_latest`` and ``score_history``; returns the count."""
+        ...
+
     async def mark_erased(self, pseudonym: bytes, at: datetime) -> None: ...
     async def block(self, entry: BlockEntry) -> None: ...
     async def record_request(self, request: ErasureRequest) -> None: ...
@@ -192,6 +208,9 @@ class ErasureStore(Protocol):
         ...
 
     async def get_request(self, request_id: UUID) -> ErasureRequest | None: ...
+    async def list_requests(self, req: PageRequest, status: str | None) -> Page[ErasureRequest]:
+        """Newest ``requested_at`` first."""
+        ...
 
 
 class BlocklistRepo(Protocol):
@@ -210,7 +229,8 @@ class BlocklistRepo(Protocol):
 class ModelRepo(Protocol):
     async def create(self, model: ModelRecord) -> None: ...
     async def get(self, model_id: UUID) -> ModelRecord | None: ...
-    async def list_page(self, req: PageRequest, stage: str | None) -> Page[ModelRecord]: ...
+    async def get_by_name_version(self, name: str, version: str) -> ModelRecord | None: ...
+    async def list_page(self, req: PageRequest, flt: ModelFilter) -> Page[ModelRecord]: ...
     async def enforced_in_scope(
         self, snapshot_id: UUID, game_context: str, exclude: UUID
     ) -> list[ModelRecord]: ...
@@ -238,7 +258,10 @@ class JobRepo(Protocol):
         message: str,
         now: datetime,
         finished: bool,
-    ) -> JobRecord: ...
+        result: dict[str, Any] | None = None,
+    ) -> JobRecord:
+        """``result`` is stored when given and kept otherwise."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -286,6 +309,44 @@ class ScoreRepo(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class JobBrief:
+    id: UUID
+    type: str
+    status: str
+    snapshot_id: UUID
+    created_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None
+
+
+@dataclass(frozen=True)
+class ErasureBrief:
+    id: UUID
+    pseudonym: bytes
+    requested_at: datetime
+    status: str
+    compaction_pending: bool
+
+
+@dataclass(frozen=True)
+class Summary:
+    pools: int
+    snapshots: int
+    jobs_by_status: dict[str, int]
+    models_by_stage: dict[str, int]
+    labels_by_label: dict[str, int]
+    pending_erasures: int
+    recent_jobs: list[JobBrief]
+    recent_erasures: list[ErasureBrief]
+
+
+class SummaryRepo(Protocol):
+    async def summary(self, recent: int) -> Summary:
+        """Counts over the whole catalog plus the ``recent`` newest jobs and erasure requests."""
+        ...
+
+
 class Database(Protocol):
     async def ping(self) -> None: ...
 
@@ -302,5 +363,6 @@ class Repos:
     models: ModelRepo
     jobs: JobRepo
     scores: ScoreRepo
+    summary: SummaryRepo
     db: Database
     closers: list[Any] = field(default_factory=list)

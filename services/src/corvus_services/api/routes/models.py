@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..auth import READERS, Principal, Role, require
 from ..deps import Deps, get_deps, get_page
 from ..pagination import PageRequest
-from ..ports import DuplicateError, ModelRecord, StaleError
+from ..ports import DuplicateError, ModelFilter, ModelRecord, StaleError
 from ..problems import ProblemError
 from ..registry import (
     ModelNotFoundError,
@@ -23,7 +23,9 @@ from ..schemas import ModelOut, Paged, TransitionOut
 
 router = APIRouter(tags=["models"])
 _DS = Depends(require(Role.DATA_SCIENTIST))
+_DS_OR_JOB = Depends(require(Role.DATA_SCIENTIST, allow_jobs=True))
 _READ = Depends(require(*READERS))
+_READ_OR_JOB = Depends(require(*READERS, allow_jobs=True))
 
 
 class ModelIn(BaseModel):
@@ -48,7 +50,7 @@ class StageIn(BaseModel):
 
 @router.post("/models", status_code=201, response_model=ModelOut, summary="Register a model")
 async def register_model(
-    body: ModelIn, who: Principal = _DS, deps: Deps = Depends(get_deps)
+    body: ModelIn, who: Principal = _DS_OR_JOB, deps: Deps = Depends(get_deps)
 ) -> ModelOut:
     if await deps.repos.snapshots.get(body.snapshot_id) is None:
         raise ProblemError(422, "snapshot does not exist", slug="validation")
@@ -75,12 +77,17 @@ async def register_model(
 
 @router.get("/models", response_model=Paged[ModelOut], summary="List models, newest first")
 async def list_models(
+    name: str | None = Query(default=None, max_length=200),
+    version: str | None = Query(default=None, max_length=100),
+    game_context: str | None = Query(default=None, max_length=200),
+    domain: str | None = Query(default=None, max_length=200),
     stage: Stage | None = Query(default=None),
-    _: Principal = _READ,
+    _: Principal = _READ_OR_JOB,
     page: PageRequest = Depends(get_page),
     deps: Deps = Depends(get_deps),
 ) -> Paged[ModelOut]:
-    result = await deps.repos.models.list_page(page, stage.value if stage else None)
+    flt = ModelFilter(name, version, game_context, domain, stage.value if stage else None)
+    result = await deps.repos.models.list_page(page, flt)
     return Paged[ModelOut](
         items=[ModelOut.of(m) for m in result.items], next_cursor=result.next_cursor
     )
@@ -93,7 +100,7 @@ async def list_models(
     summary="Get a model",
 )
 async def get_model(
-    model_id: UUID, _: Principal = _READ, deps: Deps = Depends(get_deps)
+    model_id: UUID, _: Principal = _READ_OR_JOB, deps: Deps = Depends(get_deps)
 ) -> ModelOut:
     model = await deps.repos.models.get(model_id)
     if model is None:
@@ -113,6 +120,21 @@ async def model_transitions(
     if await deps.repos.models.get(model_id) is None:
         raise ProblemError(404, "model not found", slug="not-found")
     return [TransitionOut.of(t) for t in await deps.repos.models.transitions(model_id)]
+
+
+@router.get(
+    "/models/{name}/{version}",
+    response_model=ModelOut,
+    responses={404: {"description": "Model not found"}},
+    summary="Get a model by name and version",
+)
+async def get_model_by_version(
+    name: str, version: str, _: Principal = _READ_OR_JOB, deps: Deps = Depends(get_deps)
+) -> ModelOut:
+    model = await deps.repos.models.get_by_name_version(name, version)
+    if model is None:
+        raise ProblemError(404, "model not found", slug="not-found")
+    return ModelOut.of(model)
 
 
 @router.post(

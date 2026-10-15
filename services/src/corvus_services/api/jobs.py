@@ -86,11 +86,13 @@ class ProcessLauncher(Protocol):
 
 
 _SECRET_ENV = re.compile(r"^(CORVUS_API_.*|CORVUS_PSEUDONYM_KEY.*|CORVUS_KEK)$")
+_JOB_API_ENV = frozenset({"CORVUS_API_URL", "CORVUS_API_TOKEN"})
+"""How a job reaches the API; the token is the job's own machine token, not the API's secret."""
 
 
 def child_environment(parent: Mapping[str, str], extra: Mapping[str, str]) -> dict[str, str]:
     """The environment of a job process: the parent's, minus the API's own secrets, plus ``extra``."""
-    env = {k: v for k, v in parent.items() if not _SECRET_ENV.match(k)}
+    env = {k: v for k, v in parent.items() if k in _JOB_API_ENV or not _SECRET_ENV.match(k)}
     env.update(extra)
     return env
 
@@ -321,6 +323,39 @@ async def create_job(
     )
 
 
+class JobFinishedError(Exception):
+    """The job already reached a final status that differs from the reported one."""
+
+
+REPORTABLE = (JobState.RUNNING, JobState.SUCCEEDED, JobState.FAILED)
+
+
+async def report_job(
+    jobs: JobRepo,
+    job: JobRecord,
+    *,
+    status: JobState,
+    message: str,
+    result: dict[str, Any] | None,
+    now: datetime,
+) -> JobRecord:
+    """Apply a status report from the job process. Final statuses are final; repeating the same
+    report is accepted (retries after a lost response)."""
+    if JobState(job.status) in TERMINAL:
+        if status.value == job.status and message == job.message and result in (None, job.result):
+            return job
+        raise JobFinishedError(job.status)
+    return await jobs.update(
+        job.id,
+        status=status.value,
+        runner_ref=None,
+        message=message,
+        now=now,
+        finished=status in TERMINAL,
+        result=result,
+    )
+
+
 async def refresh_job(jobs: JobRepo, runner: JobRunner, job: JobRecord, now: datetime) -> JobRecord:
     """Pulls the runner status into the stored job. Runner errors leave the stored status unchanged."""
     if JobState(job.status) in TERMINAL or job.runner_ref is None or job.runner != runner.name:
@@ -330,8 +365,8 @@ async def refresh_job(jobs: JobRepo, runner: JobRunner, job: JobRecord, now: dat
     except Exception as e:
         log.warning("job %s status refresh failed (%s)", job.id, type(e).__name__)
         return job
-    if st.state.value == job.status and st.message == job.message:
-        return job
+    if st.state.value == job.status and (st.message == job.message or not st.message):
+        return job  # a message the job itself reported is not overwritten by an empty one
     return await jobs.update(
         job.id,
         status=st.state.value,

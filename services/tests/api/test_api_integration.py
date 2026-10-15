@@ -341,3 +341,100 @@ async def test_blocklist_feed_lists_pseudonyms_by_kind(repos: Repos):
     assert blocked in b and blocked not in a
     assert allowed in a and allowed not in b
     assert await repos.blocklist.delete(blocked) and await repos.blocklist.delete(allowed)
+
+
+async def test_erasure_deletes_the_players_scores_in_the_same_transaction(repos: Repos, pool: Pool):
+    pseudonym, other = os.urandom(32), os.urandom(32)
+    async with pool.connection() as conn:
+        for p in (pseudonym, other):
+            await conn.execute(
+                "INSERT INTO corvus.scores_latest (pseudonym, game_context, domain, model_name,"
+                " model_version, stage, score, smoothed, windows, session_id, segment, updated_at)"
+                " VALUES (%s, 'it', 'move', 'm', '1', 'shadow', 0.5, 0.5, 1, %s, 0, %s)",
+                (p, os.urandom(16), NOW),
+            )
+            await conn.execute(
+                "INSERT INTO corvus.score_history (pseudonym, session_id, segment, game_context,"
+                " domain, model_name, model_version, stage, score, smoothed, windows,"
+                " window_start_offset_nanos, window_end_offset_nanos, scored_at)"
+                " VALUES (%s, %s, 0, 'it', 'move', 'm', '1', 'shadow', 0.5, 0.5, 1, 0, 1, %s)",
+                (p, os.urandom(16), NOW),
+            )
+
+    await erase_player(repos.erasure, pseudonym, requested_by="it", now=NOW)
+
+    assert await repos.scores.latest(pseudonym) == []
+    assert await repos.scores.history(pseudonym, None, 10) == []
+    assert len(await repos.scores.latest(other)) == 1
+    assert len(await repos.scores.history(other, None, 10)) == 1
+
+
+async def test_erasure_requests_are_listed_newest_first_and_filtered(repos: Repos):
+    req = await erase_player(repos.erasure, os.urandom(32), requested_by="it", now=NOW)
+
+    page = await repos.erasure.list_requests(PageRequest(500, None), "completed")
+
+    assert req.id in [r.id for r in page.items]
+    times = [r.requested_at for r in page.items]
+    assert times == sorted(times, reverse=True)
+
+
+async def test_summary_counts_pending_erasures_and_lists_recent_activity(repos: Repos):
+    before = await repos.summary.summary(10)
+    await erase_player(repos.erasure, os.urandom(32), requested_by="it", now=NOW)
+
+    after = await repos.summary.summary(10)
+
+    assert after.pending_erasures == before.pending_erasures + 1
+    assert len(after.recent_erasures) <= 10
+    assert all(isinstance(n, int) for n in after.jobs_by_status.values())
+
+
+async def _snapshot(repos: Repos) -> SnapshotRecord:
+    pool_id = uuid4()
+    manifest = build_manifest(
+        pool_id=pool_id, pool_name="it", pool_filter={}, session_ids=[], files=[], created_at=NOW
+    )
+    snap = SnapshotRecord(
+        uuid4(), pool_id, "it", manifest, manifest_sha256(manifest), 0, 0, "it", NOW
+    )
+    await repos.snapshots.insert(snap)
+    return snap
+
+
+async def test_job_results_are_stored_and_kept_by_later_updates(repos: Repos):
+    from corvus_services.api.ports import JobRecord
+
+    snap = await _snapshot(repos)
+    job = JobRecord(uuid4(), "train", snap.id, {}, "running", "local", None, "", "it", NOW, NOW)
+    await repos.jobs.create(job)
+
+    done = await repos.jobs.update(
+        job.id, status="succeeded", runner_ref=None, message="", now=NOW, finished=True,
+        result={"model": "m:1"},
+    )  # fmt: skip
+    again = await repos.jobs.update(
+        job.id, status="succeeded", runner_ref=None, message="ok", now=NOW, finished=True
+    )
+
+    assert done.result == {"model": "m:1"}
+    assert again.result == {"model": "m:1"}
+
+
+async def test_models_filter_by_name_and_version(repos: Repos):
+    from corvus_services.api.ports import ModelFilter
+
+    snap = await _snapshot(repos)
+    name = f"it-{uuid4().hex[:8]}"
+    model = ModelRecord(
+        uuid4(), name, "1", "gbdt", "it", "move", snap.id, {}, "k.onnx", "registered", "it", NOW
+    )
+    await repos.models.create(model)
+
+    found = await repos.models.get_by_name_version(name, "1")
+    hit = await repos.models.list_page(PageRequest(10, None), ModelFilter(name=name, domain="move"))
+    miss = await repos.models.list_page(PageRequest(10, None), ModelFilter(name=name, domain="aim"))
+
+    assert found == model
+    assert [m.id for m in hit.items] == [model.id]
+    assert miss.items == []

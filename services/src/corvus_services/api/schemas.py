@@ -11,7 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from .pools import PoolFilter
 from .ports import (
     BlockEntry,
+    ErasureBrief,
     ErasureRequest,
+    JobBrief,
     JobRecord,
     LabelRecord,
     ModelRecord,
@@ -20,6 +22,7 @@ from .ports import (
     ScoreHistoryRecord,
     ScoreLatestRecord,
     SnapshotRecord,
+    Summary,
     TransitionRecord,
 )
 
@@ -203,14 +206,84 @@ class JobOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     finished_at: datetime | None
+    result: dict[str, Any] | None = Field(
+        default=None, description="Result document reported by the job when it finished"
+    )
 
     @classmethod
     def of(cls, j: JobRecord) -> JobOut:
         return cls(
             id=j.id, type=j.type, snapshot_id=j.snapshot_id, params=j.params, status=j.status,
             runner=j.runner, message=j.message, created_by=j.created_by, created_at=j.created_at,
-            updated_at=j.updated_at, finished_at=j.finished_at,
+            updated_at=j.updated_at, finished_at=j.finished_at, result=j.result,
         )  # fmt: skip
+
+
+class MeOut(BaseModel):
+    subject: str
+    display_name: str | None = Field(default=None, description="From the token, if it carries one")
+    roles: list[str] = Field(description="Corvus roles after `CORVUS_API_ROLE_MAPPING`")
+
+
+PSEUDONYM_PREFIX_LEN = 12
+
+
+class JobBriefOut(BaseModel):
+    id: UUID
+    type: str
+    status: str
+    snapshot_id: UUID
+    created_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None
+
+    @classmethod
+    def of(cls, j: JobBrief) -> JobBriefOut:
+        return cls(**j.__dict__)
+
+
+class ErasureBriefOut(BaseModel):
+    id: UUID
+    pseudonym_prefix: str = Field(description="First 12 hex characters of the pseudonym")
+    requested_at: datetime
+    status: str
+    compaction_pending: bool
+
+    @classmethod
+    def of(cls, e: ErasureBrief) -> ErasureBriefOut:
+        return cls(
+            id=e.id, pseudonym_prefix=e.pseudonym.hex()[:PSEUDONYM_PREFIX_LEN],
+            requested_at=e.requested_at, status=e.status, compaction_pending=e.compaction_pending,
+        )  # fmt: skip
+
+
+class SummaryOut(BaseModel):
+    pools: int
+    snapshots: int
+    jobs_by_status: dict[str, int] = Field(description="Every job status, zero when absent")
+    models_by_stage: dict[str, int] = Field(description="Every model stage, zero when absent")
+    labels_by_label: dict[str, int] = Field(description="Every label value, zero when absent")
+    pending_erasures: int = Field(description="Erasure requests whose compaction is pending")
+    recent_jobs: list[JobBriefOut]
+    recent_erasures: list[ErasureBriefOut]
+
+    @classmethod
+    def of(cls, s: Summary) -> SummaryOut:
+        def filled(counts: dict[str, int], keys: tuple[str, ...]) -> dict[str, int]:
+            return {**dict.fromkeys(keys, 0), **counts}
+
+        return cls(
+            pools=s.pools,
+            snapshots=s.snapshots,
+            jobs_by_status=filled(s.jobs_by_status, ("queued", "running", "succeeded", "failed")),
+            models_by_stage=filled(
+                s.models_by_stage, ("registered", "shadow", "canary", "enforce", "archived")
+            ),
+            labels_by_label=filled(s.labels_by_label, ("legit", "cheat")),
+            pending_erasures=s.pending_erasures,
+            recent_jobs=[JobBriefOut.of(j) for j in s.recent_jobs],
+            recent_erasures=[ErasureBriefOut.of(e) for e in s.recent_erasures],
+        )
 
 
 class ScoreLatestOut(BaseModel):
