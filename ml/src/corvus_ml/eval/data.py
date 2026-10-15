@@ -6,58 +6,17 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from corvus_ml.features.spec import DEFAULT_AGG_INPUTS, DEFAULT_SEQ_INPUTS
+
 LABEL_UNLABELLED = -1
 LABEL_LEGIT = 0
 LABEL_CHEAT = 1
 
-# Aggregate columns of the ``windows`` table used as model input (see docs/reference/features.md).
-AGG_COLUMNS = (
-    "cps",
-    "attacks_per_s",
-    "packets_per_s",
-    "movement_per_s",
-    "rot_var",
-    "rot_speed_mean",
-    "rot_speed_max",
-    "n_frames",
-)
-# Nullable aggregates: null becomes 0 plus a ``has_<name>`` indicator column.
-NULLABLE_AGG_COLUMNS = ("on_ground_frac", "tick_end_rate")
-AGG_NAMES = (*AGG_COLUMNS, *NULLABLE_AGG_COLUMNS, *(f"has_{c}" for c in NULLABLE_AGG_COLUMNS))
-
-# Token features fed to the sequence models, each with a transform applied before use.
-# "slog" = sign(x) * ln(1 + |x|) compresses heavy tails; "scale8" maps small enums to ~[0, 1].
-SEQ_FEATURES: tuple[tuple[str, str], ...] = (
-    ("event_kind", "scale8"),
-    ("domain", "scale8"),
-    ("action", "scale8"),
-    ("dt_bucket", "scale8"),
-    ("log_dt", "id"),
-    ("has_pos_delta", "id"),
-    ("dx", "slog"),
-    ("dy", "slog"),
-    ("dz", "slog"),
-    ("has_rot_delta", "id"),
-    ("dyaw", "slog"),
-    ("dpitch", "slog"),
-    ("rot_speed", "slog"),
-    ("rot_accel", "slog"),
-    ("on_ground", "id"),
-    ("t_since_swing", "id"),
-    ("t_since_move", "id"),
-    ("target_dist", "slog"),
-    ("target_angle", "slog"),
-)
+# The model input layout lives in the feature spec (shared with the scoring service). These names
+# stay importable for the harness and its tests.
+AGG_NAMES = DEFAULT_AGG_INPUTS
+SEQ_FEATURES = DEFAULT_SEQ_INPUTS
 N_SEQ_FEATURES = len(SEQ_FEATURES) + 1  # + trailing mask channel (1 = real frame, 0 = padding)
-
-
-def apply_transform(values: np.ndarray, kind: str) -> np.ndarray:
-    v = values.astype(np.float32, copy=False)
-    if kind == "slog":
-        return np.sign(v) * np.log1p(np.abs(v))
-    if kind == "scale8":
-        return v / np.float32(8.0)
-    return v
 
 
 @dataclass

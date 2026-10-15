@@ -2,7 +2,9 @@
 
 Input is the lake table `events` plus a `segments(session_id, segment, game_context)` table
 (see [data-lake.md](data-lake.md)). Output is two Parquet tables written by `corvus-features build`
-(`ml/src/corvus_ml/features/`).
+(`ml/src/corvus_ml/features/`). The feature logic is an incremental core
+([section 6](#6-incremental-featurizer-offline-and-online)) that the online scoring service runs
+unchanged; `build` also writes [`feature_spec.json`](feature-spec.md) next to the tables.
 
 ```
 uv run corvus-features build --events <dir|s3://...> --segments <parquet|csv|arrow> --out <dir>
@@ -23,9 +25,9 @@ S3 credentials come from the standard AWS environment. A CSV `session_id` is the
 3. The session is cut into runs of equal `segment`. Runs whose segment is absent from the segments
    table are skipped. **All per-run state is reset at a segment boundary** (previous frame, position,
    rotation, entity positions), and windows never cross it.
-4. Tokens are computed for the serverbound frames of the run; clientbound `entity_motion` frames only
-   feed the entity position state.
-5. Windows are cut, aggregated and written. One file per group: `windows/part-<group>.parquet` and
+4. The frames of a run are fed one by one into a `SessionFeaturizer`: tokens are computed for the
+   serverbound frames, clientbound `entity_motion` frames only feed the entity position state.
+5. Windows are cut and aggregated by the featurizer as soon as their extent is known, then written. One file per group: `windows/part-<group>.parquet` and
    `window_tokens/part-<group>.parquet`. The output does not depend on the worker count.
 
 Worker count defaults to the cgroup CPU limit (`corvus_ml.cgroup.default_workers`). Memory is
@@ -121,3 +123,39 @@ With 50 % overlap every frame is stored about twice. Per-domain views are a filt
 
 Same input produces byte-identical files: groups are sorted, one file per group index, fixed Parquet
 settings (zstd level 3), no timestamps, and `seq` order with first-wins de-duplication.
+
+## 6. Incremental featurizer (offline and online)
+
+The code that computes tokens, cuts windows and aggregates them is one pure, numpy-only component
+(`ml/src/corvus_ml/features/featurizer.py`, no Arrow import). The offline build and the scoring
+service both use it, so there is no training/serving skew by construction; `tests/
+test_features_golden.py` pins the offline output to a fixture generated before the extraction.
+
+```python
+fz = SessionFeaturizer(session_id, FeaturizerConfig(window=256, overlap=0.5, ...))
+fz.begin_segment(segment, tick_end=None)     # optional; feed() starts runs by itself
+for frame in frames:                          # corvus_ml.features.frames.Frame, one events row
+    for window in fz.feed(frame):             # CompletedWindow
+        ...
+for window in fz.flush():                     # tail of the current run
+    ...
+```
+
+| Item | Definition |
+|---|---|
+| `Frame` | NamedTuple mirroring the `events` columns the featurizer reads: `segment`, `seq`, `offset_nanos`, `direction`, `packet_type`, `event_kind`, `has_position`, `has_rotation`, `on_ground` (None or -1 = unknown), `x`, `y`, `z`, `yaw`, `pitch` (NaN = null), `entity_id`, `action` |
+| `FeaturizerConfig` | frozen: `window`, `overlap`, `max_duration_s`, `min_frames`, `dt_edges_ms`, `entity_cache`; the offline `FeatureConfig` adds only I/O knobs |
+| `CompletedWindow` | `session_id`, `segment`, `window_index`, `start_offset_nanos`, `end_offset_nanos`, `first_seq`, `last_seq`, `n_frames`, `cut`; `aggregates` float64 vector in the order of the aggregate columns of section 3 (NaN = null); `tokens` float32 matrix `(n_frames, 21)` in the column order of section 2 (all token features, `packet_type` first); `token_seq`, `token_offset_nanos` uint64 per row |
+| Emission | A window is returned from `feed` once its extent is certain: its `window`-th frame arrived, or a frame beyond `max_duration_s` arrived. `flush` emits the tail (`cut = end`) subject to `min_frames`, and resets the run. A window that already reached the last frame is not emitted twice. |
+| Segment boundary | `feed` of a frame with another `segment` first flushes the run; previous frame, position, rotation, entity positions and buffered tokens are reset. `window_index` continues per segment if a segment is entered again. |
+| Redelivery | A frame with `seq` not greater than the last one is ignored, so at-least-once delivery is harmless. Frames must otherwise arrive in `seq` order. |
+| `tick_end_rate` | Null when the run never sends `CLIENT_TICK_END`. The offline build knows this for the whole run and passes it to `begin_segment(tick_end=...)`. Online (`tick_end=None`) it is inferred from the frames seen so far, so a window that completes before the first tick end reports null where the offline build would report 0.0 if the run sends tick ends later. |
+| Memory | Consumed frames are released; the buffer holds about one window of tokens per run. |
+
+The streaming result equals the batch definition of sections 2 and 3 for any chunking of the same
+frames (`tests/test_featurizer.py` checks this against an independent whole-run reference).
+Token values are stored as float32; every integer feature is far below 2^24, so the conversion back
+to the Arrow types of section 2 is lossless.
+
+The model inputs derived from windows (aggregate vector order, token tensor layout and padding) are
+defined once, in `model_input.py`, and described by the [feature spec](feature-spec.md).

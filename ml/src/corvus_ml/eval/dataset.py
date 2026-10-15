@@ -25,17 +25,14 @@ import pyarrow.csv as pacsv
 import pyarrow.dataset as pads
 import pyarrow.parquet as pq
 
-from corvus_ml.eval.data import (
-    AGG_COLUMNS,
-    LABEL_CHEAT,
-    LABEL_LEGIT,
-    LABEL_UNLABELLED,
-    N_SEQ_FEATURES,
-    NULLABLE_AGG_COLUMNS,
-    SEQ_FEATURES,
-    EvalData,
-    apply_transform,
+from corvus_ml.eval.data import LABEL_CHEAT, LABEL_LEGIT, LABEL_UNLABELLED, EvalData
+from corvus_ml.features.model_input import (
+    aggregate_inputs,
+    empty_sequences,
+    encode_tokens,
+    scatter_frames,
 )
+from corvus_ml.features.spec import FeatureSpec
 
 log = logging.getLogger(__name__)
 
@@ -156,16 +153,18 @@ def join_labels(
 
 
 def tokens_to_sequences(
-    windows: pa.Table, tokens: pa.Table, seq_len: int
+    windows: pa.Table, tokens: pa.Table, seq_len: int, spec: FeatureSpec | None = None
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Dense (n_windows, seq_len, N_SEQ_FEATURES) tensor in ``windows`` row order.
+    """Dense (n_windows, seq_len, channels) tensor in ``windows`` row order.
 
-    Windows longer than ``seq_len`` keep their first ``seq_len`` frames; shorter ones are
-    zero-padded and flagged by the trailing mask channel. Windows without tokens stay empty.
+    The layout and transforms come from the shared model-input adapter. Windows longer than
+    ``seq_len`` keep their first ``seq_len`` frames; shorter ones are zero-padded and flagged by the
+    trailing mask channel. Windows without tokens stay empty.
     Returns the tensor and a boolean "has tokens" vector.
     """
+    spec = spec or FeatureSpec.current(seq_len=seq_len)
     n = windows.num_rows
-    out = np.zeros((n, seq_len, N_SEQ_FEATURES), dtype=np.float32)
+    out = empty_sequences(n, spec)
     has = np.zeros(n, dtype=bool)
     if tokens.num_rows == 0 or n == 0:
         return out, has
@@ -198,36 +197,35 @@ def tokens_to_sequences(
     starts = np.flatnonzero(change)
     ends = np.append(starts[1:], tokens.num_rows)
     start_sids = sid.take(pa.array(starts)).to_pylist()
-    feats = np.stack(
+    columns = {name: tokens[name].to_numpy(zero_copy_only=False) for name, _ in spec.seq_inputs}
+    encoded = encode_tokens(columns, spec)
+    row_of_group = np.array(
         [
-            apply_transform(tokens[name].to_numpy(zero_copy_only=False), kind)
-            for name, kind in SEQ_FEATURES
+            key.get((bytes(sb), int(seg[s]), int(wid[s])), -1)
+            for s, sb in zip(starts, start_sids, strict=True)
         ],
-        axis=1,
+        dtype=np.int64,
     )
-    for s, e, sb in zip(starts, ends, start_sids, strict=True):
-        row = key.get((bytes(sb), int(seg[s]), int(wid[s])))
-        if row is None:
-            continue
-        # ``pos`` is contiguous from 0; keep it anyway so gaps cannot shift frames.
-        p = pos[s:e].astype(np.int64)
-        keep = p < seq_len
-        out[row, p[keep], : N_SEQ_FEATURES - 1] = feats[s:e][keep]
-        out[row, p[keep], N_SEQ_FEATURES - 1] = 1.0
-        has[row] = True
+    rows = np.repeat(row_of_group, ends - starts)
+    known = rows >= 0
+    # ``pos`` is contiguous from 0; keep it anyway so gaps cannot shift frames.
+    scatter_frames(out, rows[known], pos[known].astype(np.int64), encoded[known])
+    has[row_of_group[row_of_group >= 0]] = True
     return out, has
 
 
-def _aggregates(windows: pa.Table) -> np.ndarray:
-    cols = []
-    for name in AGG_COLUMNS:
-        cols.append(windows[name].fill_null(0).to_numpy(zero_copy_only=False))
-    flags = []
-    for name in NULLABLE_AGG_COLUMNS:
-        col = windows[name]
-        cols.append(col.fill_null(0.0).to_numpy(zero_copy_only=False))
-        flags.append(pc.is_valid(col).to_numpy(zero_copy_only=False).astype(np.float64))
-    return np.stack([*cols, *flags], axis=1).astype(np.float32)
+def _aggregates(windows: pa.Table, spec: FeatureSpec | None = None) -> np.ndarray:
+    """Aggregate model inputs of the ``windows`` rows (null -> NaN, then the shared adapter)."""
+    spec = spec or FeatureSpec.current()
+    names = {n[4:] if n.startswith("has_") else n for n in spec.agg_inputs}
+    columns = {
+        name: windows[name]
+        .cast(pa.float64())
+        .fill_null(float("nan"))
+        .to_numpy(zero_copy_only=False)
+        for name in names
+    }
+    return aggregate_inputs(columns, spec)
 
 
 def build_eval_data(

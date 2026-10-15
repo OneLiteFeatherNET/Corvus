@@ -5,12 +5,13 @@ import numpy as np
 import pyarrow as pa
 import pytest
 
-from corvus_ml.features.config import FeatureConfig
+from corvus_ml.features.config import FeatureConfig, FeaturizerConfig
+from corvus_ml.features.constants import PACKET_CLIENT_TICK_END, TOKEN_NAMES
+from corvus_ml.features.featurizer import SessionFeaturizer
+from corvus_ml.features.frames import Frame as CoreFrame
 from corvus_ml.features.reader import EventReader, dedup_sorted, open_dataset
-from corvus_ml.features.schema import PACKET_CLIENT_TICK_END
 from corvus_ml.features.segments import SegmentMap
-from corvus_ml.features.tokens import extract_tokens, target_geometry, wrap_degrees
-from corvus_ml.features.windows import window_bounds
+from corvus_ml.features.tokens import TokenExtractor, target_geometry, wrap_degrees
 from lake_builders import (  # noqa: I001
     Frame,
     attack,
@@ -25,32 +26,54 @@ from lake_builders import (  # noqa: I001
 VOCAB = Path(__file__).parents[2] / "proto/corvus/capture/v1/vocabulary.json"
 
 
-def frame_cols(frames: list[Frame]) -> dict[str, np.ndarray]:
-    """Frame columns the way the pipeline hands them to extract_tokens."""
+def core_frame(f: Frame) -> CoreFrame:
+    """A lake_builders row as the featurizer's input record."""
     nan = float("nan")
-    return {
-        "seq": np.array([f.seq for f in frames], dtype=np.uint64),
-        "offset_nanos": np.array([int(f.t_ms * 1_000_000) for f in frames], dtype=np.uint64),
-        "direction": np.array([f.direction for f in frames], dtype=np.uint8),
-        "packet_type": np.array([f.packet_type for f in frames], dtype=np.uint32),
-        "event_kind": np.array([f.event_kind for f in frames], dtype=np.uint8),
-        "has_position": np.array([bool(f.has_position) for f in frames]),
-        "has_rotation": np.array([bool(f.has_rotation) for f in frames]),
-        "on_ground": np.array(
-            [-1 if f.on_ground is None else int(f.on_ground) for f in frames], dtype=np.int8
-        ),
-        "x": np.array([nan if f.xyz is None else f.xyz[0] for f in frames]),
-        "y": np.array([nan if f.xyz is None else f.xyz[1] for f in frames]),
-        "z": np.array([nan if f.xyz is None else f.xyz[2] for f in frames]),
-        "yaw": np.array([nan if f.yaw is None else f.yaw for f in frames]),
-        "pitch": np.array([nan if f.pitch is None else f.pitch for f in frames]),
-        "entity_id": np.array([-1 if f.entity_id is None else f.entity_id for f in frames]),
-        "action": np.array([0 if f.action is None else f.action for f in frames], dtype=np.uint8),
-    }
+    return CoreFrame(
+        segment=f.segment,
+        seq=f.seq,
+        offset_nanos=int(f.t_ms * 1_000_000),
+        direction=f.direction,
+        packet_type=f.packet_type,
+        event_kind=f.event_kind,
+        has_position=bool(f.has_position),
+        has_rotation=bool(f.has_rotation),
+        on_ground=f.on_ground,
+        x=nan if f.xyz is None else f.xyz[0],
+        y=nan if f.xyz is None else f.xyz[1],
+        z=nan if f.xyz is None else f.xyz[2],
+        yaw=nan if f.yaw is None else f.yaw,
+        pitch=nan if f.pitch is None else f.pitch,
+        entity_id=-1 if f.entity_id is None else f.entity_id,
+        action=0 if f.action is None else f.action,
+    )
 
 
-def tokens_of(frames: list[Frame], **cfg):
-    return extract_tokens(frame_cols(frames), FeatureConfig(**cfg))
+class Tokens:
+    """Token rows of the serverbound frames, addressable by feature name."""
+
+    def __init__(self, matrix: np.ndarray) -> None:
+        self.features = {name: matrix[:, i] for i, name in enumerate(TOKEN_NAMES)}
+
+
+def tokens_of(frames: list[Frame], **cfg) -> Tokens:
+    ext = TokenExtractor(FeaturizerConfig(**cfg))
+    rows = []
+    for f in frames:
+        row = np.zeros(len(TOKEN_NAMES), dtype=np.float32)
+        if ext.step(core_frame(f), row):
+            rows.append(row)
+    return Tokens(np.array(rows, dtype=np.float32).reshape(-1, len(TOKEN_NAMES)))
+
+
+def windows_of(n: int, step_ms: float = 1.0, **cfg) -> list[tuple[int, int, str]]:
+    """(first frame, end frame exclusive, cut) of the windows over n equally spaced frames."""
+    fz = SessionFeaturizer(sid(1), FeaturizerConfig(**cfg))
+    out = []
+    for i in range(n):
+        out.extend(fz.feed(core_frame(Frame(i, i * step_ms))))
+    out.extend(fz.flush())
+    return [(w.first_seq, w.last_seq + 1, w.cut) for w in out]
 
 
 def test_vocabulary_id_of_client_tick_end_matches_contract():
@@ -178,34 +201,28 @@ def test_entity_cache_is_bounded_lru():
     assert f["target_dist"][2] > 0  # entity 4 is known
 
 
-def ms_offsets(values_ms) -> np.ndarray:
-    return (np.asarray(values_ms, dtype=np.float64) * 1e6).astype(np.uint64)
-
-
 def test_stride_and_overlap_math():
-    cfg = FeatureConfig(window=4, overlap=0.5, min_frames=1)
-    bounds = window_bounds(ms_offsets(range(10)), cfg)
-    assert [(w.lo, w.hi) for w in bounds] == [(0, 4), (2, 6), (4, 8), (6, 10)]
+    got = windows_of(10, window=4, overlap=0.5, min_frames=1)
+    assert [(lo, hi) for lo, hi, _ in got] == [(0, 4), (2, 6), (4, 8), (6, 10)]
 
 
 def test_zero_overlap_tiles_without_gaps():
-    cfg = FeatureConfig(window=4, overlap=0.0, min_frames=1)
-    bounds = window_bounds(ms_offsets(range(10)), cfg)
-    assert [(w.lo, w.hi, w.cut) for w in bounds] == [(0, 4, "full"), (4, 8, "full"), (8, 10, "end")]
+    assert windows_of(10, window=4, overlap=0.0, min_frames=1) == [
+        (0, 4, "full"),
+        (4, 8, "full"),
+        (8, 10, "end"),
+    ]
 
 
 def test_short_tail_below_min_frames_is_dropped():
-    cfg = FeatureConfig(window=4, overlap=0.0, min_frames=3)
-    bounds = window_bounds(ms_offsets(range(10)), cfg)
-    assert [(w.lo, w.hi) for w in bounds] == [(0, 4), (4, 8)]
+    got = windows_of(10, window=4, overlap=0.0, min_frames=3)
+    assert [(lo, hi) for lo, hi, _ in got] == [(0, 4), (4, 8)]
 
 
 def test_max_duration_cuts_window_before_n_frames():
-    cfg = FeatureConfig(window=100, overlap=0.5, max_duration_s=30.0, min_frames=1)
-    offsets = ms_offsets([i * 10_000 for i in range(8)])  # every 10 s
-    bounds = window_bounds(offsets, cfg)
-    assert (bounds[0].lo, bounds[0].hi, bounds[0].cut) == (0, 4, "duration")  # 0..30 s inclusive
-    assert bounds[1].lo == 2
+    got = windows_of(8, step_ms=10_000, window=100, overlap=0.5, max_duration_s=30.0, min_frames=1)
+    assert got[0] == (0, 4, "duration")  # 0..30 s inclusive
+    assert got[1][0] == 2
 
 
 def test_config_rejects_bad_overlap():

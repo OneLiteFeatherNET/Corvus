@@ -14,17 +14,24 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from corvus_ml.features.config import FeatureConfig, S3Config
+from corvus_ml.features.constants import (
+    AGGREGATE_NAMES,
+    DIRECTION_SERVERBOUND,
+    NULLABLE_AGGREGATES,
+    PACKET_CLIENT_TICK_END,
+    TOKEN_INDEX,
+)
+from corvus_ml.features.featurizer import CompletedWindow, SessionFeaturizer
+from corvus_ml.features.frames import Frame
 from corvus_ml.features.reader import EventReader, open_dataset
 from corvus_ml.features.schema import (
-    PACKET_CLIENT_TICK_END,
     SESSION_ID_TYPE,
     TOKEN_FEATURES,
     WINDOW_TOKENS_SCHEMA,
     WINDOWS_SCHEMA,
 )
 from corvus_ml.features.segments import SegmentMap
-from corvus_ml.features.tokens import TokenArrays, extract_tokens
-from corvus_ml.features.windows import aggregates, window_bounds
+from corvus_ml.features.spec import FeatureSpec
 
 WINDOWS_DIR = "windows"
 TOKENS_DIR = "window_tokens"
@@ -103,56 +110,80 @@ class _Sink:
             self._writer.close()
 
 
-def _window_rows(
-    sid: bytes,
-    segment: int,
-    context: str,
-    first_index: int,
-    tokens: TokenArrays,
-    cfg: FeatureConfig,
-) -> tuple[pa.Table, pa.Table] | None:
-    """Windows + token rows of one segment run."""
-    bounds = window_bounds(tokens.offset_nanos, cfg)
-    if not bounds:
-        return None
-    has_tick = bool((tokens.features["packet_type"] == PACKET_CLIENT_TICK_END).any())
-    aggs = [aggregates(tokens, w, has_tick) for w in bounds]
-    n = len(bounds)
-    idx = np.arange(first_index, first_index + n, dtype=np.uint32)
-    lo = np.array([w.lo for w in bounds])
-    hi = np.array([w.hi for w in bounds])
-    sizes = hi - lo
+def _frames(run: dict[str, np.ndarray]) -> Iterator[Frame]:
+    """The rows of one segment run as featurizer input records."""
+    return map(
+        Frame,
+        run["segment"].tolist(),
+        run["seq"].tolist(),
+        run["offset_nanos"].tolist(),
+        run["direction"].tolist(),
+        run["packet_type"].tolist(),
+        run["event_kind"].tolist(),
+        run["has_position"].tolist(),
+        run["has_rotation"].tolist(),
+        run["on_ground"].tolist(),
+        run["x"].tolist(),
+        run["y"].tolist(),
+        run["z"].tolist(),
+        run["yaw"].tolist(),
+        run["pitch"].tolist(),
+        run["entity_id"].tolist(),
+        run["action"].tolist(),
+    )
+
+
+def window_tables(
+    sid: bytes, context: str, windows: Sequence[CompletedWindow]
+) -> tuple[pa.Table, pa.Table]:
+    """Arrow rows of the completed windows of one segment run."""
+    n = len(windows)
+    sizes = np.array([w.n_frames for w in windows], dtype=np.int64)
+    idx = np.array([w.window_index for w in windows], dtype=np.uint32)
+    segments = np.array([w.segment for w in windows], dtype=np.uint32)
+    aggs = np.stack([w.aggregates for w in windows])
     win_cols: dict[str, pa.Array] = {
         "session_id": pa.array([sid] * n, SESSION_ID_TYPE),
-        "segment": pa.array(np.full(n, segment, dtype=np.uint32)),
+        "segment": pa.array(segments),
         "game_context": pa.array([context] * n, pa.string()),
         "window_index": pa.array(idx),
-        "start_offset_nanos": pa.array(tokens.offset_nanos[lo]),
-        "end_offset_nanos": pa.array(tokens.offset_nanos[hi - 1]),
-        "first_seq": pa.array(tokens.seq[lo]),
-        "last_seq": pa.array(tokens.seq[hi - 1]),
+        "start_offset_nanos": pa.array(
+            np.array([w.start_offset_nanos for w in windows], dtype=np.uint64)
+        ),
+        "end_offset_nanos": pa.array(
+            np.array([w.end_offset_nanos for w in windows], dtype=np.uint64)
+        ),
+        "first_seq": pa.array(np.array([w.first_seq for w in windows], dtype=np.uint64)),
+        "last_seq": pa.array(np.array([w.last_seq for w in windows], dtype=np.uint64)),
         "n_frames": pa.array(sizes.astype(np.uint32)),
-        "cut": pa.array([w.cut for w in bounds], pa.string()),
+        "cut": pa.array([w.cut for w in windows], pa.string()),
     }
-    for name in aggs[0]:
-        win_cols[name] = pa.array([a[name] for a in aggs], pa.float64())
-    windows = pa.table(win_cols, schema=WINDOWS_SCHEMA)
+    for col, name in enumerate(AGGREGATE_NAMES):
+        values = aggs[:, col]
+        mask = np.isnan(values) if name in NULLABLE_AGGREGATES else None
+        win_cols[name] = pa.array(values, pa.float64(), mask=mask)
+    table_w = pa.table(win_cols, schema=WINDOWS_SCHEMA)
 
-    frame_idx = np.concatenate(
-        [np.arange(a, b) for a, b in zip(lo.tolist(), hi.tolist(), strict=True)]
-    )
-    total = len(frame_idx)
+    total = int(sizes.sum())
+    matrix = np.concatenate([w.tokens for w in windows])
+    starts = np.repeat(np.cumsum(sizes) - sizes, sizes)
     tok_cols: dict[str, pa.Array] = {
         "session_id": pa.array([sid] * total, SESSION_ID_TYPE),
-        "segment": pa.array(np.full(total, segment, dtype=np.uint32)),
+        "segment": pa.array(np.repeat(segments, sizes)),
         "window_index": pa.array(np.repeat(idx, sizes)),
-        "pos": pa.array((frame_idx - np.repeat(lo, sizes)).astype(np.uint16)),
-        "seq": pa.array(tokens.seq[frame_idx]),
-        "offset_nanos": pa.array(tokens.offset_nanos[frame_idx]),
+        "pos": pa.array((np.arange(total) - starts).astype(np.uint16)),
+        "seq": pa.array(np.concatenate([w.token_seq for w in windows])),
+        "offset_nanos": pa.array(np.concatenate([w.token_offset_nanos for w in windows])),
     }
     for name, typ in TOKEN_FEATURES:
-        tok_cols[name] = pa.array(tokens.features[name][frame_idx], typ)
-    return windows, pa.table(tok_cols, schema=WINDOW_TOKENS_SCHEMA)
+        column = matrix[:, TOKEN_INDEX[name]]
+        tok_cols[name] = pa.array(column.astype(typ.to_pandas_dtype()), typ)
+    return table_w, pa.table(tok_cols, schema=WINDOW_TOKENS_SCHEMA)
+
+
+def _run_has_tick_end(run: dict[str, np.ndarray]) -> bool:
+    serverbound = run["direction"] == DIRECTION_SERVERBOUND
+    return bool(((run["packet_type"] == PACKET_CLIENT_TICK_END) & serverbound).any())
 
 
 def build_group(
@@ -183,21 +214,25 @@ def build_group(
             contexts = segmap.by_session.get(sid, {})
             cols = _frame_columns(tables[sid])
             n_sessions += 1
-            counters: dict[int, int] = {}
+            featurizer = SessionFeaturizer(sid, cfg)
             for segment, lo, hi in _segment_runs(cols["segment"]):
                 context = contexts.get(segment)
                 if context is None:
                     continue
                 run = {k: v[lo:hi] for k, v in cols.items()}
-                tokens = extract_tokens(run, cfg)
-                n_frames += len(tokens)
-                rows = _window_rows(sid, segment, context, counters.get(segment, 0), tokens, cfg)
-                if rows is None:
+                n_frames += int((run["direction"] == DIRECTION_SERVERBOUND).sum())
+                # The offline run knows whether the whole segment sends tick end; online it cannot.
+                featurizer.begin_segment(segment, tick_end=_run_has_tick_end(run))
+                completed: list[CompletedWindow] = []
+                for frame in _frames(run):
+                    completed.extend(featurizer.feed(frame))
+                completed.extend(featurizer.flush())
+                if not completed:
                     continue
-                counters[segment] = counters.get(segment, 0) + rows[0].num_rows
-                n_windows += rows[0].num_rows
-                pending_w.append(rows[0])
-                pending_t.append(rows[1])
+                table_w, table_t = window_tables(sid, context, completed)
+                n_windows += table_w.num_rows
+                pending_w.append(table_w)
+                pending_t.append(table_t)
                 if sum(t.num_rows for t in pending_w) >= cfg.flush_windows:
                     flush()
         flush()
@@ -246,6 +281,9 @@ def build(
     groups = make_groups(segmap.sessions(), group_size)
     tasks = list(enumerate(groups))
     out_dir.mkdir(parents=True, exist_ok=True)
+    # Lets the evaluation harness (and, via the model export, the scorer) know how these windows
+    # were cut and validate the feature definitions.
+    FeatureSpec.current(cfg.featurizer()).write(out_dir)
     if workers <= 1 or len(tasks) <= 1:
         reader = EventReader(open_dataset(events, s3), cfg.batch_rows)
         return [build_group(reader, segmap, cfg, i, ids, out_dir) for i, ids in tasks]

@@ -1,6 +1,19 @@
 # corvus-ml
 
-Python tooling for Corvus. Currently: the pilot capture analyzer.
+Python tooling for Corvus: the pilot capture analyzer, the feature stage and the model evaluation
+harness.
+
+The core install needs only numpy, pyarrow and protobuf (plus grpcio-tools for the bindings).
+torch, scikit-learn, onnx and skl2onnx live in the optional extra `eval`; ONNX Runtime is in `eval`
+and in `serve`. In this checkout `uv sync` installs the `eval` extra through the `dev` group, so
+tests and CI (`uv sync --locked`) cover everything. Outside the repo:
+
+```
+pip install corvus-ml                # features, pilot analyzer, FeatureSpec, model-input adapter
+pip install 'corvus-ml[eval]'        # + corvus-eval (training, ONNX export, benchmark)
+pip install 'corvus-ml[serve]'       # + onnxruntime for the scoring service
+uv sync --no-default-groups          # in this checkout: core install only
+```
 
 ```
 uv sync
