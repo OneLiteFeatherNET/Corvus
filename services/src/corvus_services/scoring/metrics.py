@@ -106,6 +106,35 @@ class ScoreMetrics:
         self.write_queue = Gauge(
             "corvus_score_write_queue", "Score rows waiting to be written", ["kind"], registry=r
         )
+        self.model_window_max_packets = Gauge(
+            "corvus_score_model_window_max_packets",
+            "Packet cap per window of a loaded raw-byte model",
+            ["model"],
+            registry=r,
+        )
+        self.model_window_seconds = Gauge(
+            "corvus_score_model_window_seconds",
+            "Window length in seconds of a loaded raw-byte model",
+            ["model"],
+            registry=r,
+        )
+        self.model_estimated_p99_ms = Gauge(
+            "corvus_score_model_estimated_p99_ms",
+            "Estimated p99 latency of one full window of a raw-byte model (default-size model)",
+            ["model"],
+            registry=r,
+        )
+        self.raw_window_packets = Histogram(
+            "corvus_score_raw_window_packets",
+            "Packets per raw-byte window handed to the models",
+            buckets=(8, 16, 32, 64, 128, 256, 512, 1024, 2048),
+            registry=r,
+        )
+        self.raw_frames_dropped = Counter(
+            "corvus_score_raw_frames_dropped_total",
+            "Buffered raw-byte frames dropped because a window buffer was full",
+            registry=r,
+        )
         self.pending_windows = Gauge(
             "corvus_score_pending_windows", "Windows waiting for a micro-batch", registry=r
         )

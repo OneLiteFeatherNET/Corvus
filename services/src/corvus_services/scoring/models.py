@@ -17,18 +17,23 @@ import shutil
 import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import numpy as np
 from corvus_ml.features.config import FeaturizerConfig
 from corvus_ml.features.spec import SPEC_FILE, FeatureSpec, FeatureSpecError
+from corvus_ml.raw.spec import TOKENIZER_FILE, RawBytesSpec
+from corvus_ml.raw.tokenizer import RawTokenizer
 
 from .metrics import ScoreMetrics
 from .ports import ModelEntry, ModelFiles, ModelSession, ScoreCatalog, SessionFactory
+from .raw import budget_warning, estimate_p99_ms
 
 log = logging.getLogger("corvus.score.models")
 
-InputKind = Literal["agg", "seq"]
+InputKind = Literal["agg", "seq", "raw_bytes"]
+FEATURE_KINDS = ("agg", "seq")
+RAW_KIND = "raw_bytes"
 ONNX_FILE = "model.onnx"
 
 
@@ -68,6 +73,45 @@ def input_kind_of(shape: tuple[int | str | None, ...], spec: FeatureSpec) -> Inp
             )
         return "seq"
     raise ModelRejectedError(f"unsupported model input shape {shape}")
+
+
+def check_raw_shape(shape: tuple[int | str | None, ...], raw: RawBytesSpec) -> None:
+    """The ONNX input of a raw-byte model: ``(batch, [macro,] packets, max_tokens + 1)``."""
+    rank = 4 if raw.window.macro_windows > 1 else 3
+    if len(shape) != rank:
+        raise ModelRejectedError(
+            f"raw-byte model input has rank {len(shape)}, the spec (macro windows "
+            f"{raw.window.macro_windows}) needs rank {rank}"
+        )
+    channels = shape[-1]
+    want = raw.packet.max_tokens_per_packet + 1
+    if isinstance(channels, int) and channels != want:
+        raise ModelRejectedError(f"model takes {channels} channels, the spec has {want}")
+    if rank == 4 and isinstance(shape[1], int) and shape[1] != raw.window.macro_windows:
+        raise ModelRejectedError(
+            f"model takes {shape[1]} macro windows, the spec has {raw.window.macro_windows}"
+        )
+
+
+def declared_kind(card: dict[str, object] | None, spec: FeatureSpec) -> InputKind | None:
+    """The input kind the model declares: ``model_card.json`` ``input_kind``, else ``raw_bytes``
+    if the feature spec has a ``raw_bytes`` section, else None (legacy: decided by the ONNX rank).
+
+    A raw-byte spec and a card that name different kinds are rejected: the ONNX rank alone cannot
+    tell a token-sequence model from a raw-byte one (both feed a 3-D tensor).
+    """
+    declared = card.get("input_kind") if isinstance(card, dict) else None
+    if declared is not None and declared not in (*FEATURE_KINDS, RAW_KIND):
+        raise ModelRejectedError(f"model card declares unknown input_kind {declared!r}")
+    if declared == RAW_KIND and spec.raw_bytes is None:
+        raise ModelRejectedError("model card says raw_bytes but feature_spec.json has no raw_bytes")
+    if declared in FEATURE_KINDS and spec.raw_bytes is not None:
+        raise ModelRejectedError(
+            f"model card says {declared} but feature_spec.json describes a raw-byte model"
+        )
+    if declared is not None:
+        return cast(InputKind, declared)
+    return "raw_bytes" if spec.raw_bytes is not None else None
 
 
 CALIBRATED_SUFFIX = "_calibrated"
@@ -140,10 +184,16 @@ class LoadedModel:
     input_kind: InputKind
     intra_op_threads: int
     semantics: OutputSemantics = field(default_factory=OutputSemantics)
+    tokenizer: RawTokenizer | None = None  # raw-byte models only
 
     @property
     def id(self) -> str:
         return self.entry.id
+
+    @property
+    def raw_spec(self) -> RawBytesSpec | None:
+        """The tokenization and windowing contract of a raw-byte model, else None."""
+        return self.spec.raw_bytes if self.input_kind == RAW_KIND else None
 
     @property
     def window(self) -> FeaturizerConfig:
@@ -156,13 +206,20 @@ class ModelSet:
 
     models: tuple[LoadedModel, ...] = ()
     _by_context: dict[str, tuple[LoadedModel, ...]] = field(default_factory=dict, compare=False)
+    _raw_by_context: dict[str, dict[RawBytesSpec, RawTokenizer]] = field(
+        default_factory=dict, compare=False
+    )
 
     @classmethod
     def of(cls, models: list[LoadedModel]) -> ModelSet:
         by_context: dict[str, list[LoadedModel]] = {}
         for m in models:
             by_context.setdefault(m.entry.game_context, []).append(m)
-        return cls(tuple(models), {k: tuple(v) for k, v in by_context.items()})
+        raw: dict[str, dict[RawBytesSpec, RawTokenizer]] = {}
+        for m in models:
+            if m.raw_spec is not None and m.tokenizer is not None:
+                raw.setdefault(m.entry.game_context, {}).setdefault(m.raw_spec, m.tokenizer)
+        return cls(tuple(models), {k: tuple(v) for k, v in by_context.items()}, raw)
 
     def __len__(self) -> int:
         return len(self.models)
@@ -171,15 +228,32 @@ class ModelSet:
         return self._by_context.get(game_context, ())
 
     def configs_for(self, game_context: str) -> frozenset[FeaturizerConfig]:
-        return frozenset(m.window for m in self.for_context(game_context))
+        """Featurizer windows of the aggregate / token-sequence models (raw-byte ones have their
+        own windowing, see :meth:`raw_specs_for`)."""
+        return frozenset(m.window for m in self.for_context(game_context) if m.raw_spec is None)
 
-    def matching(self, game_context: str, window: FeaturizerConfig) -> list[LoadedModel]:
-        return [m for m in self.for_context(game_context) if m.window == window]
+    def raw_specs_for(self, game_context: str) -> dict[RawBytesSpec, RawTokenizer]:
+        """Distinct raw-byte windowings of the context with the tokenizer that serves them."""
+        return self._raw_by_context.get(game_context, {})
+
+    def matching(
+        self, game_context: str, window: FeaturizerConfig | RawBytesSpec
+    ) -> list[LoadedModel]:
+        if isinstance(window, RawBytesSpec):
+            return [m for m in self.for_context(game_context) if m.raw_spec == window]
+        return [
+            m for m in self.for_context(game_context) if m.raw_spec is None and m.window == window
+        ]
 
 
 def card_key(onnx_key: str) -> str:
     """The ``model_card.json`` next to the ONNX file."""
     return posixpath.join(posixpath.dirname(onnx_key), MODEL_CARD_FILE)
+
+
+def tokenizer_key(onnx_key: str) -> str:
+    """The ``tokenizer.json`` of a raw-byte model (uploaded next to the ONNX file)."""
+    return posixpath.join(posixpath.dirname(onnx_key), TOKENIZER_FILE)
 
 
 def spec_key(onnx_key: str) -> str:
@@ -203,6 +277,7 @@ class ModelManager:
         cache_dir: Path,
         cpus: int,
         metrics: ScoreMetrics,
+        p99_budget_ms: float | None = None,
     ) -> None:
         self._catalog = catalog
         self._files = files
@@ -210,6 +285,7 @@ class ModelManager:
         self._cache = cache_dir
         self._cpus = max(1, cpus)
         self._m = metrics
+        self._budget_ms = p99_budget_ms
         self.current = ModelSet()
         self._rejected: set[tuple[str, str]] = set()  # (model id, onnx_key) that can never load
         self.last_sync_ok = False
@@ -290,23 +366,71 @@ class ModelManager:
         return await asyncio.to_thread(self._open, entry, directory, intra)
 
     def _open(self, entry: ModelEntry, directory: Path, intra: int) -> LoadedModel:
+        card = self._read_card(directory)
         try:
-            spec = FeatureSpec.load(directory / SPEC_FILE)
+            spec = FeatureSpec.load(directory / SPEC_FILE, require_tokenizer=True)
+            kind = declared_kind(card, spec)
         except FeatureSpecError as e:
             raise ModelRejectedError(str(e)) from e
+        tokenizer = self._open_tokenizer(directory, spec, card) if spec.raw_bytes else None
         try:
             session = self._factory(directory / ONNX_FILE, intra)
         except Exception as e:
             raise ModelRejectedError(f"ONNX Runtime cannot load the model: {e}") from e
-        card = self._read_card(directory)
+        if spec.raw_bytes is not None:
+            check_raw_shape(session.input_shape, spec.raw_bytes)
+            input_kind: InputKind = "raw_bytes"
+            self._warn_budget(entry, spec.raw_bytes, intra)
+        else:
+            input_kind = input_kind_of(session.input_shape, spec)
+            if kind is not None and kind != input_kind:
+                raise ModelRejectedError(
+                    f"model card says {kind}, the ONNX input {session.input_shape} is {input_kind}"
+                )
         return LoadedModel(
             entry,
             spec,
             session,
-            input_kind_of(session.input_shape, spec),
+            input_kind,
             intra,
             output_semantics(entry.candidate_type, card),
+            tokenizer,
         )
+
+    @staticmethod
+    def _open_tokenizer(
+        directory: Path, spec: FeatureSpec, card: dict[str, object] | None
+    ) -> RawTokenizer:
+        """``tokenizer.json`` validated against the spec (hash, vocabulary size, layout)."""
+        raw = spec.raw_bytes
+        assert raw is not None
+        tok_card = card.get("tokenizer") if isinstance(card, dict) else None
+        if isinstance(tok_card, dict) and tok_card.get("sha256") not in (
+            None,
+            raw.tokenizer_sha256,
+        ):
+            raise ModelRejectedError(
+                f"model card names tokenizer {tok_card.get('sha256')}, "
+                f"the spec {raw.tokenizer_sha256}"
+            )
+        try:
+            return RawTokenizer.load(directory, raw)
+        except FeatureSpecError as e:
+            raise ModelRejectedError(str(e)) from e
+        except Exception as e:
+            raise ModelRejectedError(f"tokenizer.json cannot be loaded: {e}") from e
+
+    def _warn_budget(self, entry: ModelEntry, raw: RawBytesSpec, intra: int) -> None:
+        anomaly = entry.candidate_type.startswith("raw_hier_anomaly")
+        name = f"{entry.name}:{entry.version}"
+        self._m.model_estimated_p99_ms.labels(name).set(
+            estimate_p99_ms(raw.window.max_packets, intra, anomaly=anomaly)
+        )
+        message = budget_warning(
+            name, raw.window.max_packets, intra, self._budget_ms, anomaly=anomaly
+        )
+        if message is not None:
+            log.warning(message)
 
     @staticmethod
     def _read_card(directory: Path) -> dict[str, object] | None:
@@ -326,10 +450,28 @@ class ModelManager:
             card: bytes | None = await self._files.get(card_key(entry.onnx_key))
         except Exception:
             card = None
-        await asyncio.to_thread(self._publish_dir, final, onnx, spec, card)
+        tokenizer = None
+        if self._needs_tokenizer(spec, card):
+            tokenizer = await self._files.get(tokenizer_key(entry.onnx_key))
+        await asyncio.to_thread(self._publish_dir, final, onnx, spec, card, tokenizer)
         return final
 
-    def _publish_dir(self, final: Path, onnx: bytes, spec: bytes, card: bytes | None) -> None:
+    @staticmethod
+    def _needs_tokenizer(spec: bytes, card: bytes | None) -> bool:
+        """Raw-byte models ship ``tokenizer.json``; anything unparsable is left to validation."""
+        try:
+            card_doc = json.loads(card) if card is not None else None
+            spec_doc = json.loads(spec)
+        except ValueError:
+            return False
+        if isinstance(card_doc, dict) and card_doc.get("input_kind") == RAW_KIND:
+            return True
+        inputs = spec_doc.get("model_inputs") if isinstance(spec_doc, dict) else None
+        return isinstance(inputs, dict) and isinstance(inputs.get("raw_bytes"), dict)
+
+    def _publish_dir(
+        self, final: Path, onnx: bytes, spec: bytes, card: bytes | None, tokenizer: bytes | None
+    ) -> None:
         self._cache.mkdir(parents=True, exist_ok=True)
         tmp = self._cache / f".{final.name}.{uuid.uuid4().hex}.tmp"
         tmp.mkdir()
@@ -338,6 +480,8 @@ class ModelManager:
             (tmp / SPEC_FILE).write_bytes(spec)
             if card is not None:
                 (tmp / MODEL_CARD_FILE).write_bytes(card)
+            if tokenizer is not None:
+                (tmp / TOKENIZER_FILE).write_bytes(tokenizer)
             shutil.rmtree(final, ignore_errors=True)
             os.replace(tmp, final)
         finally:
@@ -354,3 +498,10 @@ class ModelManager:
         for stage in ("shadow", "canary", "enforce"):
             n = sum(1 for m in self.current.models if m.entry.stage == stage)
             self._m.models_loaded.labels(stage).set(n)
+        self._m.model_window_max_packets.clear()
+        self._m.model_window_seconds.clear()
+        for m in self.current.models:
+            if m.raw_spec is not None:
+                name = f"{m.entry.name}:{m.entry.version}"
+                self._m.model_window_max_packets.labels(name).set(m.raw_spec.window.max_packets)
+                self._m.model_window_seconds.labels(name).set(m.raw_spec.window.window_seconds)

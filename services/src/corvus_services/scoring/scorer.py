@@ -11,6 +11,7 @@ from concurrent.futures import Executor
 from dataclasses import dataclass
 
 import numpy as np
+from corvus_ml.features.featurizer import CompletedWindow
 from corvus_ml.features.model_input import model_inputs
 
 from ..clock import Clock
@@ -18,6 +19,7 @@ from .batching import Batch, PendingWindow
 from .metrics import ScoreMetrics
 from .models import LoadedModel, ModelSet, scores_from_outputs
 from .ports import PUBLISHED_STAGES, ScorePublisher, ScoreRecord
+from .raw import RawWindow, stack_inputs
 from .score_proto import score_pb
 from .smoothing import EmaTracker
 from .writer import ScoreWriter
@@ -66,10 +68,26 @@ class _Hit:
     score: float
 
 
+def build_input(model: LoadedModel, windows: list[PendingWindow]) -> np.ndarray:
+    """The model's input tensor: stacked token windows for raw-byte models, else the feature
+    adapter shared with the evaluation harness."""
+    kind = model.input_kind
+    if kind == "raw_bytes":
+        raws = [w.window for w in windows if isinstance(w.window, RawWindow)]
+        if len(raws) != len(windows):
+            raise TypeError("a raw-byte model was handed a window that is not a raw window")
+        return stack_inputs(raws)
+    feats = [w.window for w in windows if isinstance(w.window, CompletedWindow)]
+    if len(feats) != len(windows):
+        raise TypeError(f"a {kind} model was handed a raw window")
+    x: np.ndarray = model_inputs(feats, kind, model.spec)
+    return x
+
+
 def infer(model: LoadedModel, windows: list[PendingWindow]) -> tuple[np.ndarray, float]:
     """Blocking: model input via the shared adapter, then ONNX Runtime. Runs in the thread pool."""
     started = time.perf_counter()
-    x = model_inputs([w.window for w in windows], model.input_kind, model.spec)
+    x = build_input(model, windows)
     outputs = model.session.run(x)
     scores = scores_from_outputs(
         model.entry.candidate_type,

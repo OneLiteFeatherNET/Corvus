@@ -235,29 +235,47 @@ class StreamWindow:
     n_packets: int  # before the max_packets cap
 
 
+def cut_window(
+    stream: PacketStream,
+    layout: TokenLayout,
+    packet: PacketConfig,
+    cfg: WindowConfig,
+    base: np.ndarray,
+    bound: tuple[int, int, int, int],
+) -> StreamWindow:
+    """The model rows of one window ``bound = (index, lo, hi, start_ns)`` of ``stream``.
+
+    ``base`` are the rows of the whole stream (``stream.rows``; with the protocol token on every
+    packet when ``proto_mode == "every"``). Shared by the offline cut and the online windower, so
+    both produce the same ids.
+    """
+    k, lo, hi, start = bound
+    T = packet.max_tokens_per_packet
+    idx = pick_packets(lo, hi, cfg.max_packets, cfg.overflow)
+    ids = base[idx].copy()
+    if packet.proto_mode == "first":
+        ids[0:1] = stream.rows(layout, T, layout.proto_id(stream.protocol), idx[:1])
+    time_s = ((stream.offset_ns[idx] - start) / _NS).astype(np.float32)
+    return StreamWindow(
+        k, start, start + int(round(cfg.window_seconds * _NS)), ids, time_s, hi - lo
+    )
+
+
+def base_rows(stream: PacketStream, layout: TokenLayout, packet: PacketConfig) -> np.ndarray:
+    """Rows of every packet of ``stream`` (protocol token only for ``proto_mode == "every"``)."""
+    proto = layout.proto_id(stream.protocol)
+    every = packet.proto_mode == "every"
+    return stream.rows(layout, packet.max_tokens_per_packet, proto if every else None, None)
+
+
 def stream_windows(
     stream: PacketStream, spec_layout: TokenLayout, packet: PacketConfig, cfg: WindowConfig
 ) -> list[StreamWindow]:
-    T = packet.max_tokens_per_packet
     bounds = window_bounds(stream.offset_ns, cfg)
     if not bounds:
         return []
-    proto = spec_layout.proto_id(stream.protocol)
-    every = packet.proto_mode == "every"
-    base = stream.rows(spec_layout, T, proto if every else None, None)
-    out = []
-    for k, lo, hi, start in bounds:
-        idx = pick_packets(lo, hi, cfg.max_packets, cfg.overflow)
-        ids = base[idx].copy()
-        if packet.proto_mode == "first":
-            ids[0:1] = stream.rows(spec_layout, T, proto, idx[:1])
-        time_s = ((stream.offset_ns[idx] - start) / _NS).astype(np.float32)
-        out.append(
-            StreamWindow(
-                k, start, start + int(round(cfg.window_seconds * _NS)), ids, time_s, hi - lo
-            )
-        )
-    return out
+    base = base_rows(stream, spec_layout, packet)
+    return [cut_window(stream, spec_layout, packet, cfg, base, b) for b in bounds]
 
 
 # --- dataset of windows --------------------------------------------------------------------------

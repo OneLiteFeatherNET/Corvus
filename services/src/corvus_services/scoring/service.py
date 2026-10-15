@@ -29,6 +29,7 @@ from .frames import feature_frame
 from .metrics import ScoreMetrics
 from .models import ModelSet
 from .ports import ScoreCatalog, SessionLookup
+from .raw import RawWindow, raw_frame
 from .scorer import Scorer
 from .sessions import ConfiguredWindow, SessionState, SessionTracker
 from .settings import ScoreSettings
@@ -133,6 +134,7 @@ class ScoringService:
             pseudonym=bytes(s.player_pseudonym),
             key_id=s.pseudonym_key_id,
             observed_protocol=s.observed_protocol_version,
+            client_protocol=s.client_protocol_version,
         )
         self._track(state)
 
@@ -159,14 +161,29 @@ class ScoringService:
         if state is None or b.segment not in state.segments:
             return self._unknown()
         game_context = state.segments[b.segment]
-        configs = self.model_set.configs_for(game_context)
-        if not configs:
+        models = self.model_set
+        configs = models.configs_for(game_context)
+        raw_specs = models.raw_specs_for(game_context)
+        if not configs and not raw_specs:
             self._m.messages.labels("no_model").inc()
             return False
-        frames = [feature_frame(sid, b.segment, f) for f in b.frames]
-        hint = tick_end_hint(state.observed_protocol, self._s.score_tick_end_min_protocol)
-        completed = state.feed(b.segment, frames, configs, hint)
-        self._m.frames_fed.inc(len(frames))
+        completed: list[ConfiguredWindow] = []
+        if configs:
+            frames = [feature_frame(sid, b.segment, f) for f in b.frames]
+            hint = tick_end_hint(state.observed_protocol, self._s.score_tick_end_min_protocol)
+            completed += state.feed(b.segment, frames, configs, hint)
+        if raw_specs:
+            # plaintext payloads: tokenized on arrival, only token ids stay in the windower
+            completed += state.feed_raw(
+                b.segment,
+                [raw_frame(f) for f in b.frames],
+                raw_specs,
+                game_context,
+                self._s.score_raw_max_buffered_frames,
+            )
+            self._m.raw_frames_dropped.inc(state.raw_frames_dropped)
+            state.raw_frames_dropped = 0
+        self._m.frames_fed.inc(len(b.frames))
         self._queue(state, completed)
         self._m.messages.labels("batch").inc()
         return False
@@ -209,6 +226,7 @@ class ScoringService:
             lookup.key_id,
             lookup.observed_protocol,
             dict(lookup.segments),
+            lookup.client_protocol,
         )
         self._track(state)
         return state
@@ -255,6 +273,8 @@ class ScoringService:
             if ctx is None:
                 self._m.windows_skipped.labels("no_context").inc()
                 continue
+            if isinstance(window, RawWindow):
+                self._m.raw_window_packets.observe(window.n_packets)
             items.append(PendingWindow(window, cfg, state.pseudonym, state.key_id, ctx))
         if completed:
             self._m.windows_completed.inc(len(completed))

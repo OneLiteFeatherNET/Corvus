@@ -231,12 +231,13 @@ The runner is selected with `CORVUS_API_JOB_RUNNER`:
 Contract with the job process, identical for both runners: arguments are the command followed by the job type; the
 environment carries `CORVUS_JOB_ID`, `CORVUS_JOB_TYPE`, `CORVUS_JOB_SNAPSHOT_ID` and `CORVUS_JOB_PARAMS` (JSON).
 
-### Scores (staff)
+### Scores (staff, data scientist)
 
-Read-only view of what `corvus-score` persisted (see [data-lake.md](data-lake.md) section 6). Role `staff` (and
-`admin`). The pseudonym is the 64-hex form (`POST /players/lookup` resolves a UUID); a malformed one is `422`.
-Scores of `shadow` models are visible here although they are never published. A player without scores yields an
-empty list, not `404`. Scores are informational, Corvus never sanctions players.
+Read-only view of what `corvus-score` persisted (see [data-lake.md](data-lake.md) section 6). Roles `staff`,
+`data_scientist` and `admin`. The pseudonym is the 64-hex form (`POST /players/lookup` resolves a UUID); a malformed
+one is `422`. Scores of `shadow` models are not validated and must not influence decisions about players: they are
+returned to `data_scientist` and `admin` only (also in the history, filtered before `limit` applies); `staff` sees
+`canary` and `enforce` scores. A player without scores yields an empty list, not `404`. Scores are informational, Corvus never sanctions players.
 
 | Method and path | Purpose |
 |---|---|

@@ -1,16 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { countOf, modelsPerStage, recent, runningJobs } from './dashboard'
+import { modelTotal, runningJobs, stageCounts } from './dashboard'
 import { formatMetric, METRICS, compareMetric, compareModels, metricValue, nextStages } from './metrics'
-import { compareQuery, distinctValues, filterModels, modelRef, parseModelRef } from './model-list'
+import { compareQuery, modelRef, parseModelRef } from './model-list'
 import { parseJobParams } from './job-params'
 import { readBasePath } from './base'
-import { countLabel } from './format'
-import type { Model } from '~/types'
-
-const m = (over: Partial<Model>): Model => ({
-  id: 'i', name: 'n', version: '1', candidate_type: 'gbm', game_context: 'bw', domain: 'movement', snapshot_id: 's',
-  metrics: {}, onnx_key: 'k', stage: 'registered', created_by: 'me', created_at: '2026-10-15T00:00:00Z', ...over,
-})
 
 describe('stage transitions offered by the UI', () => {
   it('offers the next stage and archive', () => {
@@ -62,24 +55,6 @@ describe('metrics', () => {
 })
 
 describe('model list helpers', () => {
-  const all = [
-    m({ id: '1', name: 'Alpha', game_context: 'bw', stage: 'enforce' }),
-    m({ id: '2', name: 'beta', game_context: 'sw', domain: 'combat', stage: 'shadow' }),
-  ]
-
-  it('filters by name, context, domain and stage', () => {
-    const base = { name: '', gameContext: '', domain: '', stage: '' }
-    expect(filterModels(all, base)).toHaveLength(2)
-    expect(filterModels(all, { ...base, name: 'ALP' }).map(x => x.id)).toEqual(['1'])
-    expect(filterModels(all, { ...base, gameContext: 'sw' }).map(x => x.id)).toEqual(['2'])
-    expect(filterModels(all, { ...base, domain: 'combat' }).map(x => x.id)).toEqual(['2'])
-    expect(filterModels(all, { ...base, stage: 'enforce' }).map(x => x.id)).toEqual(['1'])
-  })
-
-  it('lists distinct values sorted', () => {
-    expect(distinctValues(all, 'game_context')).toEqual(['bw', 'sw'])
-  })
-
   it('round-trips a name@version reference, including names with @', () => {
     expect(modelRef({ name: 'a', version: '1.0' })).toBe('a@1.0')
     expect(parseModelRef('a@b@1.0')).toEqual({ name: 'a@b', version: '1.0' })
@@ -90,21 +65,22 @@ describe('model list helpers', () => {
 })
 
 describe('dashboard helpers', () => {
-  it('counts per stage including empty ones', () => {
-    expect(modelsPerStage([{ stage: 'enforce' }, { stage: 'enforce' }, { stage: 'shadow' }])).toEqual({
-      registered: 0, shadow: 1, canary: 0, enforce: 2, archived: 0,
-    })
+  const summary = {
+    models_by_stage: { enforce: 2, shadow: 1 },
+    jobs_by_status: { queued: 1, running: 2, succeeded: 5, failed: 1 },
+  }
+
+  it('counts per stage including stages the summary leaves out', () => {
+    expect(stageCounts(summary)).toEqual({ registered: 0, shadow: 1, canary: 0, enforce: 2, archived: 0 })
   })
 
-  it('marks a count as partial when more pages exist', () => {
-    expect(countOf({ items: [1, 2], next_cursor: 'c' })).toEqual({ value: 2, partial: true })
-    expect(countLabel(200, true)).toBe('200+')
-    expect(countLabel(3, false)).toBe('3')
+  it('totals the models over all stages', () => {
+    expect(modelTotal(summary)).toBe(3)
   })
 
-  it('counts queued and running jobs and slices recent items', () => {
-    expect(runningJobs([{ status: 'queued' }, { status: 'running' }, { status: 'failed' }])).toBe(2)
-    expect(recent([1, 2, 3, 4, 5, 6, 7])).toHaveLength(5)
+  it('counts queued and running jobs', () => {
+    expect(runningJobs(summary)).toBe(3)
+    expect(runningJobs({ jobs_by_status: {} })).toBe(0)
   })
 })
 

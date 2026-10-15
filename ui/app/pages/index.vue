@@ -55,10 +55,13 @@
       <v-col v-if="can('players.manage')" cols="12" md="6">
         <v-card variant="flat" color="surface-container-low">
           <v-card-title class="text-title-large">{{ $t('dashboard.recentErasures') }}</v-card-title>
-          <v-card-subtitle class="text-wrap">{{ $t('players.localLogHint') }}</v-card-subtitle>
           <v-list bg-color="transparent">
-            <v-list-item v-for="e in erasures" :key="e.id" :title="`${shortPseudonym(e.pseudonym)}…`" :subtitle="`${formatDateTime(e.requested_at, locale)} · ${e.requested_by}`">
-              <template #append><v-chip size="small" label variant="tonal">{{ e.status }}</v-chip></template>
+            <v-list-item v-for="e in erasures" :key="e.id" :title="`${e.pseudonym_prefix}…`" :subtitle="formatDateTime(e.requested_at, locale)">
+              <template #append>
+                <v-chip size="small" label variant="tonal" :color="e.compaction_pending ? 'warning' : 'default'">
+                  {{ e.compaction_pending ? $t('dashboard.compactionPending') : $t('dashboard.compacted') }}
+                </v-chip>
+              </template>
             </v-list-item>
             <v-list-item v-if="!erasures.length" :title="$t('common.empty')" />
           </v-list>
@@ -69,26 +72,20 @@
 </template>
 
 <script setup lang="ts">
-import { countOf, modelsPerStage, recent, runningJobs, STAGES } from '~/lib/dashboard'
-import { shortPseudonym } from '~/lib/erasure'
-import { readErasureIds } from '~/lib/erasure-log'
-import { countLabel, formatDateTime, shortId, stageColor, stageIcon } from '~/lib/format'
-import type { Erasure, Job } from '~/types'
+import { modelTotal, runningJobs, STAGES, stageCounts as countStages } from '~/lib/dashboard'
+import { formatDateTime, formatNumber, shortId, stageColor, stageIcon } from '~/lib/format'
+import type { ErasureBrief, JobBrief } from '~/types'
 
 const { can } = useAuth()
 const { locale } = useI18n()
-const pools = usePools()
-const snapshots = useSnapshots()
-const jobs = useJobs()
-const models = useModels()
-const players = usePlayers()
+const summaryApi = useSummary()
 
 const loading = ref(false)
 const error = ref<Error | null>(null)
-const counts = reactive<Record<string, string>>({ pools: '–', snapshots: '–', running: '–', models: '–' })
+const counts = reactive<Record<string, string>>({ pools: '–', snapshots: '–', running: '–', models: '–', pending: '–' })
 const stageCounts = ref<Record<string, number>>({})
-const recentJobs = ref<Job[]>([])
-const erasures = ref<Erasure[]>([])
+const recentJobs = ref<JobBrief[]>([])
+const erasures = ref<ErasureBrief[]>([])
 
 interface Tile { key: string, to: string | { path: string, query: Record<string, string> }, value: string }
 const tiles = computed(() => {
@@ -97,48 +94,32 @@ const tiles = computed(() => {
   if (can('snapshots.read')) out.push({ key: 'snapshots', to: '/snapshots', value: counts.snapshots ?? '–' })
   if (can('jobs.read')) out.push({ key: 'runningJobs', to: { path: '/jobs', query: { status: 'running' } }, value: counts.running ?? '–' })
   if (can('models.read')) out.push({ key: 'models', to: '/models', value: counts.models ?? '–' })
+  if (can('players.manage')) out.push({ key: 'pendingErasures', to: '/players', value: counts.pending ?? '–' })
   return out
 })
 
+// One request replaces the former fan-out over every list endpoint.
 async function load() {
   loading.value = true
   error.value = null
-  const tasks: Array<Promise<void>> = []
-  const guard = (p: Promise<void>) => tasks.push(p.catch((e) => { error.value = e instanceof Error ? e : new Error(String(e)) }))
-
-  if (can('pools.read')) {
-    guard(pools.list({ limit: 200 }).then((p) => {
-      const c = countOf(p)
-      counts.pools = countLabel(c.value, c.partial)
-    }))
+  try {
+    const s = await summaryApi.get()
+    const n = (v: number) => formatNumber(v, locale.value)
+    counts.pools = n(s.pools)
+    counts.snapshots = n(s.snapshots)
+    counts.running = n(runningJobs(s))
+    counts.models = n(modelTotal(s))
+    counts.pending = n(s.pending_erasures)
+    stageCounts.value = countStages(s)
+    recentJobs.value = s.recent_jobs
+    erasures.value = s.recent_erasures
   }
-  if (can('snapshots.read')) {
-    guard(snapshots.list({ limit: 200 }).then((p) => {
-      const c = countOf(p)
-      counts.snapshots = countLabel(c.value, c.partial)
-    }))
+  catch (e) {
+    error.value = e instanceof Error ? e : new Error(String(e))
   }
-  if (can('jobs.read')) {
-    guard(jobs.list({ limit: 200 }).then((p) => {
-      counts.running = countLabel(runningJobs(p.items), p.next_cursor !== null)
-      recentJobs.value = recent(p.items)
-    }))
+  finally {
+    loading.value = false
   }
-  if (can('models.read')) {
-    guard(models.list({ limit: 200 }).then((p) => {
-      const c = countOf(p)
-      counts.models = countLabel(c.value, c.partial)
-      stageCounts.value = modelsPerStage(p.items)
-    }))
-  }
-  if (can('players.manage')) {
-    const ids = readErasureIds(localStorage).slice(0, 5)
-    guard(Promise.all(ids.map(id => players.erasure(id).catch(() => null))).then((rows) => {
-      erasures.value = rows.filter((r): r is Erasure => r !== null)
-    }))
-  }
-  await Promise.all(tasks)
-  loading.value = false
 }
 
 onMounted(load)

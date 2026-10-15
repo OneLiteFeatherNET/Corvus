@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -31,6 +32,8 @@ log = logging.getLogger("corvus.score")
 
 
 async def run(settings: ScoreSettings) -> None:
+    # The tokenizer's rayon pool would add threads outside the inference CPU budget.
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     replica = replica_index(settings.score_replica_index, settings.score_replicas)
     cpus = settings.score_cpus or default_workers()
     log.info(
@@ -51,6 +54,7 @@ async def run(settings: ScoreSettings) -> None:
         settings.score_models_dir,
         cpus,
         metrics,
+        settings.score_p99_budget_ms or None,
     )
     pool = ThreadPoolExecutor(max_workers=manager.pool_workers, thread_name_prefix="ort")
     writer = ScoreWriter(

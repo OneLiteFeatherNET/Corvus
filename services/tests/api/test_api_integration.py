@@ -363,10 +363,34 @@ async def test_erasure_deletes_the_players_scores_in_the_same_transaction(repos:
 
     await erase_player(repos.erasure, pseudonym, requested_by="it", now=NOW)
 
-    assert await repos.scores.latest(pseudonym) == []
-    assert await repos.scores.history(pseudonym, None, 10) == []
-    assert len(await repos.scores.latest(other)) == 1
-    assert len(await repos.scores.history(other, None, 10)) == 1
+    assert await repos.scores.latest(pseudonym, include_shadow=True) == []
+    assert await repos.scores.history(pseudonym, None, 10, include_shadow=True) == []
+    assert len(await repos.scores.latest(other, include_shadow=True)) == 1
+    assert len(await repos.scores.history(other, None, 10, include_shadow=True)) == 1
+
+
+async def test_shadow_scores_are_returned_only_on_request(repos: Repos, pool: Pool):
+    p = os.urandom(32)
+    async with pool.connection() as conn:
+        for stage, model in (("shadow", "a"), ("enforce", "b")):
+            await conn.execute(
+                "INSERT INTO corvus.scores_latest (pseudonym, game_context, domain, model_name,"
+                " model_version, stage, score, smoothed, windows, session_id, segment, updated_at)"
+                " VALUES (%s, 'it', 'move', %s, '1', %s, 0.5, 0.5, 1, %s, 0, %s)",
+                (p, model, stage, os.urandom(16), NOW),
+            )
+            await conn.execute(
+                "INSERT INTO corvus.score_history (pseudonym, session_id, segment, game_context,"
+                " domain, model_name, model_version, stage, score, smoothed, windows,"
+                " window_start_offset_nanos, window_end_offset_nanos, scored_at)"
+                " VALUES (%s, %s, 0, 'it', 'move', %s, '1', %s, 0.5, 0.5, 1, 0, 1, %s)",
+                (p, os.urandom(16), model, stage, NOW),
+            )
+
+    assert [r.stage for r in await repos.scores.latest(p)] == ["enforce"]
+    assert [r.stage for r in await repos.scores.history(p, None, 1)] == ["enforce"]
+    assert len(await repos.scores.latest(p, include_shadow=True)) == 2
+    assert len(await repos.scores.history(p, None, 10, include_shadow=True)) == 2
 
 
 async def test_erasure_requests_are_listed_newest_first_and_filtered(repos: Repos):

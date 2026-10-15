@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from corvus_ml.features.config import FeaturizerConfig
 from corvus_ml.features.featurizer import CompletedWindow, SessionFeaturizer
 from corvus_ml.features.frames import Frame
+from corvus_ml.raw.spec import RawBytesSpec
+from corvus_ml.raw.streaming import FrameEncoder, ModelWindow, RawFrame, SegmentWindower
 
 from ..clock import Clock
+from .raw import RawWindow
 
-type ConfiguredWindow = tuple[FeaturizerConfig, CompletedWindow]
+type ConfiguredWindow = tuple[FeaturizerConfig | RawBytesSpec, CompletedWindow | RawWindow]
 
 
 @dataclass
@@ -25,14 +28,20 @@ class SessionState:
     key_id: str
     observed_protocol: int
     segments: dict[int, str] = field(default_factory=dict)  # segment -> game_context
+    # the protocol the client speaks (``sessions.client_protocol``): the raw-byte models' [PROTO_*]
+    client_protocol: int | None = None
     last_seen: datetime = datetime.min.replace(tzinfo=UTC)
     # one incremental featurizer per distinct window configuration of the models in use
     _featurizers: dict[FeaturizerConfig, SessionFeaturizer] = field(default_factory=dict)
     _fz_segment: dict[FeaturizerConfig, int] = field(default_factory=dict)
+    # raw-byte models: one streaming windower per distinct windowing, for the current segment only
+    _raw: dict[RawBytesSpec, SegmentWindower] = field(default_factory=dict)
+    _raw_segment: int | None = None
+    raw_frames_dropped: int = 0  # buffered frames lost to the cap since the last ``take``
 
     def begin_segment(self, segment: int, tick_end: bool | None) -> list[ConfiguredWindow]:
         """Start ``segment`` in every featurizer; returns the tail windows of the previous run."""
-        out: list[ConfiguredWindow] = []
+        out: list[ConfiguredWindow] = self.flush_raw()
         for cfg, fz in self._featurizers.items():
             out.extend((cfg, w) for w in fz.begin_segment(segment, tick_end))
             self._fz_segment[cfg] = segment
@@ -59,9 +68,54 @@ class SessionState:
                 out.extend((cfg, w) for w in fz.feed(frame))
         return out
 
+    def feed_raw(
+        self,
+        segment: int,
+        frames: Sequence[RawFrame],
+        specs: Mapping[RawBytesSpec, FrameEncoder],
+        game_context: str,
+        max_buffered: int | None,
+    ) -> list[ConfiguredWindow]:
+        """Feed plaintext frames of ``segment`` to the windower of every raw-byte windowing in
+        ``specs``. Windows never cross a segment: a new segment first flushes the old windowers."""
+        out: list[ConfiguredWindow] = []
+        if self._raw_segment is not None and self._raw_segment != segment:
+            out.extend(self.flush_raw())
+        self._raw_segment = segment
+        for spec in [s for s in self._raw if s not in specs]:
+            del self._raw[spec]  # no model needs this windowing any more
+        for spec, tokenizer in specs.items():
+            w = self._raw.get(spec)
+            if w is None:
+                w = self._raw[spec] = SegmentWindower(
+                    spec,
+                    tokenizer,
+                    self.session_id,
+                    segment,
+                    game_context,
+                    self.client_protocol,
+                    max_buffered,
+                )
+            before = w.stats.dropped_overflow
+            out.extend((spec, self._to_raw(m)) for m in w.feed(frames))
+            self.raw_frames_dropped += w.stats.dropped_overflow - before
+        return out
+
+    def _to_raw(self, m: ModelWindow) -> RawWindow:
+        return RawWindow(self.session_id, m.segment, m.start_offset_nanos, m.end_offset_nanos, m.x)
+
+    def flush_raw(self) -> list[ConfiguredWindow]:
+        """Tail windows of the raw-byte windowers; frees their buffers."""
+        out: list[ConfiguredWindow] = [
+            (spec, self._to_raw(m)) for spec, w in self._raw.items() for m in w.flush()
+        ]
+        self._raw.clear()
+        self._raw_segment = None
+        return out
+
     def flush(self) -> list[ConfiguredWindow]:
         """Tail windows of every featurizer (session end or eviction); frees the featurizers."""
-        out: list[ConfiguredWindow] = []
+        out: list[ConfiguredWindow] = self.flush_raw()
         for cfg, fz in self._featurizers.items():
             out.extend((cfg, w) for w in fz.flush())
         self._featurizers.clear()
