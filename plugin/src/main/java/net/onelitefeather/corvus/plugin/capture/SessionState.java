@@ -18,6 +18,7 @@ public final class SessionState {
     private final AtomicLong droppedQueueFull = new AtomicLong();
     private final AtomicLong droppedPrivacy = new AtomicLong();
     private final AtomicLong listenerErrors = new AtomicLong();
+    private final AtomicLong droppedTransport = new AtomicLong();
     private volatile int segment;
     private volatile boolean closed;
     private volatile boolean multiChannelLogged;
@@ -86,6 +87,19 @@ public final class SessionState {
         droppedPrivacy.incrementAndGet();
     }
 
+    /** Adds frames the transport could not deliver; reported with the next batch or the session end. */
+    public void addDroppedTransport(long frames) {
+        droppedTransport.addAndGet(frames);
+    }
+
+    /** Gives counters back that were taken for an envelope which then could not be delivered. */
+    public void restoreCounters(CaptureCounters c) {
+        droppedQueueFull.addAndGet(c.getDroppedQueueFull());
+        droppedPrivacy.addAndGet(c.getDroppedPrivacy());
+        listenerErrors.addAndGet(c.getListenerErrors());
+        droppedTransport.addAndGet(c.getDroppedTransport());
+    }
+
     void addListenerError() {
         listenerErrors.incrementAndGet();
     }
@@ -96,6 +110,7 @@ public final class SessionState {
                 .setDroppedQueueFull(droppedQueueFull.getAndSet(0))
                 .setDroppedPrivacy(droppedPrivacy.getAndSet(0))
                 .setListenerErrors(listenerErrors.getAndSet(0))
+                .setDroppedTransport(droppedTransport.getAndSet(0))
                 .build();
     }
 }

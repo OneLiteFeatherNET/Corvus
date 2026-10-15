@@ -17,11 +17,15 @@ import net.onelitefeather.corvus.plugin.BuildConstants;
 import net.onelitefeather.corvus.plugin.capture.ByteBoundedQueue;
 import net.onelitefeather.corvus.plugin.capture.CaptureEngine;
 import net.onelitefeather.corvus.plugin.capture.CaptureWriter;
+import net.onelitefeather.corvus.plugin.capture.EnvelopeTransport;
+import net.onelitefeather.corvus.plugin.capture.FileTransport;
+import net.onelitefeather.corvus.plugin.capture.NatsTransport;
 import net.onelitefeather.corvus.plugin.capture.GameContextMapper;
 import net.onelitefeather.corvus.plugin.capture.Metrics;
 import net.onelitefeather.corvus.plugin.capture.StatsReporter;
 import net.onelitefeather.corvus.plugin.capture.WriterThread;
 import net.onelitefeather.corvus.plugin.config.CorvusConfig;
+import net.onelitefeather.corvus.plugin.nats.JetStreamEnvelopePublisher;
 import net.onelitefeather.corvus.plugin.pe.CorvusPacketListener;
 import net.onelitefeather.corvus.plugin.privacy.KeyLoader;
 import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
@@ -122,7 +126,17 @@ public final class CorvusPlugin {
             return;
         }
 
-        CaptureWriter writer = new CaptureWriter(dataDirectory.resolve("captures"), queue, config.batchSize(),
+        EnvelopeTransport transport;
+        if (config.sinkType() == CorvusConfig.SinkType.NATS) {
+            CorvusConfig.Nats nats = config.nats();
+            logger.info("Corvus sink: NATS JetStream {} -> {}.{} (connecting in the background)", nats.urls(),
+                    nats.subjectPrefix(), config.proxyId());
+            transport = new NatsTransport(new JetStreamEnvelopePublisher(nats, logger::info, logger::warn),
+                    nats.subjectPrefix(), config.proxyId(), nats.maxInFlightBytes(), nano, metrics, logger::warn);
+        } else {
+            transport = new FileTransport(dataDirectory.resolve("captures"));
+        }
+        CaptureWriter writer = new CaptureWriter(transport, queue, config.batchSize(),
                 config.flushIntervalMillis(), nano, metrics, logger::warn);
         writerThread = new WriterThread(writer);
         writerThread.start();
