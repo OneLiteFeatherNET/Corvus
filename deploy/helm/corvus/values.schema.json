@@ -147,6 +147,14 @@
         "id": {"type": "string", "minLength": 1}
       }
     },
+    "rawRetention": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultDays": {"type": "integer", "minimum": 1},
+        "maxDays": {"type": "integer", "minimum": 1}
+      }
+    },
     "pseudonym": {
       "type": "object",
       "properties": {

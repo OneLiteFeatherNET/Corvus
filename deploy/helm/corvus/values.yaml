@@ -107,6 +107,14 @@ pseudonym:
   key: key
   keyId: k1
 
+# Retention of raw payloads (NFR-018). The same two values reach housekeeping, which applies them,
+# and the api, which validates a pool's `raw_retention_days` against `maxDays`. A pool without its
+# own value keeps raw payloads for `defaultDays`; housekeeping also deletes the raw-derived feature
+# artefacts of a snapshot once the retention of its pool has passed.
+rawRetention:
+  defaultDays: 21
+  maxDays: 365
+
 # ---- components --------------------------------------------------------------------------------
 
 # One-shot schema migration, run as a Helm pre-install/pre-upgrade hook.

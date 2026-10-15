@@ -33,6 +33,7 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           env:
             {{- include "corvus.pgEnv" . | nindent 12 }}
+            {{- include "corvus.rawRetentionEnv" . | nindent 12 }}
             - name: CORVUS_API_PORT
               value: {{ .Values.api.port | quote }}
             - name: CORVUS_API_ROLES_CLAIM
