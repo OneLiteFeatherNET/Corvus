@@ -10,6 +10,7 @@ from api_fakes import FIXED_NOW, FakeErasureStore, sequential_ids
 from api_support import PLUGIN_TOKEN, Env
 
 from corvus_services.api.erasure import erase_player
+from corvus_services.api.ports import ScoreHistoryRecord, ScoreLatestRecord
 from corvus_services.api.pseudonym import Pseudonymizer, PseudonymKeyMissingError, parse_pseudonym
 from corvus_services.api.settings import ApiSettings
 
@@ -118,7 +119,9 @@ async def test_erasure_runs_all_steps():
     )
 
 
-@pytest.mark.parametrize("step", ["delete_player_key", "mark_erased", "block", "record_request"])
+@pytest.mark.parametrize(
+    "step", ["delete_player_key", "delete_scores", "mark_erased", "block", "record_request"]
+)
 async def test_erasure_is_all_or_nothing(step):
     store = _store()
     store.fail_at = step
@@ -130,6 +133,69 @@ async def test_erasure_is_all_or_nothing(step):
     assert store.players[PSEUDONYM].erased_at is None
     assert store.blocklist == {}
     assert store.requests == {}
+
+
+def _scores(store: FakeErasureStore, pseudonym: bytes) -> None:
+    store.latest_rows[pseudonym] = [
+        ScoreLatestRecord("pvp", "combat", "gb", "1", "enforce", 0.9, 0.8, 3, FIXED_NOW)
+    ]
+    store.history_rows[pseudonym] = [
+        ScoreHistoryRecord(
+            i, b"\x01" * 16, 0, "pvp", "combat", "gb", "1", "shadow", 0.5, 0.4, 1, 0, 1, FIXED_NOW
+        )
+        for i in (1, 2)
+    ]
+
+
+async def test_erasure_deletes_the_players_scores_but_not_other_players():
+    store = _store()
+    other = bytes(range(1, 33))
+    _scores(store, PSEUDONYM)
+    _scores(store, other)
+
+    await erase_player(store, PSEUDONYM, requested_by="root", now=FIXED_NOW)
+
+    assert PSEUDONYM not in store.latest_rows
+    assert PSEUDONYM not in store.history_rows
+    assert len(store.latest_rows[other]) == 1
+    assert len(store.history_rows[other]) == 2
+
+
+@pytest.mark.parametrize("step", ["mark_erased", "block", "record_request"])
+async def test_scores_survive_a_failed_erasure(step):
+    store = _store()
+    _scores(store, PSEUDONYM)
+    store.fail_at = step
+
+    with pytest.raises(RuntimeError):
+        await erase_player(store, PSEUDONYM, requested_by="root", now=FIXED_NOW)
+
+    assert len(store.latest_rows[PSEUDONYM]) == 1
+    assert len(store.history_rows[PSEUDONYM]) == 2
+
+
+async def test_erasing_an_unknown_pseudonym_still_deletes_stray_scores():
+    store = FakeErasureStore()
+    _scores(store, PSEUDONYM)
+
+    await erase_player(store, PSEUDONYM, requested_by="root", now=FIXED_NOW)
+
+    assert PSEUDONYM not in store.latest_rows
+
+
+def test_erasure_over_http_removes_the_scores_the_scores_endpoint_returns(env: Env, admin):
+    env.parts["erasure"].add_player(PSEUDONYM)
+    _scores(env.parts["erasure"], PSEUDONYM)
+    url = f"/api/v1/scores/players/{PSEUDONYM.hex()}"
+    assert env.client.get(url, headers=admin).json()["items"]
+
+    resp = env.client.post(
+        "/api/v1/players/erasure", json={"pseudonym": PSEUDONYM.hex()}, headers=admin
+    )
+
+    assert resp.status_code == 202
+    assert env.client.get(url, headers=admin).json()["items"] == []
+    assert env.client.get(url + "/history", headers=admin).json()["items"] == []
 
 
 async def test_erasing_an_unknown_pseudonym_still_blocklists_and_audits_it():

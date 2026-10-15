@@ -71,12 +71,13 @@ jobs:
     permissions:
       contents: read
     outputs:
+      ml: ${{ steps.detect.outputs.ml }}
       ui: ${{ steps.detect.outputs.ui }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
-      # The UI image only exists once ui/Dockerfile does; until then the ui job is skipped.
+      # The UI and ML job images only exist once their Dockerfiles do; until then the job is skipped.
       - id: detect
         run: |
           if [ -f ui/Dockerfile ]; then
@@ -84,6 +85,12 @@ jobs:
           else
             echo "ui=false" >> "$GITHUB_OUTPUT"
             echo "::notice::ui/Dockerfile not found, skipping the ui image"
+          fi
+          if [ -f ml/Dockerfile ]; then
+            echo "ml=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ml=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::ml/Dockerfile not found, skipping the ml image"
           fi
 
   image-services:
@@ -100,6 +107,22 @@ jobs:
       # The Dockerfile copies proto/ and services/ paths, so the context is the repository root.
       context: "."
       dockerfile: "services/Dockerfile"
+    secrets: inherit
+
+  image-ml:
+    name: Publish corvus-ml image
+    needs: [release-please, images-detect]
+    if: needs.release-please.outputs.release_created == 'true' && needs.images-detect.outputs.ml == 'true'
+    permissions:
+      contents: read
+      id-token: write # keyless cosign signing
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.9.0
+    with:
+      image-name: "onelitefeather/corvus-ml"
+      version: ${{ needs.release-please.outputs.version }}
+      # The Dockerfile copies proto/ and ml/ paths, so the context is the repository root.
+      context: "."
+      dockerfile: "ml/Dockerfile"
     secrets: inherit
 
   image-ui:

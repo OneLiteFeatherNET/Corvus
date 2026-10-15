@@ -286,6 +286,11 @@ ENDPOINTS: list[tuple[str, str, set[str]]] = [
     ("POST", "/api/v1/jobs", {"data_scientist"}),
     ("GET", "/api/v1/jobs", {"data_scientist"}),
     ("GET", f"/api/v1/jobs/{UUID_}", {"data_scientist"}),
+    ("PATCH", f"/api/v1/jobs/{UUID_}", {"data_scientist"}),
+    ("POST", "/api/v1/pools/preview", {"data_scientist"}),
+    ("GET", "/api/v1/models/some-model/1", {"viewer", "staff", "data_scientist"}),
+    ("GET", "/api/v1/summary", {"viewer", "staff", "data_scientist"}),
+    ("GET", "/api/v1/erasure-requests", set()),
 ]
 ALL_ROLES = ["viewer", "staff", "data_scientist", "admin"]
 

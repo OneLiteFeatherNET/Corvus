@@ -6,6 +6,7 @@ import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
+from corvus_ml.calibration import METHODS as CALIBRATION_METHODS
 from corvus_ml.eval.synthetic import SyntheticConfig
 
 UNLABELLED_MODES = ("exclude", "assume_legit")
@@ -28,6 +29,7 @@ class EvalConfig:
     threads: int = 1
     seq_len: int = 256
     unlabelled: str = "exclude"
+    calibration: str = "auto"  # auto | isotonic | platt | ecdf | none (see corvus_ml.calibration)
     contexts: list[str] = field(default_factory=list)  # empty = every context in the data
     split: tuple[float, float, float] = (0.6, 0.2, 0.2)
     fpr_targets: tuple[float, ...] = (0.01, 0.001)
@@ -52,6 +54,7 @@ class EvalConfig:
             "threads",
             "seq_len",
             "unlabelled",
+            "calibration",
             "contexts",
             "min_confidence",
         ):
@@ -67,6 +70,8 @@ class EvalConfig:
             raise ValueError(f"unknown [run] keys: {sorted(run)}")
         if cfg.unlabelled not in UNLABELLED_MODES:
             raise ValueError(f"run.unlabelled must be one of {UNLABELLED_MODES}")
+        if cfg.calibration not in CALIBRATION_METHODS:
+            raise ValueError(f"run.calibration must be one of {CALIBRATION_METHODS}")
         for key in ("windows", "tokens", "sessions", "labels"):
             if key in data:
                 setattr(cfg, key, (base / data[key]).resolve())

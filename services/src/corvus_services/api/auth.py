@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
+from uuid import UUID
 
 import httpx
 import jwt
@@ -38,6 +40,13 @@ READERS: tuple[Role, ...] = (Role.VIEWER, Role.STAFF, Role.DATA_SCIENTIST)
 class Principal:
     subject: str
     roles: frozenset[Role]
+    display_name: str | None = None
+    job: str | None = None
+    """Name of the machine token (``CORVUS_API_JOB_TOKENS``); ``None`` for people."""
+
+    @property
+    def is_job(self) -> bool:
+        return self.job is not None
 
 
 class AuthError(Exception):
@@ -128,6 +137,7 @@ class TokenVerifier:
         role_mapping: dict[str, str],
         clock: Clock,
         leeway_s: int = 30,
+        display_name_claim: str = "name",
     ) -> None:
         self._jwks = jwks
         self._issuer = issuer
@@ -137,6 +147,7 @@ class TokenVerifier:
         self._role_mapping = role_mapping
         self._clock = clock
         self._leeway = leeway_s
+        self._display_name_claim = display_name_claim
 
     async def verify(self, token: str) -> Principal:
         try:
@@ -179,7 +190,14 @@ class TokenVerifier:
             raise AuthError("token expired")
         if nbf is not None and (not isinstance(nbf, int | float) or now + self._leeway < nbf):
             raise AuthError("token not yet valid")
-        return Principal(str(claims["sub"]), self._roles(claims))
+        return Principal(str(claims["sub"]), self._roles(claims), self._display_name(claims))
+
+    def _display_name(self, claims: dict[str, Any]) -> str | None:
+        for claim in (self._display_name_claim, "preferred_username"):
+            value = claims.get(claim)
+            if isinstance(value, str) and value.strip():
+                return value.strip()[:200]
+        return None
 
     def _roles(self, claims: dict[str, Any]) -> frozenset[Role]:
         value: Any = claims
@@ -202,18 +220,25 @@ class TokenVerifier:
             return None
 
 
+def token_digest(token: str) -> str:
+    """Hex SHA-256 of a machine token, the form configured in ``CORVUS_API_JOB_TOKENS``."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 class Authenticator:
-    """Dev token (only if explicitly configured) first, then OIDC."""
+    """Dev token (only if explicitly configured) first, then job tokens, then OIDC."""
 
     def __init__(
         self,
         verifier: TokenVerifier | None,
         dev_token: str | None = None,
         dev_roles: Sequence[Role] = (Role.ADMIN,),
+        job_tokens: Sequence[tuple[str, str]] = (),
     ) -> None:
         self._verifier = verifier
         self._dev_token = dev_token
         self._dev_roles = frozenset(dev_roles)
+        self._job_tokens = list(job_tokens)
         if dev_token:
             log.warning(
                 "CORVUS_API_DEV_TOKEN is set: a static bearer token grants roles %s. "
@@ -223,11 +248,25 @@ class Authenticator:
 
     @property
     def configured(self) -> bool:
-        return self._verifier is not None or bool(self._dev_token)
+        return self._verifier is not None or bool(self._dev_token) or bool(self._job_tokens)
+
+    def _job_principal(self, token: str) -> Principal | None:
+        """Constant-time comparison of the presented token's hash against every configured hash."""
+        presented = token_digest(token).encode()
+        matched: str | None = None
+        for digest, name in self._job_tokens:
+            if hmac.compare_digest(presented, digest.encode()):
+                matched = name
+        if matched is None:
+            return None
+        return Principal(f"job:{matched}", frozenset({Role.DATA_SCIENTIST}), job=matched)
 
     async def authenticate(self, token: str) -> Principal:
         if self._dev_token and hmac.compare_digest(token.encode(), self._dev_token.encode()):
             return Principal("dev", self._dev_roles)
+        job = self._job_principal(token) if self._job_tokens else None
+        if job is not None:
+            return job
         if self._verifier is None:
             raise AuthError("invalid token")
         return await self._verifier.verify(token)
@@ -248,10 +287,11 @@ def build_authenticator(
             role_mapping=settings.role_mapping,
             clock=clock,
             leeway_s=settings.oidc_leeway_s,
+            display_name_claim=settings.display_name_claim,
         )
     dev = settings.dev_token.get_secret_value() if settings.dev_token else None
     dev_roles = [Role(r) for r in settings.dev_token_roles]
-    return Authenticator(verifier, dev or None, dev_roles)
+    return Authenticator(verifier, dev or None, dev_roles, settings.job_token_list())
 
 
 _bearer = HTTPBearer(auto_error=False, description="OIDC access token")
@@ -269,8 +309,14 @@ def _unauthorized(reason: str) -> ProblemError:
     )
 
 
-def require(*roles: Role) -> Callable[..., Awaitable[Principal]]:
-    """Dependency factory: the caller needs one of ``roles`` (``admin`` always passes)."""
+JOB_ID_HEADER = "X-Corvus-Job-Id"
+
+
+def require(*roles: Role, allow_jobs: bool = False) -> Callable[..., Awaitable[Principal]]:
+    """Dependency factory: the caller needs one of ``roles`` (``admin`` always passes).
+
+    Job tokens (machine principals with role ``data_scientist``) are refused unless ``allow_jobs``.
+    """
     allowed = frozenset(roles) | {Role.ADMIN}
 
     async def dependency(
@@ -284,6 +330,10 @@ def require(*roles: Role) -> Callable[..., Awaitable[Principal]]:
             principal = await authenticator.authenticate(creds.credentials)
         except AuthError as e:
             raise _unauthorized(str(e)) from e
+        if principal.is_job and not allow_jobs:
+            raise ProblemError(
+                403, "job tokens are not accepted on this endpoint", slug="forbidden"
+            )
         if not (principal.roles & allowed):
             raise ProblemError(
                 403,
@@ -295,6 +345,40 @@ def require(*roles: Role) -> Callable[..., Awaitable[Principal]]:
         return principal
 
     return dependency
+
+
+def enforce_job_scope(principal: Principal, job_id: UUID, header: str | None) -> None:
+    """A job principal may touch only the job named in ``X-Corvus-Job-Id`` and in the path."""
+    if not principal.is_job:
+        return
+    try:
+        declared = UUID(header) if header else None
+    except ValueError:
+        declared = None
+    if declared != job_id:
+        raise ProblemError(
+            403,
+            f"job tokens may only act on their own job: send {JOB_ID_HEADER} equal to the job id",
+            slug="forbidden",
+        )
+
+
+async def authenticated(
+    request: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> Principal:
+    """Any valid token, whatever its roles (used by ``GET /me``)."""
+    if creds is None:
+        raise _unauthorized("missing bearer token")
+    authenticator: Authenticator = request.app.state.deps.authenticator
+    try:
+        principal = await authenticator.authenticate(creds.credentials)
+    except AuthError as e:
+        raise _unauthorized(str(e)) from e
+    if principal.is_job:
+        raise ProblemError(403, "job tokens are not accepted on this endpoint", slug="forbidden")
+    request.state.principal = principal
+    return principal
 
 
 async def require_proxy_token(

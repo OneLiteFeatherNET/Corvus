@@ -17,10 +17,13 @@ from corvus_services.api.pools import PoolFilter, RawPreview
 from corvus_services.api.ports import (
     BlockEntry,
     DuplicateError,
+    ErasureBrief,
     ErasureRequest,
     ErasureTx,
+    JobBrief,
     JobRecord,
     LabelRecord,
+    ModelFilter,
     ModelRecord,
     PlayerInfo,
     PoolRecord,
@@ -30,6 +33,7 @@ from corvus_services.api.ports import (
     SnapshotMaterial,
     SnapshotRecord,
     StaleError,
+    Summary,
     TransitionRecord,
 )
 
@@ -150,6 +154,8 @@ class _ErasureState:
     keys: set[bytes]
     blocklist: dict[bytes, BlockEntry]
     requests: dict[UUID, ErasureRequest]
+    latest: dict[bytes, list[ScoreLatestRecord]]
+    history: dict[bytes, list[ScoreHistoryRecord]]
 
 
 class FakeErasureTx:
@@ -169,6 +175,11 @@ class FakeErasureTx:
         existed = pseudonym in self._s.keys
         self._s.keys.discard(pseudonym)
         return existed
+
+    async def delete_scores(self, pseudonym: bytes) -> int:
+        self._maybe_fail("delete_scores")
+        removed = len(self._s.latest.pop(pseudonym, [])) + len(self._s.history.pop(pseudonym, []))
+        return removed
 
     async def mark_erased(self, pseudonym: bytes, at: datetime) -> None:
         self._maybe_fail("mark_erased")
@@ -192,6 +203,8 @@ class FakeErasureStore:
         self.keys: set[bytes] = set()
         self.blocklist: dict[bytes, BlockEntry] = {}
         self.requests: dict[UUID, ErasureRequest] = {}
+        self.latest_rows: dict[bytes, list[ScoreLatestRecord]] = {}
+        self.history_rows: dict[bytes, list[ScoreHistoryRecord]] = {}
         self.fail_at: str | None = None
 
     def add_player(self, pseudonym: bytes, *, with_key: bool = True) -> None:
@@ -202,14 +215,24 @@ class FakeErasureStore:
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[ErasureTx]:
         work = _ErasureState(
-            dict(self.players), set(self.keys), dict(self.blocklist), dict(self.requests)
+            dict(self.players),
+            set(self.keys),
+            dict(self.blocklist),
+            dict(self.requests),
+            dict(self.latest_rows),
+            dict(self.history_rows),
         )
         yield FakeErasureTx(work, self.fail_at)
         self.players, self.keys = work.players, work.keys
         self.blocklist, self.requests = work.blocklist, work.requests
+        self.latest_rows, self.history_rows = work.latest, work.history
 
     async def get_request(self, request_id: UUID) -> ErasureRequest | None:
         return self.requests.get(request_id)
+
+    async def list_requests(self, req: PageRequest, status: str | None) -> Page[ErasureRequest]:
+        rows = [r for r in self.requests.values() if status is None or r.status == status]
+        return paginate(rows, req, lambda r: (r.requested_at, str(r.id)))
 
 
 class FakeBlocklistRepo:
@@ -250,8 +273,24 @@ class FakeModelRepo:
     async def get(self, model_id: UUID) -> ModelRecord | None:
         return self.rows.get(model_id)
 
-    async def list_page(self, req: PageRequest, stage: str | None) -> Page[ModelRecord]:
-        rows = [m for m in self.rows.values() if stage is None or m.stage == stage]
+    async def get_by_name_version(self, name: str, version: str) -> ModelRecord | None:
+        return next((m for m in self.rows.values() if (m.name, m.version) == (name, version)), None)
+
+    async def list_page(self, req: PageRequest, flt: ModelFilter) -> Page[ModelRecord]:
+        rows = [
+            m
+            for m in self.rows.values()
+            if all(
+                want is None or getattr(m, attr) == want
+                for attr, want in (
+                    ("name", flt.name),
+                    ("version", flt.version),
+                    ("game_context", flt.game_context),
+                    ("domain", flt.domain),
+                    ("stage", flt.stage),
+                )
+            )
+        ]
         return paginate(rows, req, _created_key)
 
     async def enforced_in_scope(
@@ -304,10 +343,12 @@ class FakeJobRepo:
         message: str,
         now: datetime,
         finished: bool,
+        result: dict[str, Any] | None = None,
     ) -> JobRecord:
         old = self.rows[job_id]
         self.rows[job_id] = replace(
             old,
+            result=result if result is not None else old.result,
             status=status,
             runner_ref=runner_ref or old.runner_ref,
             message=message,
@@ -318,9 +359,16 @@ class FakeJobRepo:
 
 
 class FakeScoreRepo:
-    def __init__(self) -> None:
-        self.latest_rows: dict[bytes, list[ScoreLatestRecord]] = {}
-        self.history_rows: dict[bytes, list[ScoreHistoryRecord]] = {}
+    def __init__(self, store: FakeErasureStore | None = None) -> None:
+        self._store = store or FakeErasureStore()
+
+    @property
+    def latest_rows(self) -> dict[bytes, list[ScoreLatestRecord]]:
+        return self._store.latest_rows
+
+    @property
+    def history_rows(self) -> dict[bytes, list[ScoreHistoryRecord]]:
+        return self._store.history_rows
 
     async def latest(self, pseudonym: bytes) -> list[ScoreLatestRecord]:
         return sorted(
@@ -337,6 +385,42 @@ class FakeScoreRepo:
             if game_context is None or r.game_context == game_context
         ]
         return sorted(rows, key=lambda r: (r.scored_at, r.id), reverse=True)[:limit]
+
+
+class FakeSummaryRepo:
+    """Computes the summary from the other fakes, like the SQL does from the tables."""
+
+    def __init__(self, parts: dict[str, Any]) -> None:
+        self._parts = parts
+
+    async def summary(self, recent: int) -> Summary:
+        p = self._parts
+
+        def count(values: list[str]) -> dict[str, int]:
+            return {v: values.count(v) for v in sorted(set(values))}
+
+        jobs = sorted(p["jobs"].rows.values(), key=_created_key, reverse=True)
+        erasures = sorted(
+            p["erasure"].requests.values(), key=lambda r: (r.requested_at, str(r.id)), reverse=True
+        )
+        return Summary(
+            pools=len(p["pools"].rows),
+            snapshots=len(p["snapshots"].rows),
+            jobs_by_status=count([j.status for j in jobs]),
+            models_by_stage=count([m.stage for m in p["models"].rows.values()]),
+            labels_by_label=count([lb.label for lb in p["labels"].rows]),
+            pending_erasures=sum(1 for r in erasures if r.compaction_pending),
+            recent_jobs=[
+                JobBrief(
+                    j.id, j.type, j.status, j.snapshot_id, j.created_at, j.updated_at, j.finished_at
+                )  # fmt: skip
+                for j in jobs[:recent]
+            ],
+            recent_erasures=[
+                ErasureBrief(r.id, r.pseudonym, r.requested_at, r.status, r.compaction_pending)
+                for r in erasures[:recent]
+            ],
+        )
 
 
 class FakeDb:
@@ -382,7 +466,8 @@ def make_repos() -> tuple[Repos, dict[str, Any]]:
         "blocklist": FakeBlocklistRepo(erasure),
         "models": FakeModelRepo(),
         "jobs": FakeJobRepo(),
-        "scores": FakeScoreRepo(),
+        "scores": FakeScoreRepo(erasure),
         "db": FakeDb(),
     }
+    parts["summary"] = FakeSummaryRepo(parts)
     return Repos(**parts), parts

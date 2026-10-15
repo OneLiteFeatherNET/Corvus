@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -15,8 +16,22 @@ from corvus_ml.features.config import S3Config
 from corvus_ml.features.schema import EVENT_COLUMNS, SESSION_ID_TYPE
 
 
-def open_dataset(path: str | Path, s3: S3Config | None = None) -> ds.Dataset:
-    """Open ``events`` from a local directory/file or an ``s3://`` path (hive ``date=`` ok)."""
+@dataclass(frozen=True)
+class EventFiles:
+    """An explicit list of ``events`` Parquet files on a filesystem (a dataset snapshot).
+
+    Picklable, so worker processes can open the same dataset.
+    """
+
+    paths: tuple[str, ...]
+    filesystem: pafs.FileSystem
+
+
+def open_dataset(path: str | Path | EventFiles, s3: S3Config | None = None) -> ds.Dataset:
+    """Open ``events`` from a local directory/file, an ``s3://`` path (hive ``date=`` ok) or an
+    explicit :class:`EventFiles` list."""
+    if isinstance(path, EventFiles):
+        return ds.dataset(list(path.paths), format="parquet", filesystem=path.filesystem)
     text = str(path)
     filesystem: pafs.FileSystem | None = None
     if text.startswith("s3://"):

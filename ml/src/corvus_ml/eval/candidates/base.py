@@ -13,6 +13,8 @@ from typing import ClassVar, Literal
 
 import numpy as np
 
+from corvus_ml.calibration import Calibration
+from corvus_ml.calibration_onnx import RawOutput
 from corvus_ml.eval.data import EvalData
 from corvus_ml.features.featurizer import CompletedWindow
 from corvus_ml.features.model_input import model_inputs
@@ -32,11 +34,34 @@ class Candidate(ABC):
     input_kind: ClassVar[Literal["agg", "seq"]]
     # True for torch models (they get the int8 dynamic-quantization variant).
     quantizable: ClassVar[bool] = False
+    # How the raw score is read from the exported graph (see corvus_ml.calibration_onnx).
+    onnx_raw: ClassVar[RawOutput] = "first"
+    # True if the raw score is already a probability in [0, 1].
+    bounded: ClassVar[bool] = False
 
     def __init__(self, seed: int = 0, threads: int = 1, **params):
         self.seed = seed
         self.threads = threads
         self.params = params
+        self.calibration: Calibration | None = None
+
+    def calibrated_score(self, data: EvalData) -> np.ndarray:
+        """The score a deployed model outputs: ``score`` mapped through the calibration."""
+        raw = self.score(data)
+        return raw if self.calibration is None else self.calibration.apply(raw)
+
+    def export_calibrated_onnx(self, path: Path, example: np.ndarray) -> Path:
+        """Export with the calibration baked in: one output ``score`` in [0, 1]."""
+        import onnx
+
+        from corvus_ml.calibration_onnx import embed_calibration
+
+        if self.calibration is None:
+            raise ValueError("fit a calibration before exporting a calibrated graph")
+        raw_path = self.export_onnx(path.with_name(f"{path.stem}.raw.onnx"), example)
+        model = embed_calibration(onnx.load(str(raw_path)), self.onnx_raw, self.calibration)
+        onnx.save(model, str(path))
+        return path
 
     def inputs(self, data: EvalData) -> np.ndarray:
         """The float32 array fed to both the native model and the ONNX graph."""
