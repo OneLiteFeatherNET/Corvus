@@ -48,10 +48,12 @@ Operator or SealedSecrets) and point the values at them:
   `database.dsnKey` is then ignored.
 - *Rook-Ceph ObjectBucketClaim:* the claim's Secret uses the keys `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, so set
   `s3.existingSecret`, `s3.accessKeyKey: AWS_ACCESS_KEY_ID` and `s3.secretKeyKey: AWS_SECRET_ACCESS_KEY`. Its ConfigMap
-  (`BUCKET_NAME`, `BUCKET_HOST`, `BUCKET_PORT`) can replace `s3.bucket` and `s3.endpointUrl`: set
-  `s3.bucketConfigMap.name` (and `scheme: https` if the gateway uses TLS).
-- *NATS with credentials:* `nats.credsSecret` (key `nats.credsKey`, default `nats.creds`) is mounted read-only into the
-  ingest and score pods and passed as `CORVUS_NATS_CREDS_FILE`. This needs a services image that supports that setting.
+  (`BUCKET_NAME`, `BUCKET_HOST`, `BUCKET_PORT`) can replace `s3.bucket` and the endpoint: set `s3.bucketConfigMap` to its
+  name. `s3.endpointUrl` still wins when set (for example an in-cluster service URL).
+- *NATS:* `nats.streamReplicas` (default 1; 3 on a three-node cluster) sets the replicas of the JetStream stream, and an
+  existing stream with fewer replicas is updated. `nats.creds.existingSecret` holds one `.creds` file per component
+  (`nats.creds.ingestKey`, `nats.creds.scoreKey`, because ingest and score are different NATS users); each pod mounts only
+  its own key read-only and gets `CORVUS_NATS_CREDS_FILE`. This needs a services image that supports those settings.
 
 Losing the KEK makes every stored player key, and with it all raw payloads, unreadable. Back it up.
 

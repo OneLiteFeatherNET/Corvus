@@ -96,8 +96,16 @@
       "properties": {
         "url": {"type": "string", "pattern": "^(nats|tls|ws|wss)://"},
         "stream": {"type": "string", "minLength": 1},
-        "credsSecret": {"type": "string"},
-        "credsKey": {"type": "string", "minLength": 1}
+        "streamReplicas": {"type": "integer", "minimum": 1, "maximum": 5},
+        "creds": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {"type": "string"},
+            "ingestKey": {"type": "string", "minLength": 1},
+            "scoreKey": {"type": "string", "minLength": 1}
+          }
+        }
       }
     },
     "database": {
@@ -127,17 +135,7 @@
         "existingSecret": {"type": "string", "minLength": 1},
         "accessKeyKey": {"type": "string", "minLength": 1},
         "secretKeyKey": {"type": "string", "minLength": 1},
-        "bucketConfigMap": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "name": {"type": "string"},
-            "bucketKey": {"type": "string", "minLength": 1},
-            "hostKey": {"type": "string", "minLength": 1},
-            "portKey": {"type": "string", "minLength": 1},
-            "scheme": {"enum": ["http", "https"]}
-          }
-        }
+        "bucketConfigMap": {"type": "string"}
       }
     },
     "kek": {

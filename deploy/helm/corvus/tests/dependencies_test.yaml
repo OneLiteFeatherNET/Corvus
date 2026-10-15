@@ -79,7 +79,7 @@ tests:
       path: kind
       value: Deployment
     set:
-      s3.bucketConfigMap.name: corvus-lake
+      s3.bucketConfigMap: corvus-lake
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
@@ -100,7 +100,7 @@ tests:
       path: kind
       value: Deployment
     set:
-      nats.credsSecret: nats-creds-secret
+      nats.creds.existingSecret: nats-creds-secret
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
@@ -120,6 +120,9 @@ tests:
             secret:
               secretName: nats-creds-secret
               defaultMode: 288
+              items:
+                - key: ingest.creds
+                  path: nats.creds
 
   - it: mounts no nats credentials by default
     documentSelector:
@@ -132,3 +135,16 @@ tests:
             name: nats-creds
             mountPath: /etc/corvus/nats
             readOnly: true
+
+  - it: passes the stream replicas to the service
+    documentSelector:
+      path: kind
+      value: Deployment
+    set:
+      nats.streamReplicas: 3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_NATS_STREAM_REPLICAS
+            value: "3"

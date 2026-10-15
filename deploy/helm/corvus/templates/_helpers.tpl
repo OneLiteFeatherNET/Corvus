@@ -143,34 +143,36 @@ topologySpreadConstraints:
 {{- end }}
 {{- end }}
 
-{{/* Bucket and endpoint from values, or from the ConfigMap an ObjectBucketClaim creates. */}}
+{{/* Bucket (and endpoint) from values, or from the ConfigMap an ObjectBucketClaim creates. */}}
 {{- define "corvus.s3Env" -}}
 {{- $cm := .Values.s3.bucketConfigMap }}
-{{- if $cm.name }}
+{{- if $cm }}
 - name: CORVUS_S3_BUCKET
   valueFrom:
     configMapKeyRef:
-      name: {{ $cm.name }}
-      key: {{ $cm.bucketKey }}
+      name: {{ $cm }}
+      key: BUCKET_NAME
+{{- if not .Values.s3.endpointUrl }}
 - name: CORVUS_S3_HOST
   valueFrom:
     configMapKeyRef:
-      name: {{ $cm.name }}
-      key: {{ $cm.hostKey }}
+      name: {{ $cm }}
+      key: BUCKET_HOST
 - name: CORVUS_S3_PORT
   valueFrom:
     configMapKeyRef:
-      name: {{ $cm.name }}
-      key: {{ $cm.portKey }}
+      name: {{ $cm }}
+      key: BUCKET_PORT
 - name: CORVUS_S3_ENDPOINT_URL
-  value: {{ printf "%s://$(CORVUS_S3_HOST):$(CORVUS_S3_PORT)" $cm.scheme | quote }}
+  value: "http://$(CORVUS_S3_HOST):$(CORVUS_S3_PORT)"
+{{- end }}
 {{- else }}
 - name: CORVUS_S3_BUCKET
   value: {{ .Values.s3.bucket | quote }}
+{{- end }}
 {{- with .Values.s3.endpointUrl }}
 - name: CORVUS_S3_ENDPOINT_URL
   value: {{ . | quote }}
-{{- end }}
 {{- end }}
 - name: CORVUS_S3_REGION
   value: {{ .Values.s3.region | quote }}
@@ -178,32 +180,39 @@ topologySpreadConstraints:
 {{ include "corvus.secretEnv" (dict "name" "CORVUS_S3_SECRET_KEY" "secret" .Values.s3.existingSecret "key" .Values.s3.secretKeyKey) }}
 {{- end }}
 
+{{/* Call with (dict "root" $ "credsKey" <key in nats.creds.existingSecret>). */}}
 {{- define "corvus.natsEnv" -}}
 - name: CORVUS_NATS_URL
-  value: {{ .Values.nats.url | quote }}
+  value: {{ .root.Values.nats.url | quote }}
 - name: CORVUS_NATS_STREAM
-  value: {{ .Values.nats.stream | quote }}
-{{- if .Values.nats.credsSecret }}
+  value: {{ .root.Values.nats.stream | quote }}
+- name: CORVUS_NATS_STREAM_REPLICAS
+  value: {{ .root.Values.nats.streamReplicas | quote }}
+{{- if .root.Values.nats.creds.existingSecret }}
 - name: CORVUS_NATS_CREDS_FILE
-  value: /etc/corvus/nats/{{ .Values.nats.credsKey }}
+  value: /etc/corvus/nats/nats.creds
 {{- end }}
 {{- end }}
 
-{{/* Read-only mount and volume of the NATS credentials file (only when nats.credsSecret is set). */}}
+{{/* Read-only mount and volume of one component's NATS credentials file (when nats.creds is set). */}}
 {{- define "corvus.natsCredsMount" -}}
-{{- if .Values.nats.credsSecret }}
+{{- if .Values.nats.creds.existingSecret }}
 - name: nats-creds
   mountPath: /etc/corvus/nats
   readOnly: true
 {{- end }}
 {{- end }}
 
+{{/* Call with (dict "root" $ "credsKey" ...): only this component's key is mounted. */}}
 {{- define "corvus.natsCredsVolume" -}}
-{{- if .Values.nats.credsSecret }}
+{{- if .root.Values.nats.creds.existingSecret }}
 - name: nats-creds
   secret:
-    secretName: {{ .Values.nats.credsSecret }}
+    secretName: {{ .root.Values.nats.creds.existingSecret }}
     defaultMode: 0440
+    items:
+      - key: {{ .credsKey }}
+        path: nats.creds
 {{- end }}
 {{- end }}
 

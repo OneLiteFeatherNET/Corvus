@@ -34,7 +34,7 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           env:
-            {{- include "corvus.natsEnv" . | nindent 12 }}
+            {{- include "corvus.natsEnv" (dict "root" . "credsKey" .Values.nats.creds.ingestKey) | nindent 12 }}
             {{- include "corvus.pgEnv" . | nindent 12 }}
             {{- include "corvus.s3Env" . | nindent 12 }}
             {{- include "corvus.secretEnv" (dict "name" "CORVUS_KEK" "secret" .Values.kek.existingSecret "key" .Values.kek.key) | nindent 12 }}
@@ -70,7 +70,7 @@ spec:
             {{- include "corvus.natsCredsMount" . | nindent 12 }}
       volumes:
         {{- include "corvus.tmpVolume" . | nindent 8 }}
-        {{- include "corvus.natsCredsVolume" . | nindent 8 }}
+        {{- include "corvus.natsCredsVolume" (dict "root" . "credsKey" .Values.nats.creds.ingestKey) | nindent 8 }}
 ---
 # Metrics endpoint (and ServiceMonitor target); ingest receives its work from NATS, not over HTTP.
 apiVersion: v1

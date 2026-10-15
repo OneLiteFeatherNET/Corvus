@@ -52,10 +52,16 @@ topologySpreadConstraints: []
 nats:
   url: nats://nats.nats.svc:4222
   stream: CORVUS_CAPTURE
-  # Optional Secret with a NATS credentials file (.creds), mounted read-only into ingest and score
-  # and passed as CORVUS_NATS_CREDS_FILE. Needs a services image with that setting.
-  credsSecret: ""
-  credsKey: nats.creds
+  # Replicas of the JetStream stream (CORVUS_NATS_STREAM_REPLICAS); an existing stream with fewer
+  # replicas is updated. Use 3 on a three-node NATS cluster.
+  streamReplicas: 1
+  # Optional NATS credentials (.creds files) from one Secret, one key per component because ingest
+  # and score are different NATS users. Only the component's own key is mounted, read-only, and
+  # passed as CORVUS_NATS_CREDS_FILE.
+  creds:
+    existingSecret: ""
+    ingestKey: ingest.creds
+    scoreKey: score.creds
 
 database:
   # Secret holding the full libpq DSN (including user and password). With CloudNativePG use the
@@ -81,14 +87,10 @@ s3:
   existingSecret: corvus-s3
   accessKeyKey: access-key
   secretKeyKey: secret-key
-  # Optional: read bucket and endpoint from the ConfigMap an ObjectBucketClaim creates (BUCKET_NAME,
-  # BUCKET_HOST, BUCKET_PORT) instead of `bucket` and `endpointUrl`.
-  bucketConfigMap:
-    name: ""
-    bucketKey: BUCKET_NAME
-    hostKey: BUCKET_HOST
-    portKey: BUCKET_PORT
-    scheme: http
+  # Optional: name of the ConfigMap an ObjectBucketClaim creates (BUCKET_NAME, BUCKET_HOST,
+  # BUCKET_PORT). The bucket name is then read from it instead of `bucket`; the endpoint too,
+  # unless `endpointUrl` is set (then that wins, for example an in-cluster service URL).
+  bucketConfigMap: ""
 
 # Key encryption key (base64, 32 bytes) wrapping every player data key. Losing it makes all raw
 # payloads unreadable. Needed by ingest only.
