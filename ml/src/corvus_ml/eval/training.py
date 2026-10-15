@@ -130,6 +130,7 @@ def fit(
     patience: int = 5,
     seed: int = 0,
     grad_clip: float = 1.0,
+    on_epoch: Callable[[int, float], None] | None = None,
 ) -> FitHistory:
     """AdamW + linear warmup / cosine decay + early stopping on validation loss.
 
@@ -169,6 +170,8 @@ def fit(
                 n += batch[0].shape[0]
         v = tot / max(1, n)
         hist.val_loss.append(v)
+        if on_epoch is not None:
+            on_epoch(epoch, v)
         if v < best_val - 1e-6:
             best_val, best_state, bad = v, copy.deepcopy(model.state_dict()), 0
             hist.best_epoch = epoch

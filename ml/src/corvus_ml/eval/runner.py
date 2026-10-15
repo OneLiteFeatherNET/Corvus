@@ -35,8 +35,35 @@ def _tag(fpr: float) -> str:
     return f"{fpr * 100:g}pct"
 
 
+def load_raw_source(cfg: EvalConfig, workdir: Path):
+    """The packet-level source of a raw-byte run (real table or synthetic)."""
+    from corvus_ml.eval import raw_data
+    from corvus_ml.raw import pipeline
+    from corvus_ml.raw.synthetic import generate as generate_raw
+
+    raw = cfg.raw
+    assert raw is not None
+    if raw.synthetic is not None:
+        syn = generate_raw(replace(raw.synthetic, seed=raw.synthetic.seed or cfg.seed))
+        return pipeline.synthetic_source(
+            syn, workdir / "tokenizer", raw.tokenizer, raw.packet, raw.window()
+        )
+    assert raw.dir is not None
+    base = raw_data.load_raw_source(raw.dir, labels=cfg.labels)
+    return base.with_window(raw.window(base.spec.window))
+
+
 def load_data(cfg: EvalConfig) -> tuple[EvalData, bool]:
     """Return the dataset and whether it is synthetic."""
+    if cfg.raw is not None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix="corvus-raw-") as tmp:
+            source = load_raw_source(cfg, Path(tmp))
+            data = source.build(cfg.min_confidence, cfg.raw.max_windows, cfg.seed)
+            _keep_tokenizer(data)
+            data.meta["raw_source"] = source
+        return data, source.synthetic
     need_seq = any(cand_pkg.REGISTRY[n].input_kind == "seq" for n in cfg.candidates)
     if cfg.synthetic is not None:
         t = generate(cfg.synthetic)
@@ -62,6 +89,13 @@ def load_data(cfg: EvalConfig) -> tuple[EvalData, bool]:
         cfg.min_confidence,
     )
     return data, False
+
+
+def _keep_tokenizer(data: EvalData) -> None:
+    """Copy the tokenizer into memory-independent storage: the temp dir is about to go."""
+    directory = data.meta.get("tokenizer_dir")
+    if directory is not None:
+        data.meta["tokenizer_json"] = (Path(directory) / "tokenizer.json").read_bytes()
 
 
 def _training_sets(
@@ -111,7 +145,11 @@ def _fit(cand_name: str, cfg: EvalConfig, data: EvalData, train_idx, val_idx) ->
     if cls.supervised and len(np.unique(train.label)) < 2:
         return None
     cand = cand_pkg.create(cand_name, cfg.seed, cfg.threads, cfg.candidates[cand_name])
-    cand.fit(train, val if len(val) else None)
+    if cls.pretrains:
+        # Masked pretraining sees every window of the training players, labelled or not.
+        cand.fit(train, val if len(val) else None, pool=data.take(train_idx))
+    else:
+        cand.fit(train, val if len(val) else None)
     try:
         _calibrate(cand, cfg, train, val)
     except ValueError as exc:
@@ -136,6 +174,8 @@ def resolve_spec(cfg: EvalConfig) -> FeatureSpec:
     ``window_tokens`` directories; it is validated against this checkout (a mismatch is an error).
     Without it (synthetic data, older builds) the default windowing parameters are assumed.
     """
+    if cfg.raw is not None:
+        return FeatureSpec.current(seq_len=cfg.seq_len)  # replaced by the source's spec in run()
     if cfg.windows is not None:
         candidate = cfg.windows.parent / SPEC_FILE
         if candidate.is_file():
@@ -156,7 +196,11 @@ def _export_and_bench(
     res: dict = {}
     out.mkdir(parents=True, exist_ok=True)
     spec.write(out)  # the exported graphs are only meaningful together with this layout
+    if spec.raw_bytes is not None and data.meta.get("tokenizer_json"):
+        (out / spec.raw_bytes.tokenizer_file).write_bytes(data.meta["tokenizer_json"])
     test = data.take(test_idx[data.label[test_idx] != LABEL_UNLABELLED])
+    if cand.parity_rows is not None:
+        test = test.take(np.arange(min(len(test), cand.parity_rows)))
     if len(test) == 0:
         return {"error": "no labelled test windows"}
     x = cand.inputs(test)
@@ -198,9 +242,27 @@ def _export_and_bench(
     bench = onnx_bench.benchmark_isolated if cfg.bench.isolated else onnx_bench.benchmark
     kw = {"warmup": cfg.bench.warmup, "iters": cfg.bench.iters, "batch": cfg.bench.batch}
     res["bench"] = bench(path, x, cfg.threads, **kw).to_dict()
+    if cand.input_kind == "raw_bytes" and cfg.bench.raw_packets:
+        res["bench_sizes"] = _bench_sizes(path, x, cfg, kw)
     if cand.quantizable and cfg.bench.quantize:
         res["int8"] = _quantized(cand, cfg, x, test, raw_path, native_raw, fprs, bench, kw)
     return res
+
+
+def _bench_sizes(path: Path, x: np.ndarray, cfg: EvalConfig, kw: dict) -> dict:
+    """Single-window latency with 1, 128, ... packets: real rows tiled to the requested count."""
+    out = {}
+    # The real (non-padding) packets of the fullest window, repeated up to the requested count.
+    first = x[np.argmax((x[..., 0] != 0).reshape(len(x), -1).sum(1))]
+    flat = first.reshape(-1, first.shape[-1]) if first.ndim == 3 else first
+    real = flat[flat[:, 0] != 0]
+    for count in cfg.bench.raw_packets:
+        rows = real[np.arange(count) % len(real)]
+        tiled = np.broadcast_to(rows, first.shape[:-2] + rows.shape)[None].copy()
+        sized = dict(kw, batch=1, iters=max(10, kw["iters"] // 4), warmup=min(kw["warmup"], 5))
+        bench = onnx_bench.benchmark_isolated if cfg.bench.isolated else onnx_bench.benchmark
+        out[str(count)] = bench(path, tiled, cfg.threads, **sized).to_dict()
+    return out
 
 
 def _quantized(cand, cfg, x, test, path, native, fprs, bench, kw) -> dict:
@@ -290,8 +352,84 @@ def run_candidate(
     return res
 
 
-def run(cfg: EvalConfig, out_dir: Path) -> dict:
-    """Evaluate every configured candidate in every game context; returns the report dict."""
+def _apply_tuned(name, best, cfg, data, split, spec):
+    """Config / data / split / spec with the best parameters of a study applied."""
+    from corvus_ml.eval import tune as tuner
+
+    window_keys = set(tuner.WINDOW_SPACE)
+    model_params = {k: v for k, v in best.items() if k not in window_keys}
+    new_cfg = replace(
+        cfg, candidates={**cfg.candidates, name: {**cfg.candidates[name], **model_params}}
+    )
+    source = data.meta.get("raw_source")
+    if source is None or not (window_keys & set(best)):
+        return new_cfg, data, split, spec
+    window = tuner.window_for(data.meta["raw_spec"].window, best)
+    rebuilt = source.with_window(window).build(cfg.min_confidence, cfg.raw.max_windows, cfg.seed)
+    ctx = data.game_context[0]
+    rebuilt = rebuilt.take(np.flatnonzero(rebuilt.game_context == ctx))
+    rebuilt.meta["raw_source"] = source
+    rebuilt.meta["tokenizer_json"] = data.meta.get("tokenizer_json")
+    if cfg.unlabelled == "assume_legit":
+        rebuilt.label[rebuilt.label == LABEL_UNLABELLED] = LABEL_LEGIT
+    new_split = tuner.split_like(rebuilt, tuner.player_parts(data, split))
+    return new_cfg, rebuilt, new_split, FeatureSpec.current(raw_bytes=rebuilt.meta["raw_spec"])
+
+
+def pretrain_checkpoints(cfg: EvalConfig, out_dir: Path) -> dict:
+    """Masked pretraining on the unlabelled windows of the training players, one checkpoint per
+    game context (``<out>/pretrain/<context>.pt``). The model shape comes from the parameters of
+    the first raw-byte candidate; finetune with ``init_from = "<checkpoint>"``."""
+    from corvus_ml.eval.training import seed_everything
+    from corvus_ml.raw.model import RawAnomalyNet
+    from corvus_ml.raw.pretrain import flatten_windows, pretrain, save_checkpoint
+
+    if cfg.raw is None:
+        raise ValueError("pretraining needs a [raw] table")
+    seed_everything(cfg.seed, cfg.threads)
+    data, _ = load_data(cfg)
+    name = next(iter(cfg.candidates))
+    params = dict(cfg.candidates[name])
+    out: dict = {}
+    for ctx in cfg.contexts or sorted(set(data.game_context.tolist())):
+        sub = data.take(np.flatnonzero(data.game_context == ctx))
+        if len(sub) == 0:
+            continue
+        split = group_split(sub.label, sub.group_codes(), cfg.seed, cfg.split)
+        pool = sub.take(split.train)
+        cand = cand_pkg.create(name, cfg.seed, cfg.threads, params)
+        model_cfg = cand.model_config(sub)  # type: ignore[attr-defined]
+        net = RawAnomalyNet(replace(model_cfg, macro_windows=1))
+        ids, t = flatten_windows(pool.raw_ids, pool.raw_time)  # type: ignore[arg-type]
+        hist = pretrain(
+            net, ids, t, epochs=int(params.get("pretrain_epochs", 5)),
+            batch_size=int(params.get("batch_size", 16)), lr=float(params.get("pretrain_lr", 1e-3)),
+            weight_decay=float(params.get("weight_decay", 0.01)),
+            patience=int(params.get("patience", 3)), seed=cfg.seed,
+        )  # fmt: skip
+        path = save_checkpoint(out_dir / "pretrain" / f"{_safe(ctx)}.pt", net)
+        out[ctx] = {
+            "checkpoint": str(path),
+            "windows": int(len(ids)),
+            "epochs_run": len(hist.train_loss),
+            "train_loss": hist.train_loss,
+            "val_loss": hist.val_loss,
+        }
+    return out
+
+
+def _safe(text: str) -> str:
+    return "".join(c if c.isalnum() or c in "_.-" else "_" for c in text) or "context"
+
+
+def run(cfg: EvalConfig, out_dir: Path, tune: bool = False) -> dict:
+    """Evaluate every configured candidate in every game context; returns the report dict.
+
+    With ``tune`` the tunable candidates first get an Optuna study (``cfg.tune``) on the train /
+    val split; the best parameters (and, for raw-byte models, the best window) are then used for
+    the evaluation on the test split.
+    """
+    from corvus_ml.eval import tune as tuner
     from corvus_ml.eval.training import seed_everything
 
     seed_everything(cfg.seed, cfg.threads)
@@ -300,6 +438,8 @@ def run(cfg: EvalConfig, out_dir: Path) -> dict:
         raise ValueError(f"unknown candidates {unknown}; known: {sorted(cand_pkg.REGISTRY)}")
     spec = resolve_spec(cfg)
     data, synthetic = load_data(cfg)
+    if cfg.raw is not None:
+        spec = FeatureSpec.current(raw_bytes=data.meta["raw_spec"])
     assumed = 0
     if cfg.unlabelled == "assume_legit":
         mask = data.label == LABEL_UNLABELLED
@@ -317,6 +457,13 @@ def run(cfg: EvalConfig, out_dir: Path) -> dict:
         "split": list(cfg.split),
         "contexts": {},
     }
+    if cfg.raw is not None:
+        report["raw_bytes"] = {
+            "tokenizer_sha256": spec.raw_bytes.tokenizer_sha256,  # type: ignore[union-attr]
+            "vocab_size": spec.raw_bytes.vocab_size,  # type: ignore[union-attr]
+            "window": spec.raw_bytes.window.__dict__,  # type: ignore[union-attr]
+            "packet": spec.raw_bytes.packet.__dict__,  # type: ignore[union-attr]
+        }
     for ctx in contexts:
         sub = data.take(np.flatnonzero(data.game_context == ctx))
         if len(sub) == 0:
@@ -340,6 +487,15 @@ def run(cfg: EvalConfig, out_dir: Path) -> dict:
         }
         for name in cfg.candidates:
             log.info("context %s: %s", ctx, name)
-            info["candidates"][name] = run_candidate(name, cfg, sub, split, out_dir, ctx, spec)
+            c_cfg, c_data, c_split, c_spec = cfg, sub, split, spec
+            if tune and cand_pkg.REGISTRY[name].tunable:
+                summary = tuner.tune_candidate(name, cfg, ctx, sub, split, out_dir / "tune")
+                info.setdefault("tune", {})[name] = summary
+                c_cfg, c_data, c_split, c_spec = _apply_tuned(
+                    name, summary["best_params"], cfg, sub, split, spec
+                )
+            info["candidates"][name] = run_candidate(
+                name, c_cfg, c_data, c_split, out_dir, ctx, c_spec
+            )
         report["contexts"][ctx] = info
     return report
