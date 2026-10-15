@@ -25,6 +25,8 @@ from corvus_services.api.ports import (
     PlayerInfo,
     PoolRecord,
     Repos,
+    ScoreHistoryRecord,
+    ScoreLatestRecord,
     SnapshotMaterial,
     SnapshotRecord,
     StaleError,
@@ -315,6 +317,28 @@ class FakeJobRepo:
         return self.rows[job_id]
 
 
+class FakeScoreRepo:
+    def __init__(self) -> None:
+        self.latest_rows: dict[bytes, list[ScoreLatestRecord]] = {}
+        self.history_rows: dict[bytes, list[ScoreHistoryRecord]] = {}
+
+    async def latest(self, pseudonym: bytes) -> list[ScoreLatestRecord]:
+        return sorted(
+            self.latest_rows.get(pseudonym, []),
+            key=lambda r: (r.game_context, r.domain, r.model_name),
+        )
+
+    async def history(
+        self, pseudonym: bytes, game_context: str | None, limit: int
+    ) -> list[ScoreHistoryRecord]:
+        rows = [
+            r
+            for r in self.history_rows.get(pseudonym, [])
+            if game_context is None or r.game_context == game_context
+        ]
+        return sorted(rows, key=lambda r: (r.scored_at, r.id), reverse=True)[:limit]
+
+
 class FakeDb:
     def __init__(self) -> None:
         self.healthy = True
@@ -358,6 +382,7 @@ def make_repos() -> tuple[Repos, dict[str, Any]]:
         "blocklist": FakeBlocklistRepo(erasure),
         "models": FakeModelRepo(),
         "jobs": FakeJobRepo(),
+        "scores": FakeScoreRepo(),
         "db": FakeDb(),
     }
     return Repos(**parts), parts
