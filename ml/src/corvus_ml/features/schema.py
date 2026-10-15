@@ -19,6 +19,7 @@ EVENT_ENTITY_MOTION = 7
 ACTION_ATTACK = 2
 MOTION_RELATIVE = 1
 MOTION_TELEPORT = 2
+MOTION_SPAWN = 4
 
 # Vocabulary id of C_CLIENT_TICK_END (checked against vocabulary.json in the tests).
 PACKET_CLIENT_TICK_END = 27

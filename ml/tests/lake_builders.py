@@ -101,7 +101,7 @@ def tick_end(seq, t_ms, **kw) -> Frame:
     return Frame(seq, t_ms, packet_type=TICK_END, **kw)
 
 
-def entity_teleport(seq, t_ms, entity_id, xyz, **kw) -> Frame:
+def entity_teleport(seq, t_ms, entity_id, xyz, action=2, **kw) -> Frame:
     return Frame(
         seq,
         t_ms,
@@ -109,7 +109,7 @@ def entity_teleport(seq, t_ms, entity_id, xyz, **kw) -> Frame:
         packet_type=ENTITY_VELOCITY,
         event_kind=7,
         entity_id=entity_id,
-        action=2,
+        action=action,
         xyz=xyz,
         **kw,
     )

@@ -28,6 +28,7 @@ from corvus_ml.features.schema import (
     EVENT_PLACE,
     EVENT_SWING,
     MOTION_RELATIVE,
+    MOTION_SPAWN,
     MOTION_TELEPORT,
     TIME_SINCE_CAP_S,
     TOKEN_FEATURES,
@@ -208,7 +209,7 @@ def _update_entity(
 ) -> None:
     if math.isnan(x):
         return
-    if kind == MOTION_TELEPORT:
+    if kind in (MOTION_TELEPORT, MOTION_SPAWN):
         entities[entity_id] = (x, y, z)
     elif kind == MOTION_RELATIVE:
         prev = entities.get(entity_id)
