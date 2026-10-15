@@ -23,6 +23,7 @@ import pyarrow.parquet as pq
 from corvus_ml.features.reader import EventFiles, open_dataset
 from corvus_ml.features.spec import SPEC_FILE, FeatureSpec
 from corvus_ml.jobs import layout
+from corvus_ml.jobs.artifacts import check_needs_rebuild, register_prefix
 from corvus_ml.jobs.context import JobContext
 from corvus_ml.jobs.lifecycle import JobEnv, JobError, JobOutcome
 from corvus_ml.jobs.params import Params
@@ -67,9 +68,22 @@ def _deks(env: JobEnv):
         raise JobError(f"raw-byte jobs cannot read the player keys: {exc}") from None
 
 
-def _raw_files(env: JobEnv, manifest: dict[str, Any], sessions: list[dict[str, Any]]) -> list[str]:
-    """Keys of the ``raw`` files: the manifest's list, else the lake's date partitions of the
-    snapshot's sessions (the manifest of the API lists ``events`` only)."""
+def _raw_files(
+    env: JobEnv, snapshot_id: str, manifest: dict[str, Any], sessions: list[dict[str, Any]]
+) -> list[str]:
+    """Keys of the ``raw`` files: ``raw`` of ``GET /snapshots/{id}/files``.
+
+    Only an API that does not send the field (older version) is served by the fallback: the
+    manifest's list, else the lake's date partitions of the sessions' start dates. An empty
+    ``raw`` list is an answer (no raw files), not a reason to scan.
+    """
+    files = env.api.get_snapshot_files(snapshot_id)
+    if "raw" in files:
+        return [f["key"] for f in files["raw"] or []]
+    log.warning(
+        "the API lists no raw files (older version): falling back to the manifest / a scan of %s",
+        RAW_LAKE_ROOT,
+    )
     listed = [f["key"] for f in (manifest.get("files") or {}).get("raw") or []]
     if listed:
         return listed
@@ -110,6 +124,7 @@ def _read_params(ctx: JobContext, kind: str) -> dict[str, Any]:
     if macro is not None and (isinstance(macro, bool) or not isinstance(macro, (int, float))):
         raise JobError("macro_window_seconds must be a number")
     out: dict[str, Any] = {
+        "strict": p.boolean("strict", False),
         "contexts": p.game_contexts(),
         "group_size": p.integer("group_size", 4, 1, 1000),
         "tokenizer_sessions": p.integer("tokenizer_sessions", 2000, 1, 1_000_000),
@@ -180,6 +195,7 @@ def build_raw(ctx: JobContext, env: JobEnv, kind: str) -> JobOutcome:
 
     opts = _read_params(ctx, kind)
     snapshot = env.api.get_snapshot(ctx.snapshot_id)
+    check_needs_rebuild(snapshot, strict=opts["strict"])
     manifest = snapshot.get("manifest") or {}
     event_keys = [f["key"] for f in (manifest.get("files") or {}).get("events") or []]
     if not event_keys:
@@ -192,7 +208,7 @@ def build_raw(ctx: JobContext, env: JobEnv, kind: str) -> JobOutcome:
     infos = _infos(sel)
     if not infos:
         raise JobError("no sessions selected: the snapshot has none in the requested game contexts")
-    raw_keys = _raw_files(env, manifest, sel.sessions)
+    raw_keys = _raw_files(env, ctx.snapshot_id, manifest, sel.sessions)
     if not raw_keys:
         raise JobError("no raw files for the snapshot (short retention: are they still there?)")
     without_protocol = sum(1 for i in infos if i.protocol is None)
@@ -220,6 +236,7 @@ def build_raw(ctx: JobContext, env: JobEnv, kind: str) -> JobOutcome:
         prefix = tokenizer_prefix(ctx.snapshot_id, ctx.job_id)
         for name in (TOKENIZER_FILE, SPEC_FILE):
             env.store.put_file(f"{prefix}/{name}", out / name)
+        register_prefix(ctx, env, "tokenizer", prefix, contains_raw=False)
         result = {
             "tokenizer_prefix": prefix,
             "tokenizer_sha256": spec.tokenizer_sha256,
@@ -287,4 +304,5 @@ def build_raw(ctx: JobContext, env: JobEnv, kind: str) -> JobOutcome:
         f"{prefix}/{layout.BUILD_FILE}",
         json.dumps({**result, "job_id": ctx.job_id, "built_at": env.clock().isoformat()}).encode(),
     )
+    register_prefix(ctx, env, "raw_features", prefix, contains_raw=True)
     return JobOutcome(f"tokenized {packets} packets of {stats.sessions_read} sessions", result)

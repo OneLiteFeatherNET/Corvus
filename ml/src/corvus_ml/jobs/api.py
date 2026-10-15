@@ -7,9 +7,12 @@ Assumed shape of the snapshot endpoints (see docs/reference/ml-jobs.md):
 
 * ``GET /api/v1/snapshots/{id}`` returns the snapshot with its ``manifest``
   (``files.events[].key`` are object keys in the lake bucket);
+* ``GET /api/v1/snapshots/{id}/files`` returns ``{"items": [...], "raw": [...]}`` (entries with
+  ``key``); ``raw`` is absent on older APIs;
 * ``GET /api/v1/snapshots/{id}/sessions?exclude_erased=true`` returns a page
   ``{"items": [...], "next_cursor": ...}`` of sessions, each with ``session_id`` (hex),
-  ``pseudonym`` (hex), ``started_at``, ``segments`` (``[{"segment", "game_context"}]``) and
+  ``pseudonym`` (hex), ``started_at``, ``client_protocol``, ``segments``
+  (``[{"segment", "game_context"}]``) and
   optionally ``labels`` (``[{"label", "source", "confidence", "valid_from", "valid_to"}]``).
 """
 
@@ -39,6 +42,13 @@ class ApiError(RuntimeError):
         self.status = status
 
 
+class ArtifactInvalidated(ApiError):  # noqa: N818 - a domain event rather than a failure
+    """``409``: an erasure invalidated the snapshot's raw-derived artefacts after the job began."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, 409)
+
+
 class JobApi(Protocol):
     def update_job(
         self,
@@ -51,8 +61,17 @@ class JobApi(Protocol):
 
     def get_snapshot(self, snapshot_id: str) -> dict[str, Any]: ...
 
+    def get_snapshot_files(self, snapshot_id: str) -> dict[str, Any]:
+        """``GET /snapshots/{id}/files``: ``items`` (events) and, on current APIs, ``raw``."""
+
     def iter_snapshot_sessions(self, snapshot_id: str) -> Iterator[dict[str, Any]]:
         """Sessions of the snapshot, erased players excluded."""
+
+    def register_artifact(self, job_id: str, kind: str, s3_prefix: str, contains_raw: bool) -> None:
+        """``POST /jobs/{job_id}/artifacts`` (201 new, 200 repeated).
+
+        Raises :class:`ArtifactInvalidated` on ``409``.
+        """
 
     def register_model(self, payload: dict[str, Any]) -> dict[str, Any]:
         """``POST /models`` (stage ``registered``)."""
@@ -101,6 +120,18 @@ class HttpApiClient:
 
     def get_snapshot(self, snapshot_id: str) -> dict[str, Any]:
         return self._call("GET", f"/snapshots/{snapshot_id}", retry=True)
+
+    def get_snapshot_files(self, snapshot_id: str) -> dict[str, Any]:
+        return self._call("GET", f"/snapshots/{snapshot_id}/files", retry=True)
+
+    def register_artifact(self, job_id: str, kind: str, s3_prefix: str, contains_raw: bool) -> None:
+        body = {"kind": kind, "s3_prefix": s3_prefix, "contains_raw": contains_raw}
+        try:  # idempotent per (snapshot, prefix), so a retry is safe
+            self._call("POST", f"/jobs/{job_id}/artifacts", body=body, retry=True)
+        except ApiError as exc:
+            if exc.status == 409:
+                raise ArtifactInvalidated(str(exc)) from None
+            raise
 
     def iter_snapshot_sessions(self, snapshot_id: str) -> Iterator[dict[str, Any]]:
         cursor: str | None = None

@@ -6,7 +6,7 @@ import urllib.error
 
 import pytest
 
-from corvus_ml.jobs.api import ApiError, HttpApiClient
+from corvus_ml.jobs.api import ApiError, ArtifactInvalidated, HttpApiClient
 from corvus_ml.jobs.context import ApiSettings
 from job_fakes import JOB_ID, TOKEN
 
@@ -145,3 +145,46 @@ def test_model_registration_is_posted_once_and_never_retried():
     assert len(opener.requests) == 1
     assert opener.requests[0].get_method() == "POST"
     assert opener.requests[0].full_url.endswith("/api/v1/models")
+
+
+def test_snapshot_files_are_read_from_the_files_endpoint():
+    opener = ScriptedOpener({"items": [{"key": "a"}], "raw": [{"key": "r"}]})
+
+    files = client(opener).get_snapshot_files("snap")
+
+    assert files["raw"] == [{"key": "r"}]
+    assert opener.requests[0].full_url == "http://api:8080/api/v1/snapshots/snap/files"
+
+
+def test_an_artifact_is_registered_for_the_job():
+    opener = ScriptedOpener({"id": "x"})
+
+    client(opener).register_artifact(JOB_ID, "raw_features", "features/s/raw/", True)
+
+    request = opener.requests[0]
+    assert request.get_method() == "POST"
+    assert request.full_url == f"http://api:8080/api/v1/jobs/{JOB_ID}/artifacts"
+    assert json.loads(request.data) == {
+        "kind": "raw_features",
+        "s3_prefix": "features/s/raw/",
+        "contains_raw": True,
+    }
+
+
+def test_a_conflict_on_artifact_registration_is_reported_as_invalidated_and_not_retried():
+    opener = ScriptedOpener(http_error(409, {"title": "Conflict"}))
+
+    with pytest.raises(ArtifactInvalidated):
+        client(opener).register_artifact(JOB_ID, "raw_features", "features/s/raw/", True)
+
+    assert len(opener.requests) == 1
+
+
+def test_other_artifact_errors_stay_plain_api_errors():
+    opener = ScriptedOpener(http_error(403, {"title": "Forbidden"}))
+
+    with pytest.raises(ApiError) as caught:
+        client(opener).register_artifact(JOB_ID, "tokenizer", "tokenizers/s/j/", False)
+
+    assert not isinstance(caught.value, ArtifactInvalidated)
+    assert caught.value.status == 403

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from corvus_ml.jobs.api import ArtifactInvalidated
 from corvus_ml.jobs.context import JobContext, Secrets
 from corvus_ml.jobs.lifecycle import JobEnv
 from corvus_ml.jobs.storage import ObjectStore, local_store
@@ -27,7 +28,12 @@ class FakeApi:
         sessions: list[dict[str, Any]] | None = None,
         *,
         honour_exclude_erased: bool = True,
+        files: dict[str, Any] | None = None,
+        artifact_conflict: bool = False,
     ) -> None:
+        self.files = files if files is not None else {"items": []}  # no "raw": an older API
+        self.artifact_conflict = artifact_conflict
+        self.artifacts: list[dict[str, Any]] = []
         self.snapshot = snapshot or {}
         self.sessions = sessions or []
         self.honour_exclude_erased = honour_exclude_erased
@@ -48,6 +54,16 @@ class FakeApi:
 
     def get_snapshot(self, snapshot_id) -> dict[str, Any]:
         return self.snapshot
+
+    def get_snapshot_files(self, snapshot_id) -> dict[str, Any]:
+        return self.files
+
+    def register_artifact(self, job_id, kind, s3_prefix, contains_raw) -> None:
+        if self.artifact_conflict:
+            raise ArtifactInvalidated("POST /jobs/x/artifacts failed with HTTP 409")
+        self.artifacts.append(
+            {"job_id": job_id, "kind": kind, "s3_prefix": s3_prefix, "contains_raw": contains_raw}
+        )
 
     def iter_snapshot_sessions(self, snapshot_id) -> Iterator[dict[str, Any]]:
         self.session_requests += 1

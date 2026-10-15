@@ -9,7 +9,7 @@ import pytest
 from corvus_ml.features.spec import SPEC_FILE, FeatureSpec
 from corvus_ml.jobs.features_job import build_features
 from corvus_ml.jobs.lifecycle import JobError, run_job
-from job_fakes import SNAPSHOT_ID, FakeApi, key_set, make_context, make_env
+from job_fakes import JOB_ID, SNAPSHOT_ID, FakeApi, key_set, make_context, make_env
 from lake_builders import Frame, events_table, sid, write_events
 
 PREFIX = f"features/{SNAPSHOT_ID}"
@@ -213,3 +213,44 @@ def test_a_malformed_session_id_from_the_api_fails_the_job(tmp_path):
 
     with pytest.raises(JobError, match="malformed session id"):
         build_features(make_context(**SMALL), env)
+
+
+def test_the_aggregate_build_registers_windows_and_tokens_without_raw(tmp_path):
+    api, env = lake(tmp_path, [session(1)])
+
+    build_features(make_context(**SMALL), env)
+
+    assert [(a["kind"], a["s3_prefix"], a["contains_raw"]) for a in api.artifacts] == [
+        ("window_features", f"{PREFIX}/windows/", False),
+        ("window_tokens", f"{PREFIX}/window_tokens/", False),
+    ]
+    assert {a["job_id"] for a in api.artifacts} == {JOB_ID}
+
+
+def test_a_conflict_on_registration_fails_the_aggregate_build_and_deletes_the_prefix(tmp_path):
+    api, env = lake(tmp_path, [session(1)])
+    api.artifact_conflict = True
+
+    with pytest.raises(JobError, match="erasure invalidated"):
+        build_features(make_context(**SMALL), env)
+
+    assert not key_set(env.store, f"{PREFIX}/windows")
+
+
+def test_a_snapshot_that_needs_a_rebuild_is_built_by_default(tmp_path):
+    api, env = lake(tmp_path, [session(1)])
+    api.snapshot["needs_rebuild"] = True
+
+    outcome = build_features(make_context(**SMALL), env)
+
+    assert outcome.result["windows"] > 0
+
+
+def test_strict_refuses_a_snapshot_that_needs_a_rebuild(tmp_path):
+    api, env = lake(tmp_path, [session(1)])
+    api.snapshot["needs_rebuild"] = True
+
+    with pytest.raises(JobError, match="needs a rebuild"):
+        build_features(make_context(**SMALL, strict=True), env)
+
+    assert not key_set(env.store, PREFIX)

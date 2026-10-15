@@ -163,13 +163,110 @@ def test_missing_client_protocol_is_counted_and_not_fatal(syn, tmp_path):
     assert outcome.result["sessions_without_protocol"] == len(syn.sessions)
 
 
-def test_raw_files_listed_in_the_manifest_are_used_without_a_directory_scan(syn, tmp_path):
+def test_raw_files_listed_by_the_api_are_used_without_a_directory_scan(syn, tmp_path):
+    api, env = lake(tmp_path, syn)
+    api.files = {"items": [], "raw": [{"id": 2, "key": RAW_KEY}]}
+    env.store.put_bytes("lake/raw/date=2026-01-01/decoy.parquet", b"not a parquet file")
+
+    outcome = build_features(make_context(**BUILD), env)
+
+    assert outcome.result["raw_files"] == 1
+
+
+def test_an_empty_raw_list_from_the_api_is_an_answer_and_not_scanned(syn, tmp_path):
+    api, env = lake(tmp_path, syn)
+    api.files = {"items": [], "raw": []}  # the file is in the lake, the API says it is gone
+
+    with pytest.raises(JobError, match="no raw files"):
+        build_features(make_context(**BUILD), env)
+
+
+def test_without_the_raw_field_the_scan_is_the_fallback_and_warns(syn, tmp_path, caplog):
+    _, env = lake(tmp_path, syn)  # FakeApi files have no "raw": an older API
+
+    with caplog.at_level("WARNING", logger="corvus.job.raw"):
+        outcome = build_features(make_context(**BUILD), env)
+
+    assert outcome.result["raw_files"] == 1
+    assert "older version" in caplog.text
+
+
+def test_the_manifest_list_still_serves_an_api_without_the_raw_field(syn, tmp_path):
     _, env = lake(tmp_path, syn, manifest_raw=True)
     env.store.put_bytes("lake/raw/date=2026-01-01/decoy.parquet", b"not a parquet file")
 
     outcome = build_features(make_context(**BUILD), env)
 
     assert outcome.result["raw_files"] == 1
+
+
+def test_the_raw_build_registers_its_prefix_as_containing_raw(syn, tmp_path):
+    api, env = lake(tmp_path, syn)
+
+    build_features(make_context(**BUILD), env)
+
+    assert api.artifacts == [
+        {"job_id": JOB_ID, "kind": "raw_features", "s3_prefix": f"{RAW}/", "contains_raw": True}
+    ]
+
+
+def test_the_tokenizer_step_registers_its_prefix_without_raw(syn, tmp_path):
+    api, env = lake(tmp_path, syn)
+    params = {k: v for k, v in BUILD.items() if k != "kind"}
+
+    build_features(make_context(kind="train_tokenizer", **params), env)
+
+    assert api.artifacts == [
+        {
+            "job_id": JOB_ID,
+            "kind": "tokenizer",
+            "s3_prefix": f"tokenizers/{SNAPSHOT_ID}/{JOB_ID}/",
+            "contains_raw": False,
+        }
+    ]
+
+
+def test_a_conflict_on_registration_deletes_the_raw_prefix_and_fails_the_job(syn, tmp_path):
+    api, env = lake(tmp_path, syn)
+    api.artifact_conflict = True
+
+    with pytest.raises(JobError, match="erasure invalidated"):
+        build_features(make_context(**BUILD), env)
+
+    assert not key_set(env.store, RAW), "nothing derived from erased data may stay"
+
+
+def test_a_conflict_on_the_tokenizer_registration_deletes_it_too(syn, tmp_path):
+    api, env = lake(tmp_path, syn)
+    api.artifact_conflict = True
+    params = {k: v for k, v in BUILD.items() if k != "kind"}
+
+    with pytest.raises(JobError, match="erasure invalidated"):
+        build_features(make_context(kind="train_tokenizer", **params), env)
+
+    assert not key_set(env.store, f"tokenizers/{SNAPSHOT_ID}")
+
+
+def test_a_snapshot_that_needs_a_rebuild_is_built_and_logged_by_default(syn, tmp_path, caplog):
+    api, env = lake(tmp_path, syn)
+    api.snapshot["needs_rebuild"] = True
+
+    with caplog.at_level("WARNING", logger="corvus.job.artifacts"):
+        outcome = build_features(make_context(**BUILD), env)
+
+    assert outcome.result["packets"] > 0
+    assert "needs_rebuild" in caplog.text
+
+
+def test_a_strict_raw_build_refuses_a_snapshot_that_needs_a_rebuild(syn, tmp_path):
+    api, env = lake(tmp_path, syn)
+    api.snapshot["needs_rebuild"] = True
+
+    with pytest.raises(JobError, match="needs a rebuild"):
+        build_features(make_context(**BUILD, strict=True), env)
+
+    assert not key_set(env.store, RAW)
+    assert api.artifacts == []
 
 
 def test_a_snapshot_without_raw_files_fails_with_a_clear_message(syn, tmp_path):
