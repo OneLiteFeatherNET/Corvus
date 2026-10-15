@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable, Sequence
 from concurrent.futures import Executor, Future
 from datetime import timedelta
@@ -17,7 +18,7 @@ from corvus_ml.features.spec import FeatureSpec
 from corvus_services.proto import pb
 from corvus_services.scoring.batching import MicroBatcher
 from corvus_services.scoring.metrics import ScoreMetrics
-from corvus_services.scoring.models import ModelManager, spec_key
+from corvus_services.scoring.models import ModelManager, card_key, spec_key, tokenizer_key
 from corvus_services.scoring.ports import ModelEntry, ScoreRecord, SessionLookup
 from corvus_services.scoring.scorer import Scorer
 from corvus_services.scoring.service import ScoringService
@@ -49,9 +50,11 @@ class FakeSession:
         self.value = value
         self.intra = intra
         self.runs: list[int] = []  # batch sizes
+        self.inputs: list[np.ndarray] = []
 
     def run(self, x: np.ndarray) -> list[np.ndarray]:
         self.runs.append(len(x))
+        self.inputs.append(x)
         return [np.full((len(x), 1), self.value, dtype=np.float32)]
 
 
@@ -69,9 +72,12 @@ class FakeFactory:
         if name in self.fail_for:
             raise RuntimeError("invalid onnx")
         spec = FeatureSpec.read(path.parent)
-        session = FakeSession(
-            (None, spec.n_agg_inputs), self.values.get(name, 0.5), intra_op_threads
-        )
+        shape: tuple[int | None, ...] = (None, spec.n_agg_inputs)
+        if spec.raw_bytes is not None:
+            channels = spec.raw_bytes.packet.max_tokens_per_packet + 1
+            macro = spec.raw_bytes.window.macro_windows
+            shape = (None, None, channels) if macro == 1 else (None, macro, None, channels)
+        session = FakeSession(shape, self.values.get(name, 0.5), intra_op_threads)
         self.created.append((path, intra_op_threads))
         self.sessions[name] = session
         return session
@@ -86,11 +92,21 @@ class FakeFiles:
             raise KeyError(key)
         return self.objects[key]
 
-    def put_model(self, entry: ModelEntry, spec: FeatureSpec | None = None) -> None:
+    def put_model(
+        self,
+        entry: ModelEntry,
+        spec: FeatureSpec | None = None,
+        card: dict[str, object] | None = None,
+        tokenizer: bytes | None = None,
+    ) -> None:
         self.objects[entry.onnx_key] = b"onnx"
         self.objects[spec_key(entry.onnx_key)] = (
             (spec or FeatureSpec.current(SMALL)).to_json().encode()
         )
+        if card is not None:
+            self.objects[card_key(entry.onnx_key)] = json.dumps(card).encode()
+        if tokenizer is not None:
+            self.objects[tokenizer_key(entry.onnx_key)] = tokenizer
 
 
 def entry(
@@ -176,7 +192,13 @@ class Rig:
         self.factory = FakeFactory()
         self.publisher = FakePublisher()
         self.manager = ModelManager(
-            self.catalog, self.files, self.factory, self.settings.score_models_dir, 2, self.metrics
+            self.catalog,
+            self.files,
+            self.factory,
+            self.settings.score_models_dir,
+            2,
+            self.metrics,
+            self.settings.score_p99_budget_ms or None,
         )
         self.writer = ScoreWriter(
             self.catalog,
@@ -219,9 +241,16 @@ class Rig:
         self.log: list[str] = []
         self.counter = 0
 
-    def add_model(self, e: ModelEntry, value: float = 0.5, spec: FeatureSpec | None = None) -> None:
+    def add_model(
+        self,
+        e: ModelEntry,
+        value: float = 0.5,
+        spec: FeatureSpec | None = None,
+        card: dict[str, object] | None = None,
+        tokenizer: bytes | None = None,
+    ) -> None:
         self.catalog.models.append(e)
-        self.files.put_model(e, spec)
+        self.files.put_model(e, spec, card, tokenizer)
         self.factory.values[e.id] = value
 
     async def start(self) -> None:

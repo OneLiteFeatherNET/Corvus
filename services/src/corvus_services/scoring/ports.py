@@ -27,6 +27,7 @@ class SessionLookup:
     key_id: str
     observed_protocol: int
     segments: dict[int, str]  # segment -> game_context
+    client_protocol: int | None = None  # what the raw-byte models' protocol token is built from
 
 
 @dataclass(frozen=True)

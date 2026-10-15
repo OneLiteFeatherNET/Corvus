@@ -65,7 +65,8 @@ class PgScoreCatalog:
     async def lookup_session(self, session_id: bytes) -> SessionLookup | None:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT s.pseudonym, p.key_id, s.observed_protocol FROM corvus.sessions s"
+                "SELECT s.pseudonym, p.key_id, s.observed_protocol, s.client_protocol"
+                " FROM corvus.sessions s"
                 " JOIN corvus.players p USING (pseudonym)"
                 " WHERE s.session_id = %s AND NOT s.orphan AND p.erased_at IS NULL",
                 (session_id,),
@@ -78,7 +79,7 @@ class PgScoreCatalog:
                 (session_id,),
             )
             segments = {int(r[0]): str(r[1]) for r in await cur.fetchall()}
-        return SessionLookup(session_id, bytes(row[0]), row[1], int(row[2]), segments)
+        return SessionLookup(session_id, bytes(row[0]), row[1], int(row[2]), segments, int(row[3]))
 
     async def active_models(self) -> list[ModelEntry]:
         async with self._pool.connection() as conn:
