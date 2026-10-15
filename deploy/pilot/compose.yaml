@@ -33,7 +33,8 @@ x-paper: &paper
 services:
   stage-corvus:
     # One-shot: copies exactly one corvus-velocity-*.jar (no -sources/-plain/-javadoc)
-    # into a volume that the proxy mounts as /plugins.
+    # into a volume that the proxy mounts as /plugins, and makes the capture directory
+    # writable for the proxy user (a bind mount that Docker creates would belong to root).
     image: alpine:3.22
     restart: "no"
     cpus: 0.25
@@ -41,11 +42,14 @@ services:
     volumes:
       - ../../plugin/build/libs:/src:ro
       - corvus-plugin:/dst
+      - ./data/captures:/captures
     command:
       - sh
       - -c
       - |
         set -eu
+        # 1000:1000 is the default user of the itzg images
+        chown 1000:1000 /captures
         rm -f /dst/*.jar
         n=0
         for f in /src/corvus-velocity-*.jar; do
@@ -89,6 +93,8 @@ services:
       - proxy-server:/server
       - corvus-plugin:/plugins:ro
       - ./proxy/velocity.toml:/config/velocity.toml:ro
+      # Velocity's data directory for the plugin id "corvus" is plugins/corvus. The plugin reads
+      # config.toml there and writes captures/<yyyy-MM-dd>/<session-id>.cvc below it.
       - ./proxy/corvus-config.toml:/server/plugins/corvus/config.toml:ro
       - ./data/captures:/server/plugins/corvus/captures
 

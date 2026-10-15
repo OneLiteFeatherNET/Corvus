@@ -1,19 +1,35 @@
-# Corvus plugin configuration for the pilot.
-# The key names are a best-effort match for the plugin's config contract; align
-# them with the plugin's default config.toml once it is merged.
+# Corvus plugin configuration for the pilot. Mounted read-only as plugins/corvus/config.toml.
+# Key names follow CorvusConfig.DEFAULT_TOML of the plugin (CorvusConfigTest guards this file).
+# Captures are written to plugins/corvus/captures (mounted from deploy/pilot/data/captures).
+
+proxy_id = "pilot-proxy"
 
 [pseudonym]
-# The HMAC key itself comes from the CORVUS_PSEUDONYM_KEY environment variable.
+# The base64 HMAC key comes from the CORVUS_PSEUDONYM_KEY environment variable (set in .env).
+# Without it the plugin loads but captures nothing.
+key_file = ""
 key_id = "pilot-1"
 
+[players]
+mode = "all"
+allowlist = []
+blocklist = []
+
 [capture]
-output_dir = "captures"
-# Keep payload bytes during the pilot so bytes/s reflect real frame sizes.
-include_payload = true
+# Privacy: "serverbound" records payload bytes of serverbound play packets (minus text-bearing types
+# such as signs, books, anvil names, plugin messages) and of a few clientbound motion packets.
+# Clientbound payloads would contain names and UUIDs of other players and are not kept.
+# Use "none" to record no payload bytes at all. "all" is for local debugging only.
+raw_payloads = "serverbound"
+max_payload_bytes = 2048
+queue_max_bytes = 67108864
+batch_size = 200
+flush_interval_seconds = 5
 
 [game_context]
 default = "unknown"
 
+# backend server name (see velocity.toml) = game context tag
 [game_context.servers]
 lobby = "lobby"
 pvp = "pvp"

@@ -52,6 +52,9 @@ tasks.test {
     // The committed vocabulary export is checked against the Java vocabulary. Regenerate it with
     //   ./gradlew :plugin:test --tests '*VocabularyJsonTest' -PupdateVocabulary
     inputs.files(vocabularyJson)
+    val pilotConfig = rootProject.file("deploy/pilot/proxy/corvus-config.toml")
+    inputs.files(pilotConfig)
+    systemProperty("corvus.pilot.config", pilotConfig.absolutePath)
     systemProperty("corvus.vocabulary.json", vocabularyJson.absolutePath)
     systemProperty("corvus.vocabulary.update", providers.gradleProperty("updateVocabulary").isPresent.toString())
 }
