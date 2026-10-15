@@ -1,0 +1,129 @@
+{
+  "app": { "name": "Corvus management interface" },
+  "common": {
+    "skipToContent": "Skip to content", "menu": "Menu", "language": "Language", "lightTheme": "Switch to light theme",
+    "darkTheme": "Switch to dark theme", "navigation": "Main navigation", "refresh": "Refresh", "loading": "Loading",
+    "empty": "Nothing here yet", "loadMore": "Load more", "search": "Search", "save": "Save", "cancel": "Cancel",
+    "edit": "Edit", "delete": "Delete", "close": "Close", "yes": "Yes", "no": "No", "all": "All",
+    "updated": "Updated", "created": "Created", "createdBy": "Created by", "line": "Line {n}"
+  },
+  "nav": {
+    "dashboard": "Dashboard", "pools": "Pools", "snapshots": "Snapshots", "jobs": "Jobs", "models": "Models",
+    "labels": "Labels", "players": "Players", "blocklist": "Blocklist"
+  },
+  "roles": { "admin": "Admin", "data_scientist": "Data scientist", "staff": "Staff", "viewer": "Viewer" },
+  "auth": {
+    "account": "Account", "noRoles": "No Corvus role in the token", "logout": "Sign out", "title": "Sign in to Corvus",
+    "oidcHint": "You will be redirected to the identity provider.",
+    "tokenHint": "Development login: paste the API development token and choose the roles the interface should assume. The API enforces the real roles.",
+    "token": "Bearer token", "rolesLegend": "Roles (interface only)", "login": "Sign in", "completing": "Completing sign-in",
+    "failed": "Sign-in failed"
+  },
+  "errors": {
+    "configTitle": "The interface is not configured",
+    "configHint": "Check that config.json is mounted next to the application and valid.",
+    "network": "The API could not be reached", "networkHint": "Check the API address in config.json, CORS or the reverse proxy.",
+    "unexpected": "Something went wrong", "forbiddenTitle": "Not allowed",
+    "forbiddenText": "Your role does not allow this page."
+  },
+  "dashboard": {
+    "title": "Dashboard", "subtitle": "State of pools, jobs and models",
+    "pools": "Pools", "snapshots": "Snapshots", "runningJobs": "Running jobs", "models": "Models",
+    "modelsPerStage": "Models per stage", "recentJobs": "Recent jobs", "recentErasures": "Recent erasures"
+  },
+  "pools": {
+    "title": "Pools", "new": "New pool", "edit": "Edit pool", "saveAndPreview": "Save and preview",
+    "createSnapshot": "Create snapshot", "snapshotCreated": "Snapshot created:", "noFilter": "No conditions: all sessions match",
+    "rawFilter": "Filter as JSON", "deleteTitle": "Delete pool?",
+    "deleteText": "Pool \"{name}\" will be deleted. Its snapshots are kept.",
+    "form": {
+      "name": "Name", "description": "Description", "filter": "Filter", "gameContexts": "Game contexts",
+      "backendServers": "Backend servers", "listHint": "Type a value and press Enter", "brandInclude": "Client brands (include)",
+      "brandExclude": "Client brands (exclude)", "protocolMin": "Protocol minimum", "protocolMax": "Protocol maximum",
+      "dateStart": "From (UTC date)", "dateEnd": "To (UTC date)", "labelValue": "Label", "labelAny": "Any",
+      "labelMinConfidence": "Minimum label confidence", "minDuration": "Minimum session duration (s)",
+      "maxDropRate": "Maximum drop rate (0 to 1)", "retention": "Retention (days)",
+      "retentionHint": "For retention jobs; does not change the selection", "excludeOrphans": "Exclude orphan sessions"
+    },
+    "preview": {
+      "title": "Preview", "refresh": "Refresh preview", "stale": "The filter changed since the last save. The preview shows the saved pool.",
+      "none": "No preview yet.", "savedOnly": "The API previews the saved pool. Save to update the numbers.",
+      "sessions": "Sessions", "segments": "Segments", "distinctPlayers": "Players", "eventsFiles": "Event files",
+      "framesEstimate": "Frames (estimate)", "labelDistribution": "Label distribution"
+    },
+    "errors": {
+      "nameRequired": "A name is required", "nameTooLong": "At most 200 characters", "protocolOrder": "Minimum must not exceed maximum",
+      "dateOrder": "Start must not be after end", "dropRateRange": "Between 0 and 1", "confidenceRange": "Between 0 and 1",
+      "durationNegative": "Must not be negative", "retentionRange": "Between 1 and 3650", "protocolNegative": "Must not be negative"
+    },
+    "summary": {
+      "gameContexts": "Game", "backendServers": "Server", "protocol": "Protocol", "brandInclude": "Brand +", "brandExclude": "Brand -",
+      "dateRange": "Dates", "label": "Label", "minDuration": "Min. duration", "maxDropRate": "Max. drop rate", "retention": "Retention"
+    }
+  },
+  "snapshots": {
+    "title": "Snapshots", "detail": "Snapshot", "pool": "Pool", "manifestHash": "Manifest hash", "sessions": "Sessions",
+    "files": "Files", "startJob": "Start job", "openPool": "Open pool", "filter": "Filter at snapshot time"
+  },
+  "jobs": {
+    "title": "Jobs", "typeLabel": "Type", "statusLabel": "Status", "snapshot": "Snapshot", "params": "Parameters",
+    "paramsHint": "JSON object, at most 16 KiB, no secrets", "runner": "Runner", "finished": "Finished", "message": "Message",
+    "polling": "Refreshing while the job is running",
+    "paramsErrors": { "invalidJson": "Not valid JSON", "notObject": "Must be a JSON object", "tooLarge": "Larger than 16 KiB" },
+    "type": { "build_features": "Build features", "evaluate": "Evaluate", "train": "Train" },
+    "status": { "queued": "Queued", "running": "Running", "succeeded": "Succeeded", "failed": "Failed" }
+  },
+  "models": {
+    "title": "Model registry", "name": "Name", "version": "Version", "gameContext": "Game context", "domain": "Domain",
+    "stageLabel": "Stage", "compare": "Compare", "compareHint": "Select two models in the table to compare them.",
+    "compareTitle": "Compare models", "compareA": "Model A", "compareB": "Model B", "comparePick": "Choose two models.",
+    "better": "Better value", "metricsTitle": "Metrics", "details": "Details", "history": "Stage history", "from": "From",
+    "to": "To", "actor": "Actor", "reason": "Reason", "notFound": "Model not found",
+    "metrics": {
+      "recallAtFpr": "Recall at FPR 0.1 %", "prAuc": "PR-AUC", "rocAuc": "ROC-AUC", "ece": "ECE", "p50": "Latency p50",
+      "p99": "Latency p99", "rss": "Memory (RSS)"
+    },
+    "stage": { "registered": "Registered", "shadow": "Shadow", "canary": "Canary", "enforce": "Enforce", "archived": "Archived" },
+    "transition": {
+      "title": "Change stage of {name} {version}", "current": "Current stage", "target": "New stage",
+      "final": "This model is archived. Archived is final.", "reason": "Reason", "apply": "Apply", "open": "Change stage"
+    }
+  },
+  "labels": {
+    "title": "Labels", "create": "Create label", "import": "Import CSV", "subjectType": "Subject type", "subject": "Subject",
+    "label": "Label", "source": "Source", "confidence": "Confidence", "validFrom": "Valid from", "validTo": "Valid to",
+    "note": "Note", "noteHint": "Keep personal data out", "importHint": "All rows or none are imported. Required columns:",
+    "chooseFile": "CSV file", "csvOk": "{n} rows look valid", "csvIssues": "{n} problems found", "moreIssues": "{n} more",
+    "previewRows": "Showing {n} of {total} rows", "upload": "Upload", "imported": "{n} labels imported",
+    "value": { "legit": "Legit", "cheat": "Cheat", "labeled": "Labeled", "unlabeled": "Unlabeled" },
+    "errors": { "badSubject": "Pseudonym: 64 hex characters, session: 32" },
+    "csvErrors": {
+      "tooLarge": "File exceeds 8 MiB", "empty": "The file is empty", "missingColumn": "Missing column", "unknownColumn": "Unknown column",
+      "tooManyRows": "More than 50 000 rows", "extraCells": "More cells than columns", "badSubjectType": "Subject type must be pseudonym or session",
+      "badSubject": "Subject has the wrong length or is not hex", "badLabel": "Label must be legit or cheat", "badSource": "Unknown source",
+      "badConfidence": "Confidence must be between 0 and 1", "badDate": "Date needs an ISO format with time zone",
+      "dateOrder": "valid_from must be before valid_to", "noteTooLong": "Note longer than 2000 characters"
+    }
+  },
+  "players": {
+    "title": "Players", "subtitle": "Pseudonym lookup and erasure (admin)", "pseudonym": "Pseudonym", "keyId": "Key id",
+    "known": "Known in catalog", "firstSeen": "First seen", "lastSeen": "Last seen", "erasedAt": "Erased at",
+    "byPseudonym": "Erase by pseudonym", "invalidPseudonym": "64 hex characters", "requests": "Erasure requests",
+    "localLogHint": "The API has no list of erasure requests. This list shows the requests made from this browser.",
+    "requestedAt": "Requested", "requestedBy": "By", "status": "Status", "keyDeleted": "Key deleted", "compactionPending": "Compaction pending",
+    "lookup": {
+      "title": "UUID to pseudonym", "privacy": "The UUID is sent in a POST body, never in a URL, and is not stored by the interface.",
+      "uuid": "Minecraft UUID", "invalid": "Not a valid UUID", "submit": "Look up"
+    },
+    "erasure": {
+      "title": "Erase player data", "warning": "This crypto-shreds the raw data and blocklists the pseudonym permanently. It cannot be undone.",
+      "target": "Pseudonym", "typeToConfirm": "Type {word} to confirm", "caseHint": "Upper case, exactly",
+      "confirm": "Erase permanently", "open": "Erase player data"
+    }
+  },
+  "blocklist": {
+    "title": "Blocklist", "kind": "Kind", "add": "Add entry", "source": "Source", "reason": "Reason",
+    "permanent": "Entries created by an erasure are permanent",
+    "kinds": { "block": "Block", "allow": "Allow" }, "sources": { "manual": "Manual", "erasure": "Erasure" }
+  }
+}

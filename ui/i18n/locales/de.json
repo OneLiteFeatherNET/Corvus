@@ -1,0 +1,129 @@
+{
+  "app": { "name": "Corvus Verwaltungsoberfläche" },
+  "common": {
+    "skipToContent": "Zum Inhalt springen", "menu": "Menü", "language": "Sprache", "lightTheme": "Zum hellen Design wechseln",
+    "darkTheme": "Zum dunklen Design wechseln", "navigation": "Hauptnavigation", "refresh": "Aktualisieren", "loading": "Lädt",
+    "empty": "Noch nichts vorhanden", "loadMore": "Mehr laden", "search": "Suchen", "save": "Speichern", "cancel": "Abbrechen",
+    "edit": "Bearbeiten", "delete": "Löschen", "close": "Schließen", "yes": "Ja", "no": "Nein", "all": "Alle",
+    "updated": "Aktualisiert", "created": "Erstellt", "createdBy": "Erstellt von", "line": "Zeile {n}"
+  },
+  "nav": {
+    "dashboard": "Übersicht", "pools": "Pools", "snapshots": "Snapshots", "jobs": "Jobs", "models": "Modelle",
+    "labels": "Labels", "players": "Spieler", "blocklist": "Sperrliste"
+  },
+  "roles": { "admin": "Admin", "data_scientist": "Data Scientist", "staff": "Team", "viewer": "Betrachter" },
+  "auth": {
+    "account": "Konto", "noRoles": "Keine Corvus-Rolle im Token", "logout": "Abmelden", "title": "Bei Corvus anmelden",
+    "oidcHint": "Du wirst zum Identitätsanbieter weitergeleitet.",
+    "tokenHint": "Entwicklungs-Login: Füge das Entwicklungs-Token der API ein und wähle die Rollen, die die Oberfläche annehmen soll. Die API erzwingt die echten Rollen.",
+    "token": "Bearer-Token", "rolesLegend": "Rollen (nur Oberfläche)", "login": "Anmelden", "completing": "Anmeldung wird abgeschlossen",
+    "failed": "Anmeldung fehlgeschlagen"
+  },
+  "errors": {
+    "configTitle": "Die Oberfläche ist nicht konfiguriert",
+    "configHint": "Prüfe, ob config.json neben der Anwendung eingebunden und gültig ist.",
+    "network": "Die API ist nicht erreichbar", "networkHint": "Prüfe die API-Adresse in config.json, CORS oder den Reverse Proxy.",
+    "unexpected": "Etwas ist schiefgelaufen", "forbiddenTitle": "Nicht erlaubt",
+    "forbiddenText": "Deine Rolle erlaubt diese Seite nicht."
+  },
+  "dashboard": {
+    "title": "Übersicht", "subtitle": "Stand von Pools, Jobs und Modellen",
+    "pools": "Pools", "snapshots": "Snapshots", "runningJobs": "Laufende Jobs", "models": "Modelle",
+    "modelsPerStage": "Modelle pro Stufe", "recentJobs": "Letzte Jobs", "recentErasures": "Letzte Löschungen"
+  },
+  "pools": {
+    "title": "Pools", "new": "Neuer Pool", "edit": "Pool bearbeiten", "saveAndPreview": "Speichern und Vorschau",
+    "createSnapshot": "Snapshot erstellen", "snapshotCreated": "Snapshot erstellt:", "noFilter": "Keine Bedingungen: alle Sessions passen",
+    "rawFilter": "Filter als JSON", "deleteTitle": "Pool löschen?",
+    "deleteText": "Der Pool \"{name}\" wird gelöscht. Seine Snapshots bleiben erhalten.",
+    "form": {
+      "name": "Name", "description": "Beschreibung", "filter": "Filter", "gameContexts": "Spielkontexte",
+      "backendServers": "Backend-Server", "listHint": "Wert eingeben und Enter drücken", "brandInclude": "Client-Marken (einschließen)",
+      "brandExclude": "Client-Marken (ausschließen)", "protocolMin": "Protokoll Minimum", "protocolMax": "Protokoll Maximum",
+      "dateStart": "Von (UTC-Datum)", "dateEnd": "Bis (UTC-Datum)", "labelValue": "Label", "labelAny": "Beliebig",
+      "labelMinConfidence": "Minimale Label-Sicherheit", "minDuration": "Minimale Sessiondauer (s)",
+      "maxDropRate": "Maximale Drop-Rate (0 bis 1)", "retention": "Aufbewahrung (Tage)",
+      "retentionHint": "Für Retention-Jobs; ändert die Auswahl nicht", "excludeOrphans": "Verwaiste Sessions ausschließen"
+    },
+    "preview": {
+      "title": "Vorschau", "refresh": "Vorschau aktualisieren", "stale": "Der Filter wurde seit dem Speichern geändert. Die Vorschau zeigt den gespeicherten Pool.",
+      "none": "Noch keine Vorschau.", "savedOnly": "Die API zeigt die Vorschau des gespeicherten Pools. Speichere, um die Zahlen zu aktualisieren.",
+      "sessions": "Sessions", "segments": "Segmente", "distinctPlayers": "Spieler", "eventsFiles": "Event-Dateien",
+      "framesEstimate": "Frames (Schätzung)", "labelDistribution": "Label-Verteilung"
+    },
+    "errors": {
+      "nameRequired": "Ein Name ist erforderlich", "nameTooLong": "Höchstens 200 Zeichen", "protocolOrder": "Minimum darf Maximum nicht überschreiten",
+      "dateOrder": "Start darf nicht nach dem Ende liegen", "dropRateRange": "Zwischen 0 und 1", "confidenceRange": "Zwischen 0 und 1",
+      "durationNegative": "Darf nicht negativ sein", "retentionRange": "Zwischen 1 und 3650", "protocolNegative": "Darf nicht negativ sein"
+    },
+    "summary": {
+      "gameContexts": "Spiel", "backendServers": "Server", "protocol": "Protokoll", "brandInclude": "Marke +", "brandExclude": "Marke -",
+      "dateRange": "Datum", "label": "Label", "minDuration": "Min. Dauer", "maxDropRate": "Max. Drop-Rate", "retention": "Aufbewahrung"
+    }
+  },
+  "snapshots": {
+    "title": "Snapshots", "detail": "Snapshot", "pool": "Pool", "manifestHash": "Manifest-Hash", "sessions": "Sessions",
+    "files": "Dateien", "startJob": "Job starten", "openPool": "Pool öffnen", "filter": "Filter zum Snapshot-Zeitpunkt"
+  },
+  "jobs": {
+    "title": "Jobs", "typeLabel": "Typ", "statusLabel": "Status", "snapshot": "Snapshot", "params": "Parameter",
+    "paramsHint": "JSON-Objekt, höchstens 16 KiB, keine Geheimnisse", "runner": "Runner", "finished": "Beendet", "message": "Meldung",
+    "polling": "Wird aktualisiert, solange der Job läuft",
+    "paramsErrors": { "invalidJson": "Kein gültiges JSON", "notObject": "Muss ein JSON-Objekt sein", "tooLarge": "Größer als 16 KiB" },
+    "type": { "build_features": "Features bauen", "evaluate": "Auswerten", "train": "Trainieren" },
+    "status": { "queued": "Wartend", "running": "Läuft", "succeeded": "Erfolgreich", "failed": "Fehlgeschlagen" }
+  },
+  "models": {
+    "title": "Modell-Registry", "name": "Name", "version": "Version", "gameContext": "Spielkontext", "domain": "Domäne",
+    "stageLabel": "Stufe", "compare": "Vergleichen", "compareHint": "Wähle zwei Modelle in der Tabelle, um sie zu vergleichen.",
+    "compareTitle": "Modelle vergleichen", "compareA": "Modell A", "compareB": "Modell B", "comparePick": "Wähle zwei Modelle.",
+    "better": "Besserer Wert", "metricsTitle": "Metriken", "details": "Details", "history": "Stufenverlauf", "from": "Von",
+    "to": "Nach", "actor": "Akteur", "reason": "Begründung", "notFound": "Modell nicht gefunden",
+    "metrics": {
+      "recallAtFpr": "Recall bei FPR 0,1 %", "prAuc": "PR-AUC", "rocAuc": "ROC-AUC", "ece": "ECE", "p50": "Latenz p50",
+      "p99": "Latenz p99", "rss": "Speicher (RSS)"
+    },
+    "stage": { "registered": "Registriert", "shadow": "Shadow", "canary": "Canary", "enforce": "Enforce", "archived": "Archiviert" },
+    "transition": {
+      "title": "Stufe von {name} {version} ändern", "current": "Aktuelle Stufe", "target": "Neue Stufe",
+      "final": "Dieses Modell ist archiviert. Archiviert ist endgültig.", "reason": "Begründung", "apply": "Anwenden", "open": "Stufe ändern"
+    }
+  },
+  "labels": {
+    "title": "Labels", "create": "Label erstellen", "import": "CSV importieren", "subjectType": "Subjekttyp", "subject": "Subjekt",
+    "label": "Label", "source": "Quelle", "confidence": "Sicherheit", "validFrom": "Gültig ab", "validTo": "Gültig bis",
+    "note": "Notiz", "noteHint": "Keine personenbezogenen Daten", "importHint": "Es werden alle Zeilen oder keine importiert. Pflichtspalten:",
+    "chooseFile": "CSV-Datei", "csvOk": "{n} Zeilen sehen gültig aus", "csvIssues": "{n} Probleme gefunden", "moreIssues": "{n} weitere",
+    "previewRows": "{n} von {total} Zeilen angezeigt", "upload": "Hochladen", "imported": "{n} Labels importiert",
+    "value": { "legit": "Legit", "cheat": "Cheat", "labeled": "Gelabelt", "unlabeled": "Ungelabelt" },
+    "errors": { "badSubject": "Pseudonym: 64 Hex-Zeichen, Session: 32" },
+    "csvErrors": {
+      "tooLarge": "Datei größer als 8 MiB", "empty": "Die Datei ist leer", "missingColumn": "Spalte fehlt", "unknownColumn": "Unbekannte Spalte",
+      "tooManyRows": "Mehr als 50 000 Zeilen", "extraCells": "Mehr Zellen als Spalten", "badSubjectType": "Subjekttyp muss pseudonym oder session sein",
+      "badSubject": "Subjekt hat die falsche Länge oder ist nicht hex", "badLabel": "Label muss legit oder cheat sein", "badSource": "Unbekannte Quelle",
+      "badConfidence": "Sicherheit muss zwischen 0 und 1 liegen", "badDate": "Datum braucht ISO-Format mit Zeitzone",
+      "dateOrder": "valid_from muss vor valid_to liegen", "noteTooLong": "Notiz länger als 2000 Zeichen"
+    }
+  },
+  "players": {
+    "title": "Spieler", "subtitle": "Pseudonym-Suche und Löschung (Admin)", "pseudonym": "Pseudonym", "keyId": "Schlüssel-ID",
+    "known": "Im Katalog bekannt", "firstSeen": "Zuerst gesehen", "lastSeen": "Zuletzt gesehen", "erasedAt": "Gelöscht am",
+    "byPseudonym": "Per Pseudonym löschen", "invalidPseudonym": "64 Hex-Zeichen", "requests": "Löschanfragen",
+    "localLogHint": "Die API hat keine Liste der Löschanfragen. Diese Liste zeigt die Anfragen, die in diesem Browser gestellt wurden.",
+    "requestedAt": "Angefragt", "requestedBy": "Von", "status": "Status", "keyDeleted": "Schlüssel gelöscht", "compactionPending": "Kompaktierung offen",
+    "lookup": {
+      "title": "UUID zu Pseudonym", "privacy": "Die UUID wird im POST-Body gesendet, nie in einer URL, und von der Oberfläche nicht gespeichert.",
+      "uuid": "Minecraft-UUID", "invalid": "Keine gültige UUID", "submit": "Nachschlagen"
+    },
+    "erasure": {
+      "title": "Spielerdaten löschen", "warning": "Die Rohdaten werden per Crypto-Shredding unbrauchbar gemacht und das Pseudonym dauerhaft gesperrt. Das lässt sich nicht rückgängig machen.",
+      "target": "Pseudonym", "typeToConfirm": "Tippe {word} zur Bestätigung", "caseHint": "Großbuchstaben, genau so",
+      "confirm": "Endgültig löschen", "open": "Spielerdaten löschen"
+    }
+  },
+  "blocklist": {
+    "title": "Sperrliste", "kind": "Art", "add": "Eintrag hinzufügen", "source": "Quelle", "reason": "Grund",
+    "permanent": "Einträge aus einer Löschung sind dauerhaft",
+    "kinds": { "block": "Sperren", "allow": "Erlauben" }, "sources": { "manual": "Manuell", "erasure": "Löschung" }
+  }
+}
