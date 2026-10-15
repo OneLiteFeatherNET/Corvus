@@ -121,6 +121,12 @@ class PayloadPolicyTest {
     }
 
     @Test
+    void serverboundModeStripsSpawnPlayerBecauseItCarriesAnEntityUuid() {
+        assertFalse(records(PayloadMode.SERVERBOUND, PacketType.Play.Server.SPAWN_PLAYER, CB, PLAY));
+        assertFalse(records(PayloadMode.SERVERBOUND, PacketType.Play.Server.SPAWN_ENTITY, CB, PLAY));
+    }
+
+    @Test
     void serverboundModeStripsConfigurationPackets() {
         assertFalse(records(PayloadMode.SERVERBOUND, PacketType.Configuration.Client.CLIENT_SETTINGS, SB, CONFIG));
         assertFalse(records(PayloadMode.SERVERBOUND, PacketType.Configuration.Server.REGISTRY_DATA, CB, CONFIG));

@@ -53,7 +53,7 @@ _staging/<table>/<ulid>.parquet                   upload target before promotion
 | `x`, `y`, `z` | float64 (nullable) | movement position, entity_motion vector |
 | `yaw`, `pitch` | float32 (nullable) | movement |
 | `entity_id` | int32 (nullable) | interact_entity, entity_motion |
-| `action` | uint8 (nullable) | interact action / entity_motion kind |
+| `action` | uint8 (nullable) | interact action / entity_motion kind (1 relative, 2 teleport, 3 velocity, 4 spawn) |
 | `sneaking`, `off_hand` | bool (nullable) | interact, swing, place |
 | `block_x`, `block_y`, `block_z`, `face`, `status` | int32 (nullable) | dig, place |
 | `slot` | int32 (nullable) | held_item |

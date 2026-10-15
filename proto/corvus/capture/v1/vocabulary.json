@@ -920,6 +920,14 @@
     "payload_policy": "frame_dropped"
   },
   {
+    "id": 160,
+    "name": "S_SPAWN_PLAYER",
+    "direction": "clientbound",
+    "state": "play",
+    "private": false,
+    "payload_policy": "all_only"
+  },
+  {
     "id": 200,
     "name": "CFG_C_CLIENT_SETTINGS",
     "direction": "serverbound",

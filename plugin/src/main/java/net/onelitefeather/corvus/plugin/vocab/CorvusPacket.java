@@ -135,6 +135,8 @@ public enum CorvusPacket {
     S_PLAYER_INFO(157, PacketType.Play.Server.PLAYER_INFO),
     S_PLAYER_INFO_UPDATE(158, PacketType.Play.Server.PLAYER_INFO_UPDATE),
     S_PLAYER_INFO_REMOVE(159, PacketType.Play.Server.PLAYER_INFO_REMOVE),
+    // spawn of players (legacy protocol versions only; decoded for the position, payload never recorded)
+    S_SPAWN_PLAYER(160, PacketType.Play.Server.SPAWN_PLAYER),
 
     // configuration
     CFG_C_CLIENT_SETTINGS(200, PacketType.Configuration.Client.CLIENT_SETTINGS),

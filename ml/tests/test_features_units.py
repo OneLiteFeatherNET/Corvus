@@ -146,6 +146,17 @@ def test_attack_angle_and_distance_to_known_entity():
     assert f["t_since_move"][2] == pytest.approx(0.04)
 
 
+def test_attack_right_after_spawn_without_teleport_has_valid_geometry():
+    frames = [
+        entity_teleport(0, 0, 7, (0.0, 0.72, 3.0), action=4),  # KIND_SPAWN
+        move(1, 10, xyz=(0.0, 0.0, 0.0), yaw=0.0, pitch=0.0),
+        attack(2, 50, 7),
+    ]
+    f = tokens_of(frames).features
+    assert f["target_dist"][1] == pytest.approx(3.0)
+    assert f["target_angle"][1] == pytest.approx(0.0, abs=1e-6)
+
+
 def test_attack_on_unknown_entity_has_sentinel_geometry():
     f = tokens_of([move(0, 0, xyz=(0, 0, 0), yaw=0.0, pitch=0.0), attack(1, 5, 99)]).features
     assert f["target_dist"][1] == -1.0

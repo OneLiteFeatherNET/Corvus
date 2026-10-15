@@ -71,7 +71,7 @@ Geometry for `target_*`:
 - `target_angle = acos(clamp(look . v / |v|))` in degrees, `v` = aim point minus eye.
 
 Entity positions come from clientbound `entity_motion` frames (`events.action` = kind): kind 2
-(teleport) stores the absolute position, kind 1 (relative) adds the delta to a known position and is
+(teleport) and kind 4 (spawn) store the absolute position, kind 1 (relative) adds the delta to a known position and is
 ignored for unknown entities, kind 3 (velocity) is ignored. The state is a bounded LRU (256 entities,
 `FeatureConfig.entity_cache`), reset per segment.
 

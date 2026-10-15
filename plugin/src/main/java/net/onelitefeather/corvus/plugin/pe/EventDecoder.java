@@ -22,6 +22,8 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEn
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityRelativeMoveAndRotation;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityTeleport;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityVelocity;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnPlayer;
 import net.onelitefeather.corvus.proto.capture.v1.DigEvent;
 import net.onelitefeather.corvus.proto.capture.v1.EntityMotionEvent;
 import net.onelitefeather.corvus.proto.capture.v1.Frame;
@@ -73,7 +75,9 @@ final class EventDecoder {
                 || type == PacketType.Play.Server.ENTITY_RELATIVE_MOVE_AND_ROTATION
                 || type == PacketType.Play.Server.ENTITY_TELEPORT
                 || type == PacketType.Play.Server.ENTITY_POSITION_SYNC
-                || type == PacketType.Play.Server.ENTITY_VELOCITY;
+                || type == PacketType.Play.Server.ENTITY_VELOCITY
+                || type == PacketType.Play.Server.SPAWN_ENTITY
+                || type == PacketType.Play.Server.SPAWN_PLAYER;
     }
 
     private static void decodeServerbound(PacketReceiveEvent e, PacketTypeCommon type, Frame.Builder target) {
@@ -152,6 +156,17 @@ final class EventDecoder {
             Vector3d v = w.getVelocity();
             target.setEntityMotion(motion(w.getEntityId(), EntityMotionEvent.Kind.KIND_VELOCITY,
                     v.getX(), v.getY(), v.getZ()));
+        } else if (type == PacketType.Play.Server.SPAWN_ENTITY) {
+            // position and entity id only: the entity UUID and all other fields are never read
+            WrapperPlayServerSpawnEntity w = new WrapperPlayServerSpawnEntity(e);
+            Vector3d p = w.getPosition();
+            target.setEntityMotion(motion(w.getEntityId(), EntityMotionEvent.Kind.KIND_SPAWN,
+                    p.getX(), p.getY(), p.getZ()));
+        } else if (type == PacketType.Play.Server.SPAWN_PLAYER) {
+            WrapperPlayServerSpawnPlayer w = new WrapperPlayServerSpawnPlayer(e);
+            Vector3d p = w.getPosition();
+            target.setEntityMotion(motion(w.getEntityId(), EntityMotionEvent.Kind.KIND_SPAWN,
+                    p.getX(), p.getY(), p.getZ()));
         }
     }
 
