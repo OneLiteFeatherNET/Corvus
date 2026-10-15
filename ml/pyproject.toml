@@ -28,6 +28,7 @@ serve = [
 corvus-pilot = "corvus_ml.pilot:main"
 corvus-features = "corvus_ml.features.cli:main"
 corvus-eval = "corvus_ml.eval.cli:main"
+corvus-job = "corvus_ml.jobs.cli:main"
 
 [dependency-groups]
 # `uv sync` installs the dev group by default, and the tests exercise the evaluation harness, so it
