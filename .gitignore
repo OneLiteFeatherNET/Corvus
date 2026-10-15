@@ -26,3 +26,6 @@ dist/
 # Local pilot data (pseudonymised captures stay local)
 deploy/pilot/data/
 captures/
+
+# Local agent worktrees
+.claude/
