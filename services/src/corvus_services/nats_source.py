@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any
 
 import nats
@@ -54,6 +55,14 @@ class NatsMessage:
         await self._msg.term()
 
 
+def connect_options(s: Settings, name: str) -> dict[str, Any]:
+    """Keyword arguments of ``nats.connect`` (everything but the URL)."""
+    opts: dict[str, Any] = {"max_reconnect_attempts": -1, "name": name}
+    if s.nats_creds_file:
+        opts["user_credentials"] = s.nats_creds_file
+    return opts
+
+
 class NatsSource:
     def __init__(self, nc: Any, sub: Any, settings: Settings) -> None:
         self._nc = nc
@@ -62,7 +71,7 @@ class NatsSource:
 
     @classmethod
     async def connect(cls, s: Settings) -> NatsSource:
-        nc = await nats.connect(s.nats_url, max_reconnect_attempts=-1, name="corvus-ingest")
+        nc = await nats.connect(s.nats_url, **connect_options(s, "corvus-ingest"))
         js = nc.jetstream()
         await ensure_stream(js, s)
         sub = await js.pull_subscribe(
@@ -99,6 +108,7 @@ def stream_config(s: Settings) -> StreamConfig:
         max_bytes=s.stream_max_bytes,
         max_msg_size=s.stream_max_msg_size,
         duplicate_window=float(s.stream_duplicate_window_s),
+        num_replicas=s.nats_stream_replicas,
     )
 
 
@@ -112,10 +122,22 @@ def consumer_config(s: Settings) -> ConsumerConfig:
     )
 
 
+async def raise_replicas(js: Any, info: Any, wanted: int) -> None:
+    """Grow an existing stream to ``wanted`` replicas; never shrinks it (operators own that)."""
+    config = info.config
+    if (config.num_replicas or 1) >= wanted:
+        return
+    log.info("raising stream %s from %s to %s replicas", config.name, config.num_replicas, wanted)
+    await js.update_stream(replace(config, num_replicas=wanted))
+
+
 async def ensure_stream(js: Any, s: Settings) -> None:
-    """Create the stream if missing. An existing stream is left alone (operators own its limits)."""
+    """Create the stream if missing. An existing stream keeps its limits (operators own them);
+    only its replica count is raised to ``nats_stream_replicas``."""
     try:
-        await js.stream_info(s.nats_stream)
+        info = await js.stream_info(s.nats_stream)
     except NotFoundError:
         log.info("creating stream %s", s.nats_stream)
         await js.add_stream(stream_config(s))
+    else:
+        await raise_replicas(js, info, s.nats_stream_replicas)
