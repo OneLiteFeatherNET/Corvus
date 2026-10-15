@@ -31,14 +31,16 @@ API calls beyond `PATCH /jobs/{id}`:
 
 | Call | Used for |
 |---|---|
-| `GET /api/v1/snapshots/{id}` | the manifest: `files.events[].key` (object keys of the `events` files), `sessions` |
+| `GET /api/v1/snapshots/{id}` | the manifest: `files.events[].key` (object keys of the `events` files), `sessions`; `needs_rebuild` |
+| `GET /api/v1/snapshots/{id}/files` | `raw[].key`: the live `raw` files that list a session of the snapshot (raw-byte jobs) |
 | `GET /api/v1/snapshots/{id}/sessions?exclude_erased=true` | sessions of the snapshot, paged (`limit`, `cursor`, `next_cursor`) |
+| `POST /api/v1/jobs/{job_id}/artifacts` | registering every prefix a job wrote, right after writing it (section 2) |
 | `POST /api/v1/models` | registering a trained model (not retried) |
 
 **Shape assumed for the sessions endpoint.** Each item has `session_id` (hex, 16 bytes), `pseudonym`
 (hex, 32 bytes), `started_at` (ISO 8601), `segments` (`[{"segment": 0, "game_context": "pvp"}]`),
-optionally `client_protocol` (integer, `sessions.client_protocol`; used by the raw-byte build for the
-protocol token, a missing value gives `[PROTO_OTHER]` and is counted) and optionally `labels` (`[{"label": "cheat", "source": "honeypot", "confidence": 1.0, "valid_from": null,
+`client_protocol` (integer or `null`, `sessions.client_protocol`; the raw-byte build takes the protocol
+token from it, a missing value gives `[PROTO_OTHER]` and is counted) and optionally `labels` (`[{"label": "cheat", "source": "honeypot", "confidence": 1.0, "valid_from": null,
 "valid_to": null}]`) and `erased`. Sessions flagged `erased` are skipped by the job even if the API
 returned them, and sessions that are not in the manifest's `sessions` list are ignored. A missing
 pseudonym keeps the session out of evaluation (windows without a pseudonym are dropped there).
@@ -66,14 +68,20 @@ sessions, labels, `build.json`; section 4 of [raw-byte-tokenizer.md](raw-byte-to
 Raw-byte models additionally upload `models/<name>/<version>/tokenizer.json`.
 
 **Register what you write.** `features/<snapshot_id>/raw/` holds tokenised payloads, which are personal data derived from
-`raw`. After writing a prefix a job calls `POST /api/v1/snapshots/{snapshot_id}/artifacts` (job token plus
-`X-Corvus-Job-Id`; or `POST /api/v1/jobs/{job_id}/artifacts`) with
-`{"kind": "raw_features", "s3_prefix": "features/<snapshot_id>/raw/", "contains_raw": true}`; the aggregate build
-registers `features/<snapshot_id>/windows/` etc. with `contains_raw: false` (optional). Erasure and the raw retention then
-delete the prefix; see [data-lake.md](data-lake.md) section 7 and [control-plane-api.md](control-plane-api.md). `409`
-means an erasure happened after the job started: delete the prefix and let a new job rebuild. To find the raw files
-and the protocol of a session a job reads `GET /snapshots/{id}/files` (`raw`) and `client_protocol` of
-`GET /snapshots/{id}/sessions` instead of scanning partitions.
+`raw`. Right after writing a prefix (and, for the feature builds, after its `build.json` marker) a job calls
+`POST /api/v1/jobs/{job_id}/artifacts` with `{"kind", "s3_prefix", "contains_raw"}` (`s3_prefix` ends with `/`):
+
+| Job | `kind` | `s3_prefix` | `contains_raw` |
+|---|---|---|---|
+| `build_features`, `raw_bytes` | `raw_features` | `features/<snapshot_id>/raw/` | `true` |
+| `build_features`, aggregate | `window_features`, `window_tokens` | `features/<snapshot_id>/windows/`, `features/<snapshot_id>/window_tokens/` | `false` |
+| `build_features`, `train_tokenizer` | `tokenizer` | `tokenizers/<snapshot_id>/<job_id>/` | `false` |
+
+Erasure and the raw retention then delete the prefix; see [data-lake.md](data-lake.md) section 7 and
+[control-plane-api.md](control-plane-api.md). `201` is a new registration, `200` a repeat (a repeated call is safe and
+is retried like a read). **`409`** means an erasure invalidated the snapshot's raw-derived artefacts after the job
+started: the job deletes the prefix it just wrote and fails with "an erasure invalidated the raw-derived artefacts of
+this snapshot while the job ran; <prefix> was deleted. Start a new job to rebuild". Other errors fail the job as well.
 
 A new `build_features` job replaces `features/<snapshot_id>/` completely (the raw-byte build only its `raw/` prefix). The windows and tokens
 tables are those of [features.md](features.md); the same code builds them offline and online.
@@ -90,13 +98,20 @@ so memory stays bounded; the number of worker processes is at most the CPU limit
 | `window`, `overlap`, `max_duration_s`, `min_frames`, `dt_edges_ms` | as `corvus-features` | windowing, recorded in `feature_spec.json` |
 | `group_size` | 4 | sessions per task (memory knob) |
 | `workers` | cgroup limit | upper bound; never above the cgroup limit |
+| `strict` | `false` | refuse a snapshot with `needs_rebuild`, see below |
+
+**`needs_rebuild`.** `GET /snapshots/{id}` flags a snapshot whose raw-derived artefacts an erasure deleted. A feature
+build is the way to recreate them, so by default (`strict` false, for all `build_features` kinds) the job only logs a
+warning and builds. With `"strict": true` it fails before reading any data and writes nothing.
 
 **`build_features` with `kind = "raw_bytes"`** reads the `events` and `raw` files of the snapshot, decrypts
 the payloads, trains the tokenizer (unless `tokenizer_prefix` points at a trained one) and tokenizes all
 sessions. Sessions whose player has no DEK (erased) are skipped; the result counts them
-(`sessions_crypto_shredded`). `raw` files come from `manifest.files.raw`, else from the `lake/raw/date=...`
+(`sessions_crypto_shredded`). `raw` files come from the `raw` list of `GET /snapshots/{id}/files`, so no partition is scanned; an empty
+list means the snapshot has no raw files (the job fails). Only if the API does not send the field (an older
+version) the job logs a warning and falls back to `manifest.files.raw`, else to the `lake/raw/date=...`
 partitions of the sessions' start dates. Parameters (all optional): `kind` (`aggregate` default, `raw_bytes`,
-`train_tokenizer`), `game_context(s)`, `group_size` (4), `vocab_size` (4096), `min_frequency` (2),
+`train_tokenizer`), `strict` (see below), `game_context(s)`, `group_size` (4), `vocab_size` (4096), `min_frequency` (2),
 `train_bytes_per_payload` (256), `max_train_payloads`, `max_train_bytes`, `tokenizer_sessions` (2000),
 `tokenizer_prefix`, `dt_buckets`, `dt_min_ms`, `dt_max_ms`, `protocols`, `packet_type_max`,
 `max_tokens_per_packet` (48), `proto_mode` and the window defaults recorded in the spec (`window_seconds`,
