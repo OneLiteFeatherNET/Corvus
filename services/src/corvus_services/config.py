@@ -16,6 +16,8 @@ class Settings(BaseSettings):
 
     # NATS / JetStream (defaults from docs/reference/data-lake.md section 1)
     nats_url: str = "nats://localhost:4222"
+    # Credentials file (.creds: JWT and NKey seed), usually mounted from a Secret; unset: none.
+    nats_creds_file: str | None = None
     nats_stream: str = "CORVUS_CAPTURE"
     nats_subject: str = "corvus.capture.v1.>"
     nats_consumer: str = "corvus-ingest"

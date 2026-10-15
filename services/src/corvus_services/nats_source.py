@@ -54,6 +54,14 @@ class NatsMessage:
         await self._msg.term()
 
 
+def connect_options(s: Settings, name: str) -> dict[str, Any]:
+    """Keyword arguments of ``nats.connect`` (everything but the URL)."""
+    opts: dict[str, Any] = {"max_reconnect_attempts": -1, "name": name}
+    if s.nats_creds_file:
+        opts["user_credentials"] = s.nats_creds_file
+    return opts
+
+
 class NatsSource:
     def __init__(self, nc: Any, sub: Any, settings: Settings) -> None:
         self._nc = nc
@@ -62,7 +70,7 @@ class NatsSource:
 
     @classmethod
     async def connect(cls, s: Settings) -> NatsSource:
-        nc = await nats.connect(s.nats_url, max_reconnect_attempts=-1, name="corvus-ingest")
+        nc = await nats.connect(s.nats_url, **connect_options(s, "corvus-ingest"))
         js = nc.jetstream()
         await ensure_stream(js, s)
         sub = await js.pull_subscribe(

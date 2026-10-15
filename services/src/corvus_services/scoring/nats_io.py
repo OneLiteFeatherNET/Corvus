@@ -18,7 +18,7 @@ from nats.js.api import (
 )
 from nats.js.errors import NotFoundError
 
-from ..nats_source import NatsMessage, ensure_stream
+from ..nats_source import NatsMessage, connect_options, ensure_stream
 from .partitions import filter_subjects
 from .settings import ScoreSettings
 
@@ -105,9 +105,7 @@ class NatsScoreIO:
 
     @classmethod
     async def connect(cls, s: ScoreSettings, replica: int) -> NatsScoreIO:
-        nc = await nats.connect(
-            s.nats_url, max_reconnect_attempts=-1, name=f"corvus-score-{replica}"
-        )
+        nc = await nats.connect(s.nats_url, **connect_options(s, f"corvus-score-{replica}"))
         js = nc.jetstream()
         await ensure_stream(js, s)
         await ensure_score_stream(js, s)
