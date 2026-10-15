@@ -1,5 +1,7 @@
-# Local development stack for the Corvus ingest service. See docs/how-to/run-ingest-locally.md.
+# Local development stack for the Corvus ingest service and control-plane API.
+# See docs/how-to/run-ingest-locally.md.
 #   cp .env.example .env   (fill in the generated values; credentials are read from .env)
+#   cp .env.api.example .env.api   (optional, only for the api service; holds its tokens and keys)
 #   docker compose up --build
 
 x-ingest-env: &ingest-env
@@ -138,6 +140,43 @@ services:
         limits:
           cpus: "2.0"
           memory: 1G
+
+  # Control-plane API (docs/reference/control-plane-api.md). Its secrets (dev token, pseudonym key, proxy
+  # tokens) live in .env.api so that the other services never see them.
+  api:
+    build:
+      context: ../..
+      dockerfile: services/Dockerfile
+    image: corvus-services:dev
+    command: ["corvus-api"]
+    env_file:
+      - .env
+      - path: .env.api
+        required: false
+    environment:
+      CORVUS_PG_DSN: postgresql://corvus@postgres:5432/corvus
+      CORVUS_API_PORT: "8080"
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
 
 volumes:
   nats-data:

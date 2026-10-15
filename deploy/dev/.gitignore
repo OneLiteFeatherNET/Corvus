@@ -1,0 +1,3 @@
+# Local credentials, copied from the *.example files.
+.env
+.env.api
