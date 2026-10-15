@@ -63,6 +63,27 @@ bytes). The plugin writes `plugins/corvus/captures/<yyyy-MM-dd>/<session-id>.cvc
 mounted from `deploy/pilot/data/captures`; the one-shot `stage-corvus` service makes that directory
 writable for the proxy user (uid 1000).
 
+### Sink (`sink.type`)
+
+`sink.type = "file"` (the pilot default) writes the `.cvc` files described above. `sink.type = "nats"`
+publishes every envelope to NATS JetStream instead, following the transport contract in
+[`docs/reference/data-lake.md`](reference/data-lake.md) section 1: subject `<nats.subject_prefix>.<proxy_id>`,
+body = one serialized `Envelope`, headers `Nats-Msg-Id` (`<session-id-hex>-<n>`) and `Corvus-Schema`, each
+envelope below 512 KiB. The keys are `nats.url` (one URL or a list), `nats.creds_file` (optional),
+`nats.subject_prefix` (default `corvus.capture.v1`), `nats.max_in_flight_bytes` (default 32 MiB) and
+`nats.publish_timeout_seconds`; the commented example in `deploy/pilot/proxy/corvus-config.toml` shows them.
+
+Behaviour to know when operating the NATS sink:
+
+- The plugin connects in the background and reconnects forever; an unreachable NATS never delays the proxy
+  start. Until the first connection exists, batches are dropped.
+- The plugin never creates the stream. If `CORVUS_CAPTURE` does not exist, publishes fail and the log warns
+  (at most once a minute) with a hint to check the stream.
+- Publishing is asynchronous. When the in-flight byte budget is exhausted or a publish fails or times out, the
+  batch is dropped; its frames are counted as `dropped_transport`, reported in the next `CaptureBatch` or
+  `SessionEnd` counters, and shown as `dropped_transport=` in `/corvus stats` and the 60 s log line.
+- On shutdown the plugin flushes with a bounded 3 s timeout and then closes the connection.
+
 ### Raw payload policy (`capture.raw_payloads`)
 
 Clientbound packets such as scoreboard, teams, titles, spawn player, boss bars contain names and UUIDs
