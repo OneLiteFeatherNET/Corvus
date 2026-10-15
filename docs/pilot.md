@@ -84,6 +84,12 @@ Behaviour to know when operating the NATS sink:
   `SessionEnd` counters, and shown as `dropped_transport=` in `/corvus stats` and the 60 s log line.
 - On shutdown the plugin flushes with a bounded 3 s timeout and then closes the connection.
 
+### Online scores (`[scores]`)
+
+With `sink.type = "nats"` (or `scores.enabled = true`) the plugin also subscribes to `corvus.score.v1.>` and serves
+the scores of online players to other plugins through `corvus-api`, and through `/corvus score <player>`
+(permission `corvus.admin`). Details and the decision-aid rules: [`docs/reference/plugin-api.md`](reference/plugin-api.md).
+
 ### Raw payload policy (`capture.raw_payloads`)
 
 Clientbound packets such as scoreboard, teams, titles, spawn player, boss bars contain names and UUIDs
