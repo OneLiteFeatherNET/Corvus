@@ -60,6 +60,63 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # Container images. The reusable workflow signs keyless with cosign and pushes to the OLF Harbor
+  # registry (HARBOR_* secrets). It tags the image with the release version (semver tags plus the
+  # commit sha) and builds linux/amd64 only. The chart pins its image tag to the same version.
+  images-detect:
+    name: Detect image sources
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      ui: ${{ steps.detect.outputs.ui }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+      # The UI image only exists once ui/Dockerfile does; until then the ui job is skipped.
+      - id: detect
+        run: |
+          if [ -f ui/Dockerfile ]; then
+            echo "ui=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ui=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::ui/Dockerfile not found, skipping the ui image"
+          fi
+
+  image-services:
+    name: Publish corvus-services image
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: read
+      id-token: write # keyless cosign signing
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.9.0
+    with:
+      image-name: "onelitefeather/corvus-services"
+      version: ${{ needs.release-please.outputs.version }}
+      # The Dockerfile copies proto/ and services/ paths, so the context is the repository root.
+      context: "."
+      dockerfile: "services/Dockerfile"
+    secrets: inherit
+
+  image-ui:
+    name: Publish corvus-ui image
+    needs: [release-please, images-detect]
+    if: needs.release-please.outputs.release_created == 'true' && needs.images-detect.outputs.ui == 'true'
+    permissions:
+      contents: read
+      id-token: write # keyless cosign signing
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.9.0
+    with:
+      image-name: "onelitefeather/corvus-ui"
+      version: ${{ needs.release-please.outputs.version }}
+      context: "."
+      dockerfile: "ui/Dockerfile"
+    secrets: inherit
+
   # Scans the shaded jar that actually ships (rootfs sees bundled libraries, fs does not).
   security-gate:
     name: Security gate
