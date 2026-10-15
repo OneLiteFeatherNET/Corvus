@@ -70,6 +70,13 @@ class Settings(BaseSettings):
     batch_log_retention_days: int = Field(default=3, ge=1)
     score_history_retention_days: int = Field(default=14, ge=1)
 
+    # Compaction after erasure (corvus-compact)
+    # Rows per Arrow batch while rewriting a file: bounds the memory of one rewrite.
+    compact_batch_rows: int = Field(default=65_536, ge=1)
+    # Erasure requests are compacted only after this age, so that frames still buffered or cached
+    # by ingest at erasure time have landed in the lake (session cache TTL plus flush age).
+    compact_grace_s: int = Field(default=600, ge=0)
+
     @field_validator("kek")
     @classmethod
     def _kek_is_256_bit(cls, v: SecretStr) -> SecretStr:
