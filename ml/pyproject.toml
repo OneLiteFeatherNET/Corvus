@@ -8,10 +8,13 @@ dependencies = [
     "protobuf>=6.31",
     # Provides protoc for generating the capture bindings from ../proto.
     "grpcio-tools>=1.74",
+    "pyarrow>=26.0.0",
+    "numpy>=2.5.4",
 ]
 
 [project.scripts]
 corvus-pilot = "corvus_ml.pilot:main"
+corvus-features = "corvus_ml.features.cli:main"
 
 [dependency-groups]
 dev = [
