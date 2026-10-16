@@ -20,6 +20,7 @@ from corvus_ml.eval.candidates.base import Candidate, register
 from corvus_ml.eval.data import LABEL_CHEAT, EvalData
 from corvus_ml.eval.lr import LR_PARAM_KEYS, PRETRAIN_LR_PARAM_KEYS, lr_kwargs
 from corvus_ml.eval.training import fit, seed_everything
+from corvus_ml.membudget import MicroBatchPlan, plan_micro_batch
 from corvus_ml.raw.entropy import byte_entropy_weights
 from corvus_ml.raw.model import ModelConfig, RawAnomalyNet, RawHierNet
 from corvus_ml.raw.pretrain import flatten_windows, load_encoder, pretrain, save_checkpoint
@@ -37,7 +38,8 @@ _MODEL_KEYS = (
 )  # fmt: skip
 _TRAIN_KEYS = (
     "epochs", "batch_size", "weight_decay", "patience", "pretrain_epochs",
-    "init_from", "checkpoint_out", "score_batch", *LR_PARAM_KEYS, *PRETRAIN_LR_PARAM_KEYS,
+    "init_from", "checkpoint_out", "score_batch", "memory_budget_mb",
+    *LR_PARAM_KEYS, *PRETRAIN_LR_PARAM_KEYS,
 )  # fmt: skip
 
 
@@ -80,6 +82,25 @@ class RawCandidate(Candidate):
             np.ascontiguousarray(t)
         )
 
+    def _plan(
+        self, cfg: ModelConfig, packets: int, batch: int, *, training: bool, what: str
+    ) -> MicroBatchPlan:
+        """Rows per forward pass that fit the memory budget (parameter ``memory_budget_mb``,
+        else ``CORVUS_ML_MEMORY_BUDGET_MB``, else a share of the container's memory limit)."""
+        budget = self.params.get("memory_budget_mb")
+        return plan_micro_batch(
+            cfg, packets, batch, training=training, what=what,
+            budget_mb=None if budget is None else float(budget),
+        )  # fmt: skip
+
+    def inference_rows(self, x: np.ndarray) -> int | None:
+        if not hasattr(self, "model"):
+            return None
+        plan = self._plan(
+            self.model.cfg, int(x.shape[-2]), len(x), training=False, what="ONNX parity"
+        )
+        return plan.micro
+
     def model_config(self, data: EvalData) -> ModelConfig:
         spec = self.spec_of(data)
         kw = {k: self.params[k] for k in _MODEL_KEYS if k in self.params}
@@ -116,6 +137,7 @@ class RawCandidate(Candidate):
         self.pretrain_history = pretrain(
             net, ids, t, epochs=epochs, batch_size=batch, weight_decay=wd,
             patience=int(self.params.get("patience", 3)), seed=self.seed,
+            memory_budget_mb=self.params.get("memory_budget_mb"),
             **lr_kwargs(self.params, prefix="pretrain_", default_lr=1e-3, batch_size=batch,
                         seed=self.seed, weight_decay=wd),
         )  # fmt: skip
@@ -147,12 +169,15 @@ class RawCandidate(Candidate):
     def _run_fit(self, tr, va, loss_fn) -> None:
         batch = int(self.params.get("batch_size", 16))
         wd = float(self.params.get("weight_decay", 0.01))
+        cfg, packets = self.model.cfg, int(tr[0].shape[-2])
+        micro = self._plan(cfg, packets, batch, training=True, what="training").micro
+        evaluate = self._plan(cfg, packets, 1024, training=False, what="validation").micro
         self.history = fit(
             self.model, loss_fn, tr, va, epochs=int(self.params.get("epochs", 10)),
             batch_size=batch, weight_decay=wd,
             patience=int(self.params.get("patience", 3)), seed=self.seed, on_epoch=self.on_epoch,
             **lr_kwargs(self.params, default_lr=2e-3, batch_size=batch, seed=self.seed,
-                        weight_decay=wd),
+                        weight_decay=wd, micro_batch=micro, eval_batch=evaluate),
         )  # fmt: skip
         self.lr_used = float(self.history.lr_used)  # type: ignore[arg-type]
         self.lr_range = self.history.lr_find
@@ -163,6 +188,8 @@ class RawCandidate(Candidate):
         ids, t = self._tensors(data)
         self.model.eval()
         step = int(self.params.get("score_batch", 16))
+        step = self._plan(self.model.cfg, int(ids.shape[-2]), step, training=False,
+                          what="scoring").micro  # fmt: skip
         out = []
         with torch.no_grad():
             for i in range(0, ids.shape[0], step):
@@ -268,7 +295,10 @@ class RawHierAnomaly(RawCandidate):
             tensors(train), tensors(val) if val is not None and len(val) else None, loss_fn
         )
         if cfg.combine != "none" and len(ids):
-            self.model.fit_memory(ids, t, seed=self.seed)
+            chunk = self._plan(
+                cfg, int(ids.shape[-2]), 32, training=False, what="memory bank"
+            ).micro
+            self.model.fit_memory(ids, t, seed=self.seed, chunk=chunk)
         if "checkpoint_out" in self.params:
             save_checkpoint(Path(self.params["checkpoint_out"]), self.model)
 

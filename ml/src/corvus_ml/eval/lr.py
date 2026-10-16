@@ -189,7 +189,8 @@ class LrFindConfig:
     lr_min: float = 1e-7
     lr_max: float = 1.0
     steps: int = 60  # CPU friendly; 100 gives a smoother curve
-    batch_size: int = 64
+    batch_size: int = 64  # rows per optimiser step
+    micro_batch: int | None = None  # rows per forward/backward pass (memory cap); None: whole batch
     seed: int = 0
     weight_decay: float = 0.0
     beta: float = 0.9  # EMA smoothing of the loss
@@ -204,6 +205,34 @@ class LrFindConfig:
         if self.rule not in RULES:
             raise ValueError(f"lr rule must be one of {RULES}, got {self.rule!r}")
         exponential_lrs(self.lr_min, self.lr_max, max(2, self.steps))
+
+
+def accumulate_backward(
+    model: torch.nn.Module,
+    loss_fn: LossFn,
+    batch: tuple[torch.Tensor, ...],
+    micro_batch: int | None,
+) -> float:
+    """Backward over ``batch`` in chunks of ``micro_batch`` rows; returns the batch loss.
+
+    Every chunk loss is weighted by its share of the rows, so for a loss that is a mean over the
+    rows the accumulated gradient equals that of one pass over the whole batch (the peak memory is
+    that of one chunk). Losses normalised differently (the masked-token loss divides by the number
+    of masked tokens of the chunk) are only approximately equal. Gradients are added to ``.grad``;
+    the caller zeroes them before and steps the optimiser after.
+    """
+    n = int(batch[0].shape[0])
+    size = n if not micro_batch or micro_batch >= n else max(1, int(micro_batch))
+    total = 0.0
+    for i in range(0, n, size):
+        part = tuple(t[i : i + size] for t in batch)
+        weight = part[0].shape[0] / n
+        loss = loss_fn(model, part)
+        value = float(loss.detach())
+        total += value * weight
+        if math.isfinite(value):
+            (loss * weight).backward()
+    return total
 
 
 @dataclass
@@ -299,12 +328,12 @@ def find_lr(
                 for g in opt.param_groups:
                     g["lr"] = float(grid[step])
                 opt.zero_grad(set_to_none=True)
-                loss = loss_fn(probe, tuple(t[sel] for t in subset))
-                value = float(loss.detach())
+                value = accumulate_backward(
+                    probe, loss_fn, tuple(t[sel] for t in subset), cfg.micro_batch
+                )
                 if not math.isfinite(value):
                     stop_reason = "non-finite loss"
                     break
-                loss.backward()
                 if cfg.grad_clip > 0:
                     torch.nn.utils.clip_grad_norm_(probe.parameters(), cfg.grad_clip)
                 opt.step()
@@ -486,8 +515,13 @@ def lr_kwargs(
     batch_size: int,
     seed: int,
     weight_decay: float,
+    micro_batch: int | None = None,
+    eval_batch: int | None = None,
 ) -> dict[str, Any]:
     """The learning-rate arguments of ``fit`` / ``pretrain`` from candidate or job parameters.
+
+    ``micro_batch`` / ``eval_batch`` (memory caps, see :mod:`corvus_ml.membudget`) are passed
+    through; the range test runs on the same ``batch_size`` and micro-batch as the training.
 
     ``prefix="pretrain_"`` reads ``pretrain_lr``, ``pretrain_lr_steps`` ... Without ``"auto"``
     only ``lr`` matters, so numeric configurations behave exactly as before.
@@ -498,6 +532,7 @@ def lr_kwargs(
         steps=int(params.get(f"{prefix}lr_steps", LrFindConfig.steps)),
         rule=str(params.get(f"{prefix}lr_rule", LrFindConfig.rule)),
         batch_size=batch_size,
+        micro_batch=micro_batch,
         seed=seed,
         weight_decay=weight_decay,
     )
@@ -508,6 +543,8 @@ def lr_kwargs(
         "lr": lr,
         "lr_find": find,
         "lr_mult": mult,
+        "micro_batch": micro_batch,
+        "eval_batch": eval_batch,
         "schedule_kind": str(params.get(f"{prefix}lr_schedule", "cosine")),
         "lr_precomputed": params.get(f"{prefix}lr_find_result"),
     }

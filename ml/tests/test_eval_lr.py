@@ -365,3 +365,49 @@ def test_a_flat_range_test_uses_the_fallback_and_says_so():
 def test_lr_kwargs_passes_the_numeric_default_as_the_fallback():
     kw = lr_kwargs({}, default_lr=1e-3, batch_size=16, seed=0, weight_decay=0.0)
     assert kw["lr_find"].fallback_lr == 1e-3
+
+
+# --- memory-capped micro-batches -----------------------------------------------------------------
+
+
+def _toy():
+    g = torch.Generator().manual_seed(0)
+    x = torch.randn(64, 4, generator=g)
+    y = x.sum(1)
+    return x, y
+
+
+def _mse(model, batch):
+    return torch.nn.functional.mse_loss(model(batch[0]).squeeze(-1), batch[1])
+
+
+def test_range_test_steps_on_the_configured_batch_but_runs_micro_batches():
+    x, y = _toy()
+    seen = []
+
+    def spy(model, batch):
+        seen.append(batch[0].shape[0])
+        return _mse(model, batch)
+
+    cfg = LrFindConfig(steps=4, batch_size=12, micro_batch=5, divergence=1e9)
+    find_lr(torch.nn.Linear(4, 1), spy, (x, y), cfg)
+    assert max(seen) <= 5, "no forward pass larger than the micro-batch"
+    assert seen[:3] == [5, 5, 2], "one step = the whole batch of 12 as 5 + 5 + 2"
+
+
+def test_range_test_with_micro_batches_matches_the_whole_batch():
+    x, y = _toy()
+    base = {"steps": 6, "batch_size": 16, "divergence": 1e9}
+    torch.manual_seed(0)
+    whole = find_lr(torch.nn.Linear(4, 1), _mse, (x, y), LrFindConfig(**base))
+    torch.manual_seed(0)  # same initial weights
+    micro = find_lr(torch.nn.Linear(4, 1), _mse, (x, y), LrFindConfig(**base, micro_batch=3))
+    assert np.allclose(whole.raw_losses, micro.raw_losses, rtol=1e-4, atol=1e-6)
+
+
+def test_lr_kwargs_hand_the_candidate_batch_and_micro_batch_to_the_range_test():
+    kw = lr_kwargs({"lr": "auto"}, default_lr=2e-3, batch_size=16, seed=0, weight_decay=0.0,
+                   micro_batch=4)  # fmt: skip
+    assert kw["lr_find"].batch_size == 16, "the candidate's batch, not the range test default 64"
+    assert kw["lr_find"].micro_batch == 4
+    assert kw["micro_batch"] == 4

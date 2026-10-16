@@ -573,12 +573,13 @@ class RawAnomalyNet(nn.Module):
         n = len(ids)
         pick = np.sort(np.random.default_rng(seed).choice(n, min(self.cfg.knn_bank, n), False))
         embs, recon = [], []
-        for i in range(0, len(pick), chunk):
-            sel = pick[i : i + chunk]
-            x = torch.from_numpy(ids[sel].astype(np.int64))
-            tt = torch.from_numpy(time_s[sel].astype(np.float32))
-            embs.append(self.window_embedding(x, tt))
-            recon.append(self.recon_score_ids(x, tt))
+        with torch.no_grad():  # statistics only: keep no autograd graph of the long windows
+            for i in range(0, len(pick), chunk):
+                sel = pick[i : i + chunk]
+                x = torch.from_numpy(ids[sel].astype(np.int64))
+                tt = torch.from_numpy(time_s[sel].astype(np.float32))
+                embs.append(self.window_embedding(x, tt))
+                recon.append(self.recon_score_ids(x, tt))
         emb, recon_s = torch.cat(embs), torch.cat(recon)
         sims = emb @ emb.T
         sims.fill_diagonal_(-2.0)  # leave one out: a window is not its own neighbour

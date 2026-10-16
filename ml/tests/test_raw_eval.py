@@ -368,3 +368,32 @@ def test_registry_has_the_raw_candidates():
     assert candidates.REGISTRY["raw_hier_classifier"].supervised is True
     assert candidates.REGISTRY["raw_hier_anomaly"].supervised is False
     assert candidates.REGISTRY["raw_hier_classifier"].input_kind == "raw_bytes"
+
+
+def test_raw_candidates_cap_the_micro_batch_by_the_memory_budget_and_keep_the_batch(
+    tmp_path, monkeypatch
+):
+    from corvus_ml.eval.candidates import raw_models
+    from raw_builders import tiny_source
+
+    seen = {}
+    real_fit = raw_models.fit
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real_fit(*args, **kwargs)
+
+    monkeypatch.setattr(raw_models, "fit", spy)
+    data = tiny_source(tmp_path, n_legit=4, n_cheat=0).build()
+    legit = data.take(np.flatnonzero(data.label == 0))
+    params = FAST | SMALL | {"epochs": 1, "batch_size": 8, "lr": "auto", "lr_steps": 3,
+                             "memory_budget_mb": 1}  # fmt: skip
+    cand = candidates.create("raw_hier_anomaly", seed=1, threads=1, params=params)
+
+    cand.fit(legit, None)
+
+    assert seen["batch_size"] == 8, "the configured batch stays the optimiser batch"
+    assert seen["micro_batch"] == 1, "a 1 MiB budget leaves room for one window"
+    assert seen["lr_find"].batch_size == 8
+    assert seen["lr_find"].micro_batch == 1
+    assert cand.score(legit).shape == (len(legit),)

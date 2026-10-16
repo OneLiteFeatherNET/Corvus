@@ -29,8 +29,16 @@ def make_session(path: Path | str, threads: int) -> ort.InferenceSession:
     return ort.InferenceSession(str(path), opts, providers=["CPUExecutionProvider"])
 
 
-def run_session(sess: ort.InferenceSession, x: np.ndarray) -> list[np.ndarray]:
-    return sess.run(None, {sess.get_inputs()[0].name: x})
+def run_session(
+    sess: ort.InferenceSession, x: np.ndarray, max_rows: int | None = None
+) -> list[np.ndarray]:
+    """Run the graph; ``max_rows`` feeds it in chunks (attention memory of long raw windows)
+    and concatenates the outputs along the batch axis."""
+    name = sess.get_inputs()[0].name
+    if not max_rows or max_rows >= len(x):
+        return sess.run(None, {name: x})
+    parts = [sess.run(None, {name: x[i : i + max_rows]}) for i in range(0, len(x), max_rows)]
+    return [np.concatenate(group, axis=0) for group in zip(*parts, strict=True)]
 
 
 def _peak_rss_mb() -> float:

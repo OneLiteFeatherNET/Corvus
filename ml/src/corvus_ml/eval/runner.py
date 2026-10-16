@@ -230,6 +230,7 @@ def _export_and_bench(
     if len(test) == 0:
         return {"error": "no windows to check the ONNX graph on"}
     x = cand.inputs(test)
+    rows = cand.inference_rows(x)  # long raw windows: bound the attention memory of one run
     shipped = out / f"{cand.name}.onnx"
     native_raw = cand.score(test)
     if cand.calibration is None:
@@ -243,14 +244,14 @@ def _export_and_bench(
             json.dumps(cand.calibration.to_dict(), indent=2) + "\n"
         )
         raw_scores = cand.onnx_to_score(
-            onnx_bench.run_session(onnx_bench.make_session(raw_path, cfg.threads), x)
+            onnx_bench.run_session(onnx_bench.make_session(raw_path, cfg.threads), x, rows)
         )
         res["onnx_raw"] = {
             "path": raw_path.name,
             "max_abs_diff": float(np.abs(raw_scores - native_raw).max()),
         }
     sess = onnx_bench.make_session(path, cfg.threads)
-    outputs = onnx_bench.run_session(sess, x)
+    outputs = onnx_bench.run_session(sess, x, rows)
     # A calibrated graph has the single output ``score``; a raw one is candidate specific.
     onnx_scores = (
         cand.onnx_to_score(outputs)
@@ -268,6 +269,8 @@ def _export_and_bench(
         return res
     bench = onnx_bench.benchmark_isolated if cfg.bench.isolated else onnx_bench.benchmark
     kw = {"warmup": cfg.bench.warmup, "iters": cfg.bench.iters, "batch": cfg.bench.batch}
+    if rows:
+        kw["batch"] = min(kw["batch"], rows)
     res["bench"] = bench(path, x, cfg.threads, **kw).to_dict()
     if cand.input_kind == "raw_bytes" and cfg.bench.raw_packets:
         res["bench_sizes"] = _bench_sizes(path, x, cfg, kw)
@@ -298,7 +301,7 @@ def _quantized(cand, cfg, x, test, path, native, fprs, bench, kw) -> dict:
     try:
         qpath = onnx_bench.quantize_int8(path, path.with_name(f"{cand.name}.int8.onnx"))
         sess = onnx_bench.make_session(qpath, cfg.threads)
-        q = cand.onnx_to_score(onnx_bench.run_session(sess, x))
+        q = cand.onnx_to_score(onnx_bench.run_session(sess, x, cand.inference_rows(x)))
         y = (test.label == LABEL_CHEAT).astype(np.int8)
         groups = test.group_codes()
         full = M.window_metrics(y, native, groups, fprs)

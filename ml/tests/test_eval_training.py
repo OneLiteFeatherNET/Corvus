@@ -92,3 +92,49 @@ def test_seed_everything_makes_torch_and_numpy_repeat():
     seed_everything(9)
     b = (torch.rand(3).tolist(), np.random.rand(3).tolist())  # noqa: NPY002
     assert a == b
+
+
+# --- gradient accumulation (micro-batches) -------------------------------------------------------
+
+
+def trained_weights(micro_batch, batch_size=12, n=36):
+    x, y = regression(n)
+    model = make_model()
+    fit(
+        model, mse, (x, y), None, epochs=3, batch_size=batch_size, lr=0.05,
+        weight_decay=0.0, micro_batch=micro_batch,
+    )  # fmt: skip
+    return torch.cat([p.detach().flatten() for p in model.parameters()])
+
+
+@pytest.mark.parametrize("micro", [1, 5, 12])
+def test_accumulating_micro_batches_gives_the_update_of_one_big_batch(micro):
+    whole = trained_weights(None)
+    accumulated = trained_weights(micro)
+    assert torch.allclose(whole, accumulated, atol=1e-5), "same optimiser steps, same weights"
+
+
+def test_accumulation_handles_a_last_batch_smaller_than_the_micro_batch():
+    # 38 samples, batch 12 -> last batch has 2 rows; micro 5 splits 12 as 5+5+2 and 2 as 2.
+    x, y = regression(38)
+    ref, acc = make_model(), make_model()
+    for model, micro in ((ref, None), (acc, 5)):
+        fit(model, mse, (x, y), None, epochs=2, batch_size=12, lr=0.05, weight_decay=0.0,
+            micro_batch=micro)  # fmt: skip
+    for a, b in zip(ref.parameters(), acc.parameters(), strict=True):
+        assert torch.allclose(a, b, atol=1e-5)
+
+
+def test_forward_never_sees_more_rows_than_the_micro_batch():
+    x, y = regression(40)
+    seen = []
+
+    def spy(model, batch):
+        seen.append(batch[0].shape[0])
+        return mse(model, batch)
+
+    fit(make_model(), spy, (x, y), (x[:30], y[:30]), epochs=1, batch_size=16, lr=0.01,
+        micro_batch=4, eval_batch=7)  # fmt: skip
+    assert max(seen) <= 7
+    assert seen.count(4) >= 40 // 16 * 4, "training batches were split into micro-batches of 4"
+    assert all(n <= 4 or n in (7, 2) for n in seen), seen  # 7 and 30 % 7 = 2: the validation pass

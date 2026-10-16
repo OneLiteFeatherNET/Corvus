@@ -17,6 +17,7 @@ from corvus_ml.eval.lr import (
     LrFindConfig,
     LrFindResult,
     LrSchedule,
+    accumulate_backward,
     find_lr,
     plan_lr,
     warmup_cosine,
@@ -104,6 +105,8 @@ def fit(
     lr_mult: float = 1.0,
     schedule_kind: str = "cosine",
     lr_precomputed: LrFindResult | None = None,
+    micro_batch: int | None = None,
+    eval_batch: int | None = None,
 ) -> FitHistory:
     """AdamW + linear warmup / cosine decay + early stopping on validation loss.
 
@@ -111,6 +114,11 @@ def fit(
     ``lr="auto"`` runs the range test first (:mod:`corvus_ml.eval.lr`), scales its suggestion by
     ``lr_mult`` and uses it as the peak of a 5 % warmup / cosine-to-10 % schedule; a number keeps
     the fixed ``warmup_frac`` / cosine-to-zero schedule.
+
+    ``batch_size`` is the optimiser batch. ``micro_batch`` caps the rows per forward/backward pass
+    (memory, :mod:`corvus_ml.membudget`): the gradients of the chunks are accumulated, so the
+    update is that of the whole batch. ``eval_batch`` is the chunk size of the validation pass
+    (default 1024).
     """
     plan = plan_lr(
         lr, model, loss_fn, train, epochs=epochs, batch_size=batch_size, find=lr_find,
@@ -131,11 +139,10 @@ def fit(
             for g in opt.param_groups:
                 g["lr"] = cur
             opt.zero_grad(set_to_none=True)
-            loss = loss_fn(model, batch)
-            loss.backward()
+            loss_value = accumulate_backward(model, loss_fn, batch, micro_batch)
             torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             opt.step()
-            running += float(loss.detach()) * batch[0].shape[0]
+            running += loss_value * batch[0].shape[0]
             count += batch[0].shape[0]
             step += 1
         hist.train_loss.append(running / max(1, count))
@@ -145,7 +152,7 @@ def fit(
         model.eval()
         with torch.no_grad():
             tot, n = 0.0, 0
-            for batch in _batches(val, 1024, None):
+            for batch in _batches(val, eval_batch or 1024, None):
                 tot += float(loss_fn(model, batch)) * batch[0].shape[0]
                 n += batch[0].shape[0]
         v = tot / max(1, n)
