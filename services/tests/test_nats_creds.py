@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib.util
+
 from corvus_services.config import Settings
 from corvus_services.nats_source import connect_options
 
@@ -22,3 +24,10 @@ def test_environment_variable_sets_the_credentials_file(monkeypatch):
     monkeypatch.setenv("CORVUS_NATS_CREDS_FILE", "/x.creds")
 
     assert Settings().nats_creds_file == "/x.creds"
+
+
+def test_nkeys_package_is_installed_for_creds_file_authentication():
+    assert importlib.util.find_spec("nkeys") is not None, (
+        "nats-py needs the 'nkeys' package (extra nats-py[nkeys]) to authenticate "
+        "with a JWT/NKEY creds file; without it the NATS connect crashes at runtime"
+    )
