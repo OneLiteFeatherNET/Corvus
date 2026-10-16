@@ -99,10 +99,10 @@ class ApiSettings(BaseSettings):
     # Jobs
     job_runner: Literal["local", "kubernetes"] = "local"
     # Local runner: argv prefix; the job type and arguments are appended.
-    job_local_command: list[str] = ["corvus-ml"]
+    job_local_command: list[str] = ["corvus-job"]
     job_k8s_namespace: str = "corvus"
     job_k8s_image: str = ""
-    job_k8s_command: list[str] = ["corvus-ml"]
+    job_k8s_command: list[str] = ["corvus-job"]
     job_k8s_service_account: str | None = None
     job_k8s_cpu_request: str = "1"
     job_k8s_cpu_limit: str = "4"
