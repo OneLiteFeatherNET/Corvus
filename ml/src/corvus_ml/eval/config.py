@@ -105,6 +105,10 @@ class EvalConfig:
         ):
             if key in run:
                 setattr(cfg, key, run.pop(key))
+        if cfg.threads == "auto":
+            from corvus_ml.cgroup import resolve_threads
+
+            cfg.threads = resolve_threads("auto")
         if "split" in run:
             cfg.split = tuple(float(v) for v in run.pop("split"))
         if "fpr_targets" in run:

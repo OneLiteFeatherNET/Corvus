@@ -410,3 +410,27 @@ def test_split_by_defaults_to_player_and_rejects_unknown_values(tmp_path, one_pl
         evaluate(make_context("evaluate", split_by="window", **ONE_PLAYER), env)
     with pytest.raises(JobError, match="tune"):
         evaluate(make_context("evaluate", split_by="session", tune=True, **ONE_PLAYER), env)
+
+
+def test_threads_param_defaults_to_auto(monkeypatch):
+    from corvus_ml.jobs.params import Params
+
+    monkeypatch.setattr("corvus_ml.jobs.params.available_cpus", lambda: 3)
+
+    assert Params({}).threads() == 3
+
+
+def test_threads_param_accepts_explicit_integer(monkeypatch):
+    from corvus_ml.jobs.params import Params
+
+    monkeypatch.setattr("corvus_ml.jobs.params.available_cpus", lambda: 8)
+
+    assert Params({"threads": 2}).threads() == 2
+
+
+@pytest.mark.parametrize("value", [0, -1, 65, True, 1.5, "many"])
+def test_threads_param_rejects_invalid_values(value):
+    from corvus_ml.jobs.params import ParamError, Params
+
+    with pytest.raises(ParamError):
+        Params({"threads": value}).threads()

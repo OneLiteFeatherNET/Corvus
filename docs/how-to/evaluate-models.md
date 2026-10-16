@@ -77,7 +77,7 @@ name = "pilot-2026-10"
 
 [run]
 seed = 1337              # numpy, torch, sklearn and the split
-threads = 1              # torch.set_num_threads and ONNX Runtime intra-op threads
+threads = 1              # or "auto" (all container CPUs): torch, sklearn n_jobs, ONNX parity session; >1 can change the last float bits
 seq_len = 256            # frames per window fed to sequence models (longer: cut, shorter: padded)
 unlabelled = "exclude"   # or "assume_legit"
 calibration = "auto"     # auto | isotonic | platt | ecdf | none, see "Calibration" below

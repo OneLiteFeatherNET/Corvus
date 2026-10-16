@@ -1,12 +1,17 @@
-"""Worker count and memory limit derived from the cgroup limits."""
+"""Worker count, thread count and memory limit derived from the cgroup limits."""
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 from pathlib import Path
 
+log = logging.getLogger(__name__)
+
 CPU_MAX_PATH = Path("/sys/fs/cgroup/cpu.max")
+CPU_V1_QUOTA_PATH = Path("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
+CPU_V1_PERIOD_PATH = Path("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
 MEMORY_MAX_PATH = Path("/sys/fs/cgroup/memory.max")
 # cgroup v1 and "no limit" report a huge number instead of "max"; anything this large is none.
 _UNLIMITED_BYTES = 2**60
@@ -36,6 +41,51 @@ def cpu_limit(path: Path = CPU_MAX_PATH) -> float | None:
         return parse_cpu_max(path.read_text())
     except OSError:
         return None
+
+
+def cpu_limit_v1(quota_path: Path = CPU_V1_QUOTA_PATH, period_path: Path = CPU_V1_PERIOD_PATH):
+    """CPU limit from the cgroup v1 CFS files (quota -1 = unlimited), None if none applies."""
+    try:
+        quota = int(quota_path.read_text().strip())
+        period = int(period_path.read_text().strip())
+    except (OSError, ValueError):
+        return None
+    if quota <= 0 or period <= 0:
+        return None
+    return quota / period
+
+
+def available_cpus(
+    path: Path = CPU_MAX_PATH,
+    v1_quota: Path = CPU_V1_QUOTA_PATH,
+    v1_period: Path = CPU_V1_PERIOD_PATH,
+    process_cpu_count: int | None = None,
+) -> int:
+    """CPUs this container may use: cgroup v2 quota, else v1 quota, else the affinity mask.
+
+    Capped by the CPUs the process can be scheduled on, never below 1.
+    """
+    if process_cpu_count is None:
+        process_cpu_count = os.process_cpu_count() or os.cpu_count() or 1
+    limit = cpu_limit(path)
+    if limit is None:
+        limit = cpu_limit_v1(v1_quota, v1_period)
+    if limit is None:
+        return max(1, process_cpu_count)
+    return max(1, min(math.ceil(limit), process_cpu_count))
+
+
+def resolve_threads(value: int | str, available: int | None = None) -> int:
+    """Thread count for a job: ``"auto"`` = all available CPUs; a larger integer is clamped."""
+    if available is None:
+        available = available_cpus()
+    if value == "auto":
+        return available
+    n = max(1, int(value))
+    if n > available:
+        log.warning("threads=%d exceeds the %d available CPUs, using %d", n, available, available)
+        return available
+    return n
 
 
 def default_workers(path: Path = CPU_MAX_PATH, process_cpu_count: int | None = None) -> int:
