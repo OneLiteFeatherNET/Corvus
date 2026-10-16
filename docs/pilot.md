@@ -57,7 +57,9 @@ are zero or several.
 Pilot configuration of the plugin is `deploy/pilot/proxy/corvus-config.toml`, mounted read-only as
 `plugins/corvus/config.toml` (Velocity's data directory for the plugin id `corvus`). Its keys are the
 ones the plugin reads (`PilotConfigTest` fails if it contains a key the plugin ignores): game context
-mapping `lobby -> lobby`, `pvp -> pvp`, pseudonym key id `pilot-1`, and the payload policy below. The
+mapping `lobby -> lobby`, `pvp -> pvp` (a backend named `<Task>-<n>`, as CloudNet services are, falls back to
+its task name: `Lobby-2` maps via `lobby`; exact names win, only one trailing `-<digits>` is removed, and
+`game_context.strip_instance_suffix = false` turns this off), pseudonym key id `pilot-1`, and the payload policy below. The
 HMAC key itself is read from the environment variable `CORVUS_PSEUDONYM_KEY` (base64, at least 16
 bytes). The plugin writes `plugins/corvus/captures/<yyyy-MM-dd>/<session-id>.cvc`, which is bind
 mounted from `deploy/pilot/data/captures`; the one-shot `stage-corvus` service makes that directory

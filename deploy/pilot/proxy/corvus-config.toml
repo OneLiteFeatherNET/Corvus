@@ -71,8 +71,11 @@ ca_file = ""
 
 [game_context]
 default = "unknown"
+# CloudNet services are named <Task>-<n> (Lobby-1, Team-Build-2). Lookup: exact server name, then the name without
+# one trailing "-<digits>" (Lobby-2 -> lobby), then default; case-insensitive. false = exact names only.
+strip_instance_suffix = true
 
-# backend server name (see velocity.toml) = game context tag
+# server name (see velocity.toml) or CloudNet task name = game context tag
 [game_context.servers]
 lobby = "lobby"
 pvp = "pvp"
