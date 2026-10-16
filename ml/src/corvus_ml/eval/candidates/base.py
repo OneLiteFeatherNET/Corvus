@@ -79,6 +79,7 @@ class Candidate(ABC):
     def __init__(self, seed: int = 0, threads: int = 1, **params):
         self.seed = seed
         self.threads = threads
+        self.n_jobs = max(1, threads)  # sklearn / OpenMP worker count
         self.params = params
         self.calibration: Calibration | None = None
         # Set by the tuner: called as ``on_epoch(epoch, val_loss)``; may raise to prune the run.

@@ -138,3 +138,20 @@ def test_forward_never_sees_more_rows_than_the_micro_batch():
     assert max(seen) <= 7
     assert seen.count(4) >= 40 // 16 * 4, "training batches were split into micro-batches of 4"
     assert all(n <= 4 or n in (7, 2) for n in seen), seen  # 7 and 30 % 7 = 2: the validation pass
+
+
+def test_seed_everything_sets_torch_threads():
+    before = torch.get_num_threads()
+    try:
+        seed_everything(1, threads=2)
+        assert torch.get_num_threads() == 2
+    finally:
+        torch.set_num_threads(before)
+
+
+def test_sklearn_candidates_receive_the_thread_count():
+    from corvus_ml.eval.candidates import create
+
+    cand = create("isolation_forest", 1, 3, {"n_estimators": 5})
+    assert cand.threads == 3
+    assert cand.n_jobs == 3

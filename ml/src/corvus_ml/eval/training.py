@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import math
 import os
@@ -24,12 +25,22 @@ from corvus_ml.eval.lr import (
 )
 
 
+def _set_interop_threads(threads: int) -> None:
+    """Inter-op pool size; torch allows it once, before parallel work, so a refusal is fine."""
+    with contextlib.suppress(RuntimeError):
+        torch.set_num_interop_threads(threads)
+
+
 def seed_everything(seed: int, threads: int = 1) -> None:
-    """Seed python, numpy and torch; pin CPU threads; prefer deterministic kernels."""
+    """Seed python, numpy and torch; set CPU threads; prefer deterministic kernels.
+
+    Multithreaded CPU kernels can differ from a single-threaded run in the last bits of a float.
+    """
     random.seed(seed)
     np.random.seed(seed)  # noqa: NPY002 - legacy global state, for libraries that use it
     torch.manual_seed(seed)
     torch.set_num_threads(max(1, threads))
+    _set_interop_threads(max(1, threads))
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     torch.use_deterministic_algorithms(True, warn_only=True)
 

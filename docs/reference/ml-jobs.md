@@ -145,7 +145,8 @@ message names each reason.
 | `unlabelled` | `exclude` | or `assume_legit` |
 | `label_sources`, `min_confidence` | all, 0 | which labels count (for example `["honeypot", "staff_verdict"]`) |
 | `split_by` | `player` | or `session`: split by session instead of player. **Leakage-prone** (the same player can be in train and test), so the metrics are not comparable with player-split ones; only for smoke tests with few players. Recorded as `split_by` in the report and the result, which then carries a warning. Not combinable with `tune` |
-| `seed`, `threads`, `seq_len`, `split`, `fpr_targets`, `learning_curve`, `benchmark` | as `eval.toml` | `threads` at most 8 |
+| `seed`, `seq_len`, `split`, `fpr_targets`, `learning_curve`, `benchmark` | as `eval.toml` | |
+| `threads` | `"auto"` | CPU threads for torch (intra- and inter-op), scikit-learn (`n_jobs` / OpenMP) and the ONNX parity session. `"auto"` = all CPUs of the container (cgroup v2 `cpu.max`, then v1 CFS quota, then the affinity mask; at least 1). An integer 1 to 64 is clamped to the available CPUs with a warning. The chosen count is logged at job start. Multithreaded CPU kernels can differ from a single-threaded run in the last bits of a float even with `torch.use_deterministic_algorithms`; pin `threads: 1` for bit-exact reruns. Optuna trials stay sequential, the threads already use the cores. The latency benchmark deliberately stays single-threaded |
 | `calibration` | `auto` | `isotonic`, `platt`, `ecdf`; `none` is refused |
 | `select_by` | `recall@fpr0.1pct` | metric that picks the candidate |
 | `tune` | off | `true` or an object (`trials`, `timeout_s`, `storage`, `study_name`, `tune_windows`, `space`): an Optuna study per tunable candidate before the evaluation, see section 8 of [raw-byte-tokenizer.md](raw-byte-tokenizer.md). The API has no `tune` job type, so a search is an `evaluate` or `train` job with this parameter; the result lists `best_params` per candidate |

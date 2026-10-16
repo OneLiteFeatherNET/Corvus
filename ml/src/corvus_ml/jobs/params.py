@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from corvus_ml.cgroup import available_cpus, resolve_threads
+
+MAX_THREADS = 64
+
 
 class ParamError(ValueError):
     """A job parameter is unknown or has the wrong type or range."""
@@ -34,6 +38,15 @@ class Params:
         if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
             raise ParamError(f"{name} must be an integer in [{low}, {high}]")
         return value
+
+    def threads(self, name: str = "threads") -> int:
+        """``"auto"`` (default) = all CPUs of the container; an integer 1..64 is clamped to them."""
+        value = self.raw(name, "auto")
+        if value == "auto":
+            return resolve_threads("auto", available_cpus())
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_THREADS:
+            raise ParamError(f'{name} must be "auto" or an integer in [1, {MAX_THREADS}]')
+        return resolve_threads(value, available_cpus())
 
     def number(self, name: str, default: float, low: float, high: float) -> float:
         value = self.raw(name, default)

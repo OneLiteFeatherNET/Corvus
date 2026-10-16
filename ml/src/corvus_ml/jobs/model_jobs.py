@@ -155,7 +155,7 @@ def _read_params(
         "label_sources": p.strings("label_sources"),
         "min_confidence": p.number("min_confidence", 0.0, 0.0, 1.0),
         "seed": p.integer("seed", 1337, 0, 2**31 - 1),
-        "threads": p.integer("threads", 1, 1, 8),
+        "threads": p.threads(),
         "seq_len": p.integer("seq_len", spec.seq_len, 1, 100_000),
         "split": tuple(p.numbers("split", [0.6, 0.2, 0.2]) or ()),
         "split_by": p.string("split_by", "player"),
@@ -400,6 +400,7 @@ def _evaluate_and_maybe_train(ctx: JobContext, env: JobEnv, train: bool) -> JobO
     )
 
     cfg = _eval_config(ctx, opts, features, labels, raw_mode)
+    log.info("using %d CPU thread(s) (torch, sklearn, onnxruntime)", cfg.threads)
     out = env.scratch / "eval"
     report = run(cfg, out, tune=opts["tune"] is not None)
     if not report["contexts"]:
