@@ -99,10 +99,10 @@ class ApiSettings(BaseSettings):
     # Jobs
     job_runner: Literal["local", "kubernetes"] = "local"
     # Local runner: argv prefix; the job type and arguments are appended.
-    job_local_command: list[str] = ["corvus-ml"]
+    job_local_command: list[str] = ["corvus-job"]
     job_k8s_namespace: str = "corvus"
     job_k8s_image: str = ""
-    job_k8s_command: list[str] = ["corvus-ml"]
+    job_k8s_command: list[str] = ["corvus-job"]
     job_k8s_service_account: str | None = None
     job_k8s_cpu_request: str = "1"
     job_k8s_cpu_limit: str = "4"
@@ -111,6 +111,8 @@ class ApiSettings(BaseSettings):
     job_k8s_ttl_after_finished_s: int = Field(default=86_400, ge=0)
     job_k8s_active_deadline_s: int = Field(default=14_400, ge=1)
     job_k8s_backoff_limit: int = Field(default=0, ge=0)
+    # Size limit of the emptyDir mounted at /scratch (CORVUS_JOB_SCRATCH_DIR) in job pods.
+    job_k8s_scratch_size_limit: str = "20Gi"
     # Name of a Secret that is exposed as environment (S3/DB credentials of the job); optional.
     job_k8s_env_secret: str | None = None
 

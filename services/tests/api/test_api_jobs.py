@@ -52,12 +52,12 @@ class FakeLauncher:
 
 async def test_local_runner_starts_the_configured_command_with_the_job_contract():
     launcher = FakeLauncher()
-    runner = LocalRunner(["corvus-ml", "--quiet"], launcher)
+    runner = LocalRunner(["corvus-job", "--quiet"], launcher)
 
     ref = await runner.submit(SPEC)
 
     argv, env = launcher.calls[0]
-    assert argv == ["corvus-ml", "--quiet", "train"]
+    assert argv == ["corvus-job", "--quiet", "train"]
     assert env == {
         "CORVUS_JOB_ID": str(JOB_ID),
         "CORVUS_JOB_TYPE": "train",
@@ -136,7 +136,7 @@ class FakeBatchApi:
 CONFIG = K8sJobConfig(
     namespace="corvus-ml",
     image="ghcr.io/onelitefeathernet/corvus-ml:1.2.3",
-    command=["corvus-ml"],
+    command=["corvus-job"],
     cpu_request="500m",
     cpu_limit="2",
     memory_request="1Gi",
@@ -175,7 +175,7 @@ async def test_kubernetes_runner_creates_a_batch_job_with_limits_labels_and_ttl(
     assert pod["securityContext"]["runAsNonRoot"] is True
     container = pod["containers"][0]
     assert container["image"] == "ghcr.io/onelitefeathernet/corvus-ml:1.2.3"
-    assert container["command"] == ["corvus-ml"]
+    assert container["command"] == ["corvus-job"]
     assert container["args"] == ["train"]
     assert container["resources"] == {
         "requests": {"cpu": "500m", "memory": "1Gi"},
@@ -466,3 +466,25 @@ def test_runner_calls_do_not_block_the_event_loop():
 
     assert seen
     assert seen[0] != threading.get_ident()
+
+
+def test_kubernetes_job_mounts_a_sized_scratch_volume_and_points_the_job_at_it():
+    cfg = K8sJobConfig(**{**CONFIG.__dict__, "scratch_size_limit": "5Gi"})
+
+    pod = KubernetesRunner(FakeBatchApi(), cfg).build_job(SPEC)["spec"]["template"]["spec"]
+
+    assert pod["volumes"] == [{"name": "scratch", "emptyDir": {"sizeLimit": "5Gi"}}]
+    container = pod["containers"][0]
+    assert container["volumeMounts"] == [{"name": "scratch", "mountPath": "/scratch"}]
+    env = {e["name"]: e["value"] for e in container["env"]}
+    assert env["CORVUS_JOB_SCRATCH_DIR"] == "/scratch"
+    assert env["TMPDIR"] == "/scratch"
+
+
+def test_kubernetes_job_passes_the_job_type_as_first_argument_and_in_the_environment():
+    container = KubernetesRunner(FakeBatchApi(), CONFIG).build_job(SPEC)["spec"]["template"][
+        "spec"
+    ]["containers"][0]
+
+    env = {e["name"]: e["value"] for e in container["env"]}
+    assert container["args"][0] == env["CORVUS_JOB_TYPE"] == "train"
