@@ -7,7 +7,8 @@
     "edit": "Bearbeiten", "delete": "Löschen", "close": "Schließen", "yes": "Ja", "no": "Nein", "all": "Alle",
     "updated": "Aktualisiert", "created": "Erstellt", "createdBy": "Erstellt von", "line": "Zeile {n}",
     "removeItem": "Entfernen",
-    "saved": "Gespeichert", "deleted": "Gelöscht", "dismiss": "Schließen",
+    "saved": "Gespeichert", "copy": "Kopieren", "copied": "Kopiert", "copyFailed": "Kopieren fehlgeschlagen",
+    "deleted": "Gelöscht", "dismiss": "Schließen",
     "table": {
       "selectRow": "Zeile auswählen", "sortBy": "Sortieren nach", "rowsPerPage": "Zeilen pro Seite",
       "previous": "Vorherige Seite", "next": "Nächste Seite", "range": "{from}–{to} von {total}"
@@ -70,7 +71,9 @@
   },
   "snapshots": {
     "title": "Snapshots", "detail": "Snapshot", "pool": "Pool", "manifestHash": "Manifest-Hash", "sessions": "Sessions",
-    "files": "Dateien", "startJob": "Job starten", "openPool": "Pool öffnen", "filter": "Filter zum Snapshot-Zeitpunkt"
+    "files": "Dateien", "startJob": "Job starten", "openPool": "Pool öffnen", "filter": "Filter zum Snapshot-Zeitpunkt",
+    "sessionList": "Session-Liste", "sessionId": "Session-ID", "pseudonym": "Pseudonym",
+    "started": "Start", "gameContexts": "Spielkontexte", "labelSession": "Labeln"
   },
   "jobs": {
     "title": "Jobs", "typeLabel": "Typ", "statusLabel": "Status", "snapshot": "Snapshot", "params": "Parameter",
