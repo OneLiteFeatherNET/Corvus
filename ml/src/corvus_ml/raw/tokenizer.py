@@ -8,6 +8,10 @@ byte boundary, which is what binary layouts need.
 
 The ids of the reserved tokens are fixed by :class:`~corvus_ml.raw.layout.TokenLayout`; the trained
 merges follow after them. ``tokenizer.json`` is hashed into the feature spec.
+
+``mode = "bytes"`` builds the plain-byte variant: no merges, the 256 byte tokens follow the reserved
+ids (byte ``b`` has id ``n_special + b``), one token per payload byte. It needs no training data,
+and the mode is recorded in the spec so a model is never scored with the other tokenizer.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ from corvus_ml.features.spec import FeatureSpecError, FeatureSpecMismatch
 from corvus_ml.raw.layout import TokenLayout
 from corvus_ml.raw.spec import (
     TOKENIZER_FILE,
+    TOKENIZER_MODES,
     PacketConfig,
     RawBytesSpec,
     WindowConfig,
@@ -49,6 +54,7 @@ class TokenizerConfig:
     vocab_size: int = 4096
     min_frequency: int = 2
     layout: TokenLayout = field(default_factory=TokenLayout)
+    mode: str = "bpe"  # "bytes": one token per byte, vocab_size is ignored
     # Training reads only the first bytes of each payload (headers carry the structure) and stops
     # at the first of these limits, so memory stays bounded however large the snapshot is.
     train_bytes_per_payload: int = 256
@@ -56,6 +62,10 @@ class TokenizerConfig:
     max_train_bytes: int = 256 * 1024 * 1024
 
     def __post_init__(self) -> None:
+        if self.mode not in TOKENIZER_MODES:
+            raise ValueError(f"tokenizer mode must be one of {TOKENIZER_MODES}")
+        if self.mode == "bytes":
+            return
         if self.vocab_size <= self.layout.n_special + 256:
             raise ValueError(
                 f"vocab_size must exceed the {self.layout.n_special} reserved tokens plus the 256 "
@@ -95,6 +105,8 @@ class RawTokenizer:
     def train(cls, payloads: Iterable[bytes], cfg: TokenizerConfig | None = None) -> RawTokenizer:
         """Train on payload bytes. Deterministic for the same payloads in the same order."""
         cfg = cfg or TokenizerConfig()
+        if cfg.mode == "bytes":
+            return cls.byte_level(cfg.layout)
         tok = Tokenizer(models.BPE(unk_token="[UNK]"))
         trainer = trainers.BpeTrainer(
             vocab_size=cfg.vocab_size,
@@ -105,6 +117,12 @@ class RawTokenizer:
         )
         tok.train_from_iterator(bounded_payloads(payloads, cfg), trainer)
         return cls(tok, cfg.layout)
+
+    @classmethod
+    def byte_level(cls, layout: TokenLayout) -> RawTokenizer:
+        """The plain-byte tokenizer: reserved ids, then one token per byte value, no merges."""
+        vocab = {name: i for i, name in enumerate([*layout.special_tokens(), *_ALPHABET])}
+        return cls(Tokenizer(models.BPE(vocab=vocab, merges=[], unk_token="[UNK]")), layout)
 
     @classmethod
     def load(
@@ -126,6 +144,10 @@ class RawTokenizer:
         if layout is None:
             raise ValueError("pass the spec or the layout the tokenizer was trained with")
         tok = cls(Tokenizer.from_file(str(path)), layout)
+        if spec is not None and tok.mode != spec.tokenizer_mode:
+            raise FeatureSpecMismatch(
+                f"tokenizer mode mismatch: spec has {spec.tokenizer_mode}, file is {tok.mode}"
+            )
         if spec is not None and tok.vocab_size != spec.vocab_size:
             raise FeatureSpecMismatch(
                 f"tokenizer vocab size mismatch: spec has {spec.vocab_size}, file has "
@@ -152,6 +174,11 @@ class RawTokenizer:
     @property
     def vocab_size(self) -> int:
         return self._tok.get_vocab_size()
+
+    @property
+    def mode(self) -> str:
+        """``"bytes"`` if the vocabulary is exactly the reserved ids plus the 256 bytes."""
+        return "bytes" if self.vocab_size == self.layout.n_special + 256 else "bpe"
 
     def encode(self, payload: bytes) -> list[int]:
         return self._tok.encode(bytes_to_text(payload), add_special_tokens=False).ids
@@ -190,4 +217,5 @@ class RawTokenizer:
             layout=self.layout,
             packet=packet,
             window=window,
+            tokenizer_mode=self.mode,
         )

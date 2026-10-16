@@ -30,7 +30,7 @@ from corvus_ml.jobs.params import Params
 from corvus_ml.raw.layout import DEFAULT_PROTOCOLS, TokenLayout
 from corvus_ml.raw.pipeline import tokenize_sessions, train_tokenizer
 from corvus_ml.raw.reader import RawReader, ReadStats, SessionInfo
-from corvus_ml.raw.spec import TOKENIZER_FILE, PacketConfig, WindowConfig
+from corvus_ml.raw.spec import TOKENIZER_FILE, TOKENIZER_MODES, PacketConfig, WindowConfig
 from corvus_ml.raw.tokenizer import RawTokenizer, TokenizerConfig
 
 log = logging.getLogger("corvus.job.raw")
@@ -47,6 +47,13 @@ RAW_SESSIONS_SCHEMA = pa.schema(
         ("client_protocol", pa.int32()),
     ]
 )
+
+
+def _tokenizer_mode(p: Params) -> str:
+    mode = p.string("tokenizer_mode", "bpe") or "bpe"
+    if mode not in TOKENIZER_MODES:
+        raise JobError(f"tokenizer_mode must be one of {list(TOKENIZER_MODES)}")
+    return mode
 
 
 def raw_prefix(snapshot_id: str) -> str:
@@ -130,6 +137,7 @@ def _read_params(ctx: JobContext, kind: str) -> dict[str, Any]:
         "tokenizer_sessions": p.integer("tokenizer_sessions", 2000, 1, 1_000_000),
         "tokenizer_prefix": p.string("tokenizer_prefix"),
         "tokenizer": TokenizerConfig(
+            mode=_tokenizer_mode(p),
             vocab_size=p.integer("vocab_size", 4096, 1, 32767),
             min_frequency=p.integer("min_frequency", 2, 1, 1_000_000),
             train_bytes_per_payload=p.integer("train_bytes_per_payload", 256, 1, 4096),

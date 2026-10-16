@@ -567,12 +567,14 @@ def run(cfg: EvalConfig, out_dir: Path, tune: bool = False) -> dict:
         "assumed_legit_windows": assumed,
         "fpr_targets": list(cfg.fpr_targets),
         "split": list(cfg.split),
+        "latency_budget_ms": cfg.bench.latency_budget_ms,
         "contexts": {},
     }
     if cfg.raw is not None:
         report["raw_bytes"] = {
             "tokenizer_sha256": spec.raw_bytes.tokenizer_sha256,  # type: ignore[union-attr]
             "vocab_size": spec.raw_bytes.vocab_size,  # type: ignore[union-attr]
+            "tokenizer_mode": spec.raw_bytes.tokenizer_mode,  # type: ignore[union-attr]
             "window": spec.raw_bytes.window.__dict__,  # type: ignore[union-attr]
             "packet": spec.raw_bytes.packet.__dict__,  # type: ignore[union-attr]
         }
