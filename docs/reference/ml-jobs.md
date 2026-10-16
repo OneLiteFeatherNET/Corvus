@@ -132,7 +132,8 @@ the candidate's `test` / `val` metrics are absent with `test_skipped` / `val_ski
 `test split empty: needs at least 2 players per label stratum`), the ONNX parity check and the
 benchmark run on the windows of the first non-empty split (test, val, train; reported as
 `onnx.parity_on` in the report and `parity_on` in the result), and `train` still registers the
-model, without test metrics (the selection treats a missing metric as worst). The result lists
+model, without test metrics (the selection treats a missing metric as worst). With very few players, `split_by: "session"` gives every split windows (see the table).
+The result lists
 what the caller must know under `warnings`. A candidate without usable training windows is
 skipped with its `reason`; the job only fails if no candidate in any context is usable, and the
 message names each reason.
@@ -143,6 +144,7 @@ message names each reason.
 | `game_context` / `game_contexts` | all | contexts to evaluate |
 | `unlabelled` | `exclude` | or `assume_legit` |
 | `label_sources`, `min_confidence` | all, 0 | which labels count (for example `["honeypot", "staff_verdict"]`) |
+| `split_by` | `player` | or `session`: split by session instead of player. **Leakage-prone** (the same player can be in train and test), so the metrics are not comparable with player-split ones; only for smoke tests with few players. Recorded as `split_by` in the report and the result, which then carries a warning. Not combinable with `tune` |
 | `seed`, `threads`, `seq_len`, `split`, `fpr_targets`, `learning_curve`, `benchmark` | as `eval.toml` | `threads` at most 8 |
 | `calibration` | `auto` | `isotonic`, `platt`, `ecdf`; `none` is refused |
 | `select_by` | `recall@fpr0.1pct` | metric that picks the candidate |

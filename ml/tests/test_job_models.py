@@ -389,3 +389,24 @@ def test_a_sequence_candidate_with_a_single_player_does_not_crash(tmp_path, one_
 
     assert outcome.result["contexts"]["pvp"]["candidates"]["gru_autoencoder"]["status"] == "ok"
     assert len(env.api.models) == 1
+
+
+def test_split_by_session_trains_a_single_player_and_warns_about_leakage(tmp_path, one_player):
+    env = with_features(tmp_path, one_player)
+
+    outcome = train(make_context("train", split_by="session", **ONE_PLAYER), env)
+
+    assert outcome.result["split_by"] == "session"
+    assert any("leakage-prone" in w for w in outcome.result["warnings"])
+    cand = outcome.result["contexts"]["pvp"]["candidates"]["isolation_forest"]
+    assert "test_skipped" not in cand
+
+
+def test_split_by_defaults_to_player_and_rejects_unknown_values(tmp_path, one_player):
+    env = with_features(tmp_path, one_player)
+
+    assert evaluate(make_context("evaluate", **ONE_PLAYER), env).result["split_by"] == "player"
+    with pytest.raises(JobError, match="split_by"):
+        evaluate(make_context("evaluate", split_by="window", **ONE_PLAYER), env)
+    with pytest.raises(JobError, match="tune"):
+        evaluate(make_context("evaluate", split_by="session", tune=True, **ONE_PLAYER), env)

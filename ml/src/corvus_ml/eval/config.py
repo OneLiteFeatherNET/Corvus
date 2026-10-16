@@ -15,6 +15,7 @@ from corvus_ml.raw.synthetic import SyntheticRawConfig
 from corvus_ml.raw.tokenizer import TokenizerConfig
 
 UNLABELLED_MODES = ("exclude", "assume_legit")
+SPLIT_BY = ("player", "session")
 
 
 @dataclass
@@ -70,6 +71,9 @@ class EvalConfig:
     calibration: str = "auto"  # auto | isotonic | platt | ecdf | none (see corvus_ml.calibration)
     contexts: list[str] = field(default_factory=list)  # empty = every context in the data
     split: tuple[float, float, float] = (0.6, 0.2, 0.2)
+    # "player" (default) or "session": session splits leak (a player is in train and test) and
+    # are only meant for smoke tests with few players.
+    split_by: str = "player"
     fpr_targets: tuple[float, ...] = (0.01, 0.001)
     min_confidence: float = 0.0
     learning_curve: tuple[float, ...] = ()
@@ -97,6 +101,7 @@ class EvalConfig:
             "calibration",
             "contexts",
             "min_confidence",
+            "split_by",
         ):
             if key in run:
                 setattr(cfg, key, run.pop(key))
@@ -110,6 +115,10 @@ class EvalConfig:
             raise ValueError(f"unknown [run] keys: {sorted(run)}")
         if cfg.unlabelled not in UNLABELLED_MODES:
             raise ValueError(f"run.unlabelled must be one of {UNLABELLED_MODES}")
+        if cfg.split_by not in SPLIT_BY:
+            raise ValueError(f"run.split_by must be one of {SPLIT_BY}")
+        if cfg.split_by == "session" and "tune" in raw:
+            raise ValueError("run.split_by = 'session' cannot be combined with [tune]")
         if cfg.calibration not in CALIBRATION_METHODS:
             raise ValueError(f"run.calibration must be one of {CALIBRATION_METHODS}")
         for key in ("windows", "tokens", "sessions", "labels"):
