@@ -30,7 +30,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
     CORVUS_MIGRATIONS_DIR=/app/migrations \
     PYTHONUNBUFFERED=1
 USER 10001:10001
-# corvus-ingest and corvus-score export metrics and /healthz on 9464; corvus-score also needs a
+# corvus-ingest and corvus-score export metrics, /livez (liveness) and /healthz (readiness) on 9464; corvus-score also needs a
 # writable model cache (CORVUS_SCORE_MODELS_DIR, default /tmp/corvus-score/models).
 EXPOSE 9464
 CMD ["corvus-ingest"]

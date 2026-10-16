@@ -7,6 +7,7 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 
+from ..nats_shutdown import FETCH_ENDED
 from .models import ModelManager
 from .ports import ScoreSource
 from .service import ScoringService
@@ -18,7 +19,13 @@ log = logging.getLogger("corvus.score")
 
 async def consume(source: ScoreSource, service: ScoringService, stop: asyncio.Event) -> None:
     while not stop.is_set():
-        for msg in await source.fetch():
+        try:
+            msgs = await source.fetch()
+        except FETCH_ENDED:
+            if stop.is_set():  # the pull ended because we are shutting down
+                return
+            raise
+        for msg in msgs:
             await service.handle(msg)
         await service.backpressure()
 

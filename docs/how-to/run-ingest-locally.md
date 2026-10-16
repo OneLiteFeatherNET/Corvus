@@ -19,7 +19,8 @@ implements is in [data-lake.md](../reference/data-lake.md).
 3. Check that the service is ready and exporting metrics:
 
    ```sh
-   curl -s localhost:9464/healthz
+   curl -s localhost:9464/livez      # liveness, no dependencies
+   curl -s localhost:9464/healthz    # readiness: nats, postgres, s3
    curl -s localhost:9464/metrics | grep corvus_ingest
    ```
 

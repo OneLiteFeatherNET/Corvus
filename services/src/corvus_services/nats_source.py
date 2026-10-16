@@ -19,6 +19,7 @@ from nats.js.api import (
 from nats.js.errors import NotFoundError
 
 from .config import Settings
+from .nats_shutdown import close_connection
 
 log = logging.getLogger("corvus.nats")
 
@@ -89,12 +90,12 @@ class NatsSource:
     async def fetch(self) -> list[NatsMessage]:
         try:
             msgs = await self._sub.fetch(self._s.fetch_batch, timeout=self._s.fetch_timeout_s)
-        except NatsTimeout:
+        except (NatsTimeout, TimeoutError):
             return []
         return [NatsMessage(m) for m in msgs]
 
     async def close(self) -> None:
-        await self._nc.drain()
+        await close_connection(self._nc)
 
 
 def stream_config(s: Settings) -> StreamConfig:

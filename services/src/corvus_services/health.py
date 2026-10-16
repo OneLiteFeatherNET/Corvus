@@ -1,4 +1,4 @@
-"""Tiny asyncio HTTP server: ``/metrics`` (Prometheus) and ``/healthz`` (readiness)."""
+"""Tiny asyncio HTTP server: ``/metrics``, ``/livez`` (liveness), ``/healthz`` (readiness)."""
 
 from __future__ import annotations
 
@@ -12,8 +12,11 @@ log = logging.getLogger("corvus.health")
 
 Check = Callable[[], Awaitable[None]]
 
+# Must stay below the Kubernetes probe ``timeoutSeconds`` of the readiness/startup probes.
+CHECK_TIMEOUT_S = 2.0
 
-async def run_checks(checks: dict[str, Check], timeout: float = 3.0) -> dict[str, str]:
+
+async def run_checks(checks: dict[str, Check], timeout: float = CHECK_TIMEOUT_S) -> dict[str, str]:
     """Run all checks; returns ``{name: "ok" | error}``."""
 
     async def one(name: str, check: Check) -> tuple[str, str]:
@@ -28,10 +31,17 @@ async def run_checks(checks: dict[str, Check], timeout: float = 3.0) -> dict[str
 
 
 class HealthServer:
-    def __init__(self, registry: CollectorRegistry, checks: dict[str, Check], port: int) -> None:
+    def __init__(
+        self,
+        registry: CollectorRegistry,
+        checks: dict[str, Check],
+        port: int,
+        check_timeout_s: float = CHECK_TIMEOUT_S,
+    ) -> None:
         self._registry = registry
         self._checks = checks
         self._port = port
+        self._check_timeout_s = check_timeout_s
         self._server: asyncio.Server | None = None
 
     async def start(self) -> None:
@@ -45,8 +55,10 @@ class HealthServer:
     async def respond(self, path: str) -> tuple[int, str, bytes]:
         if path == "/metrics":
             return 200, CONTENT_TYPE_LATEST, generate_latest(self._registry)
-        if path == "/healthz":
-            results = await run_checks(self._checks)
+        if path == "/livez":  # no dependencies: only proves the event loop answers
+            return 200, "text/plain", b"ok\n"
+        if path == "/healthz":  # readiness: dependencies must answer within the check timeout
+            results = await run_checks(self._checks, self._check_timeout_s)
             ok = all(v == "ok" for v in results.values())
             body = "\n".join(f"{k}: {v}" for k, v in results.items()) + "\n"
             return (200 if ok else 503), "text/plain", body.encode()

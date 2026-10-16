@@ -33,7 +33,8 @@ directory, as the evaluation export writes them (see [evaluate-models.md](evalua
 3. Check readiness and metrics (the scorer uses host port 9465 so it does not clash with ingest):
 
    ```sh
-   curl -s localhost:9465/healthz        # nats, postgres, registry
+   curl -s localhost:9465/livez          # liveness, no dependencies
+   curl -s localhost:9465/healthz        # readiness: nats, postgres, registry
    curl -s localhost:9465/metrics | grep corvus_score
    ```
 

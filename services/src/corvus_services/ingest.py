@@ -16,6 +16,7 @@ from .config import Settings
 from .crypto import Keyring
 from .health import HealthServer
 from .metrics import Metrics
+from .nats_shutdown import FETCH_ENDED
 from .nats_source import NatsSource
 from .pgcatalog import PgCatalog
 from .pipeline import IngestPipeline
@@ -26,7 +27,13 @@ log = logging.getLogger("corvus.ingest")
 
 async def consume(source: NatsSource, pipeline: IngestPipeline, stop: asyncio.Event) -> None:
     while not stop.is_set():
-        for msg in await source.fetch():
+        try:
+            msgs = await source.fetch()
+        except FETCH_ENDED:
+            if stop.is_set():  # the pull ended because we are shutting down
+                return
+            raise
+        for msg in msgs:
             await pipeline.handle(msg)
         await pipeline.apply_backpressure()
 
