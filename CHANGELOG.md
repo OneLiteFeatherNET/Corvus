@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.4.0...v0.5.0) (2026-10-16)
+
+
+### Features
+
+* default to 20 s windows with 10 s stride and 2048 packets ([#89](https://github.com/OneLiteFeatherNET/Corvus/issues/89)) ([5eb1017](https://github.com/OneLiteFeatherNET/Corvus/commit/5eb1017c403adf54f86264cbe0f207702b587195))
+* **ml:** add raw-byte model variants for the tokenizer ablation ([#87](https://github.com/OneLiteFeatherNET/Corvus/issues/87)) ([1660535](https://github.com/OneLiteFeatherNET/Corvus/commit/1660535c29029ba95dc3b84e06f35fa34c776dfc))
+* **ml:** find the learning rate with a range test ([#85](https://github.com/OneLiteFeatherNET/Corvus/issues/85)) ([5f8dbbf](https://github.com/OneLiteFeatherNET/Corvus/commit/5f8dbbfcdcb868d1b14a036f4d39989f1f062419))
+* treat scoring latency as throughput instead of a 10 ms budget ([#88](https://github.com/OneLiteFeatherNET/Corvus/issues/88)) ([2c98257](https://github.com/OneLiteFeatherNET/Corvus/commit/2c9825700576f892fb56b0f680bca39996bb719e))
+
 ## [0.4.0](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.3.2...v0.4.0) (2026-10-16)
 
 
