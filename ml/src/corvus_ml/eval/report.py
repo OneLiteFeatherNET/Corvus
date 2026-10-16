@@ -88,7 +88,7 @@ def to_markdown(report: dict) -> str:
         for f in fprs:
             head += [f"R@{f * 100:g}% win", f"R@{f * 100:g}% player"]
         budget = report.get("latency_budget_ms")
-        head += ["ECE", "p50 ms", "p99 ms"]
+        head += ["ECE", "p50 ms", "p99 ms", "players/core"]
         head += [f"p99 <= {budget:g} ms"] if budget else []
         head += ["batch w/s", "RSS MB", "ONNX diff"]
         rows = []
@@ -106,6 +106,7 @@ def to_markdown(report: dict) -> str:
                 _f(t.get("ece")),
                 _f(b.get("latency_p50_ms"), 3),
                 _f(b.get("latency_p99_ms"), 3),
+                _f(b.get("players_per_core"), 0),
                 *([_within(b.get("latency_p99_ms"), budget)] if budget else []),
                 _f(b.get("batch_throughput_wps"), 0),
                 _f(b.get("peak_rss_mb"), 0),
@@ -213,13 +214,14 @@ def _sizes_section(info: dict, budget: float | None = None) -> list[str]:
                     count,
                     _f(b["latency_p50_ms"], 2),
                     _f(b["latency_p99_ms"], 2),
+                    _f(b.get("players_per_core"), 0),
                     *([_within(b["latency_p99_ms"], budget)] if budget else []),
                     f"{b['threads']}",
                 ]
             )
     if not rows:
         return []
-    head = ["candidate", "packets", "p50 ms", "p99 ms"]
+    head = ["candidate", "packets", "p50 ms", "p99 ms", "players/core"]
     head += [f"p99 <= {budget:g} ms"] if budget else []
     head += ["threads"]
     return ["### CPU latency per window by packet count (batch of 1)", "", *_table(head, rows), ""]

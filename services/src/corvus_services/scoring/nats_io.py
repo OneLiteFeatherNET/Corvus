@@ -101,7 +101,10 @@ async def ensure_score_stream(js: Any, s: ScoreSettings) -> None:
 class NatsScoreIO:
     """One NATS connection serving as score source (capture consumer) and publisher."""
 
-    def __init__(self, nc: Any, js: Any, sub: Any, settings: ScoreSettings) -> None:
+    def __init__(
+        self, nc: Any, js: Any, sub: Any, settings: ScoreSettings, consumer: str = ""
+    ) -> None:
+        self._consumer = consumer
         self._nc = nc
         self._js = js
         self._sub = sub
@@ -115,7 +118,7 @@ class NatsScoreIO:
         await ensure_score_stream(js, s)
         await ensure_consumer(js, s, replica)
         sub = await js.pull_subscribe_bind(consumer_name(s, replica), stream=s.nats_stream)
-        return cls(nc, js, sub, s)
+        return cls(nc, js, sub, s, consumer_name(s, replica))
 
     @property
     def connected(self) -> bool:
@@ -127,6 +130,11 @@ class NatsScoreIO:
         except (NatsTimeout, TimeoutError):
             return []
         return [NatsMessage(m) for m in msgs]
+
+    async def pending(self) -> int:
+        """Capture messages not yet delivered to this replica's consumer (``num_pending``)."""
+        info = await self._js.consumer_info(self._s.nats_stream, self._consumer)
+        return int(info.num_pending)
 
     async def publish(self, subject: str, data: bytes) -> None:
         await self._js.publish(subject, data)

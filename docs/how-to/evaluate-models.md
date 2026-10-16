@@ -152,8 +152,12 @@ Per `game_context` one table row per candidate, all on the **test** split:
   or players). Do not trust those cells beyond "upper bound".
 - `ECE`: expected calibration error, 10 equal-width bins, supervised candidates only (the
   unsupervised scores are percentiles of the legit distribution, not probabilities).
-- `p50 ms`, `p99 ms`: single-window ONNX Runtime CPU latency at the configured thread count; the
-  target is under 10 ms p99. `batch w/s`: throughput at the batch size. `RSS MB`: peak resident
+- `p50 ms`, `p99 ms`: single-window ONNX Runtime CPU latency at the configured thread count.
+  `players/core`: how many concurrent players one core keeps up with, `stride_seconds / (mean
+  latency * threads)` (`stride / mean latency` with the default of one thread; for example stride
+  5 s and 50 ms is 100 players per core, 5 s latency is 1). The stride is the one of the raw-byte
+  window; candidates without raw windows show `-`. Scores are computed asynchronously, so latency
+  is no real-time target: a window may take seconds, what counts is that the scorer keeps up. `batch w/s`: throughput at the batch size. `RSS MB`: peak resident
   set of the benchmark process (`model RSS delta` in the JSON is the growth caused by the model).
 - `ONNX diff`: maximum absolute difference between ONNX and native (calibrated) scores on the test
   windows; `parity_ok` in the JSON applies `rtol=1e-3, atol=2e-3` (the calibration interpolates in
@@ -288,7 +292,7 @@ combine = "rank"
 
 [benchmark]
 raw_packets = [64, 256]
-latency_budget_ms = 10.0
+latency_budget_ms = 5000.0   # sanity bound for p99, not a real-time target
 ```
 
 ```
@@ -299,8 +303,8 @@ uv run corvus-eval run --config ablation-bytes.toml --out reports/ablation-bytes
 For a real snapshot, `[raw] dir` points to a build made with `tokenizer_mode = "bpe"` and one made with
 `"bytes"` (two `build_features` jobs, or `train_tokenizer` once per mode and `tokenizer_prefix`). Both runs
 use the same seed and the same player split, so the rows are comparable. Read each report for ROC/PR-AUC
-and recall at the FPR targets, the parameter count, and p50/p99 latency; the column `p99 <= 10 ms` marks the
-scorer budget, and the table "CPU latency per window by packet count" shows it at 64 and 256 packets.
+and recall at the FPR targets, the parameter count, and p50/p99 latency; the column `p99 <= 5000 ms` marks the
+sanity bound (`benchmark.latency_budget_ms`), `players/core` the throughput, and the table "CPU latency per window by packet count" shows it at 64 and 256 packets.
 `corvus-eval tune` searches the same candidates (`[tune.space] p_packet = [0.3, 0.9]` adds a mask-ratio
 range). `ml/eval.ablation-raw-bpe.toml` and `ml/eval.ablation-raw-bytes.toml` are runnable smoke versions on
 synthetic packets; like every synthetic run they prove the variants train, export and fit the latency

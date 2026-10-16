@@ -74,7 +74,12 @@ _P99_OVER_MEAN = 1.15  # 47.6 / 41.9
 
 
 def estimate_p99_ms(max_packets: int, intra_op_threads: int, *, anomaly: bool = False) -> float:
-    """Rough p99 latency of one window of ``max_packets`` packets for a default-size model.
+    """Rough p99 latency of one window: the mean estimate times the measured tail factor."""
+    return estimate_mean_ms(max_packets, intra_op_threads, anomaly=anomaly) * _P99_OVER_MEAN
+
+
+def estimate_mean_ms(max_packets: int, intra_op_threads: int, *, anomaly: bool = False) -> float:
+    """Rough mean latency of one window of ``max_packets`` packets for a default-size model.
 
     Piecewise linear through the measured points (proportional below the first, last slope above
     the last). A larger model needs more (``d_model`` 128 with 4 layers: about 1.6 times).
@@ -93,7 +98,23 @@ def estimate_p99_ms(max_packets: int, intra_op_threads: int, *, anomaly: bool = 
         ms *= _TWO_THREAD_FACTOR
     if anomaly:
         ms *= _ANOMALY_FACTOR
-    return ms * _P99_OVER_MEAN
+    return ms
+
+
+def estimate_capacity_players(
+    cpus: int, intra_op_threads: int, stride_seconds: float, mean_ms: float
+) -> float:
+    """Concurrent players one scorer replica can keep up with.
+
+    Each player yields one window per ``stride_seconds``; a window occupies ``intra_op_threads``
+    cores for ``mean_ms``. So ``max(1, cpus // intra_op_threads)`` windows run in parallel and
+    capacity = parallel * stride_seconds / (mean_ms / 1000). With one thread per window this is
+    ``cpus * stride_seconds / mean_latency``.
+    """
+    if mean_ms <= 0:
+        return float("inf")
+    parallel = max(1, cpus // max(1, intra_op_threads))
+    return parallel * stride_seconds * 1000.0 / mean_ms
 
 
 def budget_warning(
@@ -107,6 +128,7 @@ def budget_warning(
         return None
     return (
         f"raw-byte model {name}: max_packets={max_packets} costs an estimated p99 of {est:.1f} ms "
-        f"per full window on {intra_op_threads} thread(s), above the budget of {budget_ms:.1f} ms; "
+        f"per full window on {intra_op_threads} thread(s), above the budget (sanity bound) of "
+        f"{budget_ms:.1f} ms; "
         "retrain with a smaller max_packets or raise CORVUS_SCORE_P99_BUDGET_MS"
     )

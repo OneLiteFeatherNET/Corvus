@@ -122,7 +122,7 @@ def test_defaults_are_safe():
     assert s.plugin_token_list() == []
     assert s.job_runner == "local"
     assert s.oidc_algorithms == ["RS256", "ES256"]
-    assert s.gate_max_p99_latency_ms == 10.0
+    assert s.gate_max_p99_latency_ms == 5000.0
 
 
 def test_plugin_tokens_are_split_and_trimmed():

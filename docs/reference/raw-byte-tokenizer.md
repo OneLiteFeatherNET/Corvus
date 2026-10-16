@@ -305,7 +305,8 @@ never stored, persisted or logged. A model that appears while a segment runs sta
 (the featurizers behave the same); a frame whose `seq` does not exceed the last one (redelivery) is ignored.
 
 Metrics: `corvus_score_model_window_max_packets{model}`, `corvus_score_model_window_seconds{model}`,
-`corvus_score_model_estimated_p99_ms{model}`, `corvus_score_raw_window_packets` (packets per window handed to the
+`corvus_score_model_estimated_p99_ms{model}`, `corvus_score_model_estimated_capacity_players{model}`,
+`corvus_score_consumer_pending`, `corvus_score_falling_behind`, `corvus_score_raw_window_packets` (packets per window handed to the
 models) and `corvus_score_raw_frames_dropped_total`.
 
 Cost: the table below was measured with default-size models (`d_model` 64, 2 global layers; random
@@ -320,16 +321,31 @@ per call. The anomaly graph is slower because it runs the prediction heads for t
 
 A larger model (`d_model` 128, 4 layers) needs 68.9 ms (1 thread) for 1024 packets.
 
-**Budget guard.** At load time the scorer estimates the p99 of a full window from `max_packets` (piecewise linear
+**Throughput, not latency.** Scores are asynchronous decision aids computed in the scorer (NATS consumer) and never
+block the proxy, so a window may take longer than a few milliseconds, even seconds, which allows windows long enough
+to show behaviour clearly. What matters is that the scorer keeps up with the incoming windows, otherwise the backlog
+grows. With window stride S seconds and mean latency L, one core serves about `S / L` concurrent players (single
+thread): stride 5 s and 50 ms are 100 players per core, a 5 s latency only 1.
+
+**Sanity bound.** At load time the scorer estimates the p99 of a full window from `max_packets` (piecewise linear
 through the 1-thread classifier points above, times 0.6 for two or more threads, times 2.6 for `raw_hier_anomaly`, times
 1.15 from mean to p99; a larger model needs about 1.6 times more) and logs a warning if it exceeds
-`CORVUS_SCORE_P99_BUDGET_MS` (default 10, the registry gate `CORVUS_GATE_MAX_P99_LATENCY_MS`). The model is still
-served; the estimate is exported as `corvus_score_model_estimated_p99_ms`. With the default budget a classifier on one
-thread stays quiet up to about 270 packets and warns at 512 (about 20 ms) and 1024. Re-measure on the
-target hardware (`[benchmark] raw_packets = [128, 512, 1024]` adds this table to every report). With a
-stride of 5 s one window per session every 5 s is one call; the budget is the number of concurrent
-sessions times the cost of the window, so cap `max_packets` rather than the window length when CPU is
-the limit.
+`CORVUS_SCORE_P99_BUDGET_MS` (default 5000, like the registry gate `CORVUS_API_GATE_MAX_P99_LATENCY_MS`). It only
+catches absurd models; the model is still served and the estimate is exported as `corvus_score_model_estimated_p99_ms`.
+Re-measure on the target hardware (`[benchmark] raw_packets = [128, 512, 1024]` adds this table to every report).
+
+**Capacity.** At load time the scorer also logs and exports `corvus_score_model_estimated_capacity_players{model}`:
+`max(1, cpus // intra_op_threads) * stride_seconds / mean_latency`, with the mean from the same estimate (equal to
+`cpus * stride / mean latency` with one thread per window) and the CPUs from `CORVUS_SCORE_CPUS` or the cgroup limit.
+It assumes the model runs alone; several loaded models share the CPUs. Compare it with the concurrent players of a
+replica, and cap `max_packets` or add replicas or CPUs when it is lower. The evaluation report has the same figure per
+candidate as `players/core`.
+
+**Lag.** The scorer polls the pending count of its capture consumer (`num_pending`, every
+`CORVUS_SCORE_LAG_POLL_S`) into `corvus_score_consumer_pending` and logs a warning once, setting
+`corvus_score_falling_behind` to 1, when it grew over `CORVUS_SCORE_LAG_GROWTH_POLLS` consecutive polls. Alert on a
+rising `corvus_score_consumer_pending` as well; the per-replica pending count is the ground truth for "the scorer does
+not keep up", the capacity gauge is a forecast.
 
 ## 11. Limits
 
@@ -370,6 +386,7 @@ tokenizer is part of the source, so plain bytes versus BPE is a separate run (se
 All of this is deterministic for a seed: masks and the bank use `torch` / `numpy` generators seeded from
 `run.seed`, the entropy table has no randomness.
 
-Latency: `benchmark.latency_budget_ms` (default 10) is the p99 target per window of at most 256 packets on
-CPU. Together with `raw_packets = [..., 256]` the report prints parameters, p50, p99 and `p99 <= budget` for
-every candidate and every packet count.
+Latency: `benchmark.latency_budget_ms` (default 5000) is a sanity bound for the p99 per window on CPU, not a
+real-time target. Together with `raw_packets = [..., 256]` the report prints parameters, p50, p99,
+`players/core` (`stride_seconds / (mean latency * threads)`, see section 10) and `p99 <= budget` for every candidate and
+every packet count.

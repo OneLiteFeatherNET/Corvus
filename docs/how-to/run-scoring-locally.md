@@ -65,7 +65,8 @@ replica; roll all replicas together and keep the partition count identical on al
 | `CORVUS_SCORE_EMA_ALPHA` | `0.3` | Smoothing of `score_smoothed` |
 | `CORVUS_SCORE_SESSIONS_MAX`, `CORVUS_SCORE_SESSION_IDLE_S` | `20000`, `900` | Featurizer state bound and idle eviction |
 | `CORVUS_SCORE_RAW_MAX_BUFFERED_FRAMES` | `16384` | Raw-byte models: frames buffered per session, segment and windowing; the oldest are dropped and counted (`corvus_score_raw_frames_dropped_total`) |
-| `CORVUS_SCORE_P99_BUDGET_MS` | `10` | Raw-byte models: a model whose `max_packets` is estimated to exceed this p99 per window logs a warning at load; `0` disables |
+| `CORVUS_SCORE_P99_BUDGET_MS` | `5000` | Raw-byte models: sanity bound, not a real-time budget (scores are asynchronous). A model whose `max_packets` is estimated to exceed this p99 per window logs a warning at load; `0` disables |
+| `CORVUS_SCORE_LAG_POLL_S`, `CORVUS_SCORE_LAG_GROWTH_POLLS` | `15`, `4` | Consumer lag watch: the pending count of the capture consumer is polled every N seconds; a warning is logged once when it grew over this many consecutive polls (`0` polls disables the watch) |
 | `CORVUS_SCORE_WRITE_QUEUE` | `20000` | History rows queued before they are dropped (latest scores are never dropped) |
 | `CORVUS_SCORE_MODELS_DIR` | `/tmp/corvus-score/models` | Local model cache |
 | `CORVUS_SCORE_HISTORY_RETENTION_DAYS` | `14` | Applied by `corvus-housekeeping` |

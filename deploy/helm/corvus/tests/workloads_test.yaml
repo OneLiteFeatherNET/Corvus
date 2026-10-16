@@ -60,6 +60,16 @@ tests:
             name: CORVUS_SCORE_P99_BUDGET_MS
             value: "25"
 
+  - it: defaults the scorer p99 sanity bound to 5000 ms
+    template: score.yaml
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_SCORE_P99_BUDGET_MS
+            value: "5000"
+
   - it: rejects a raw-byte frame buffer below the minimum
     template: score.yaml
     set:

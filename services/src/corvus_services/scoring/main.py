@@ -114,7 +114,9 @@ async def run(settings: ScoreSettings) -> None:
         loop.add_signal_handler(sig, stop.set)
 
     try:
-        await ScoringApp(settings, io, service, manager, writer).run(stop)
+        await ScoringApp(
+            settings, io, service, manager, writer, backlog=io.pending, metrics=metrics
+        ).run(stop)
     finally:
         await catalog.close()
         await health.stop()

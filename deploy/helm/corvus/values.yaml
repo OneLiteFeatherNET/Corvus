@@ -219,10 +219,13 @@ score:
   # for the concurrent players and lower CORVUS_SCORE_SESSIONS_MAX (via `env`) if needed.
   # Frames buffered per session, segment and windowing at most; the oldest are dropped and counted.
   rawMaxBufferedFrames: 16384
-  # p99 budget in ms of one raw-byte window. A model whose max_packets is estimated to exceed it is
-  # still served but logs a warning at load time. 0 disables the check. Keep it in line with the
-  # registry gate (CORVUS_GATE_MAX_P99_LATENCY_MS of the api).
-  p99BudgetMs: 10
+  # Sanity bound in ms for the p99 of one raw-byte window, not a real-time budget: scores are
+  # asynchronous, what matters is that the scorer keeps up with the windows (see the
+  # corvus_score_model_estimated_capacity_players and corvus_score_consumer_pending metrics). A
+  # model whose max_packets is estimated to exceed it is still served but logs a warning at load
+  # time. 0 disables the check. Keep it in line with the registry gate
+  # (CORVUS_API_GATE_MAX_P99_LATENCY_MS of the api).
+  p99BudgetMs: 5000
   env: {}
   resources:
     requests: {cpu: "1", memory: 512Mi}

@@ -27,7 +27,7 @@ from corvus_ml.raw.tokenizer import RawTokenizer
 
 from .metrics import ScoreMetrics
 from .ports import ModelEntry, ModelFiles, ModelSession, ScoreCatalog, SessionFactory
-from .raw import budget_warning, estimate_p99_ms
+from .raw import budget_warning, estimate_capacity_players, estimate_mean_ms, estimate_p99_ms
 
 log = logging.getLogger("corvus.score.models")
 
@@ -425,6 +425,18 @@ class ModelManager:
         name = f"{entry.name}:{entry.version}"
         self._m.model_estimated_p99_ms.labels(name).set(
             estimate_p99_ms(raw.window.max_packets, intra, anomaly=anomaly)
+        )
+        mean_ms = estimate_mean_ms(raw.window.max_packets, intra, anomaly=anomaly)
+        players = estimate_capacity_players(self._cpus, intra, raw.window.stride_seconds, mean_ms)
+        self._m.model_estimated_capacity_players.labels(name).set(players)
+        log.info(
+            "raw-byte model %s: estimated mean %.1f ms per full window, stride %.1f s, "
+            "about %.0f concurrent players on %d CPU(s) (this model alone)",
+            name,
+            mean_ms,
+            raw.window.stride_seconds,
+            players,
+            self._cpus,
         )
         message = budget_warning(
             name, raw.window.max_packets, intra, self._budget_ms, anomaly=anomaly
