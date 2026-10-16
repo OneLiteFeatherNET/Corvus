@@ -1,47 +1,45 @@
 <template>
-  <v-dialog :model-value="modelValue" max-width="900" scrollable @update:model-value="$emit('update:modelValue', $event)" @after-leave="reset">
-    <v-card :title="$t('labels.import')">
-      <v-card-text>
+  <M3Dialog :model-value="modelValue" width="lg" :title="$t('labels.import')" @update:model-value="$emit('update:modelValue', $event)" @after-leave="reset">
+    <div class="flex flex-col gap-4 pt-1">
+      <div>
         <p class="mb-2">{{ $t('labels.importHint') }}</p>
-        <code class="mono d-block mb-4">subject_type,subject,label,source,confidence[,valid_from,valid_to,note]</code>
-        <AppProblem :error="action.error.value" />
-        <v-alert v-if="imported !== null" type="success" variant="tonal" role="status" class="mb-3">
-          {{ $t('labels.imported', { n: imported }) }}
-        </v-alert>
-        <v-file-input
-          v-model="file"
-          accept=".csv,text/csv"
-          :label="$t('labels.chooseFile')"
-          prepend-icon=""
-          prepend-inner-icon="mdi-file-delimited-outline"
-          @update:model-value="onFile"
-        />
-        <template v-if="preview">
-          <v-alert :type="preview.valid ? 'success' : 'error'" variant="tonal" density="compact" role="status" class="mb-3">
-            {{ preview.valid ? $t('labels.csvOk', { n: preview.rowCount }) : $t('labels.csvIssues', { n: preview.issues.length }) }}
-          </v-alert>
-          <ul v-if="preview.issues.length" class="mb-3 ml-4">
-            <li v-for="(i, n) in preview.issues.slice(0, 20)" :key="n">
-              <span v-if="i.line">{{ $t('common.line', { n: i.line }) }}: </span>{{ $t(`labels.csvErrors.${i.code}`) }}<span v-if="i.column"> ({{ i.column }})</span>
-            </li>
-            <li v-if="preview.issues.length > 20">… {{ $t('labels.moreIssues', { n: preview.issues.length - 20 }) }}</li>
-          </ul>
-          <v-table density="compact" class="mb-2">
-            <thead><tr><th v-for="h in preview.header" :key="h" scope="col">{{ h }}</th></tr></thead>
+        <code class="mono block">subject_type,subject,label,source,confidence[,valid_from,valid_to,note]</code>
+      </div>
+      <AppProblem :error="action.error.value" />
+      <M3Alert v-if="imported !== null" tone="success">{{ $t('labels.imported', { n: imported }) }}</M3Alert>
+      <M3FileInput ref="fileInput" accept=".csv,text/csv" :label="$t('labels.chooseFile')" @change="onFile" />
+      <template v-if="preview">
+        <M3Alert :tone="preview.valid ? 'success' : 'error'">
+          {{ preview.valid ? $t('labels.csvOk', { n: preview.rowCount }) : $t('labels.csvIssues', { n: preview.issues.length }) }}
+        </M3Alert>
+        <ul v-if="preview.issues.length" class="list-disc pl-5">
+          <li v-for="(i, n) in preview.issues.slice(0, 20)" :key="n">
+            <span v-if="i.line">{{ $t('common.line', { n: i.line }) }}: </span>{{ $t(`labels.csvErrors.${i.code}`) }}<span v-if="i.column"> ({{ i.column }})</span>
+          </li>
+          <li v-if="preview.issues.length > 20">… {{ $t('labels.moreIssues', { n: preview.issues.length - 20 }) }}</li>
+        </ul>
+        <div class="overflow-x-auto rounded-md border border-outline-variant">
+          <table class="w-full border-collapse text-body-small">
+            <thead>
+              <tr class="bg-surface-container text-start"><th v-for="h in preview.header" :key="h" scope="col" class="px-3 py-2 text-start">{{ h }}</th></tr>
+            </thead>
             <tbody>
-              <tr v-for="(r, n) in preview.rows.slice(0, 5)" :key="n"><td v-for="(c, k) in r" :key="k" class="mono">{{ c }}</td></tr>
+              <tr v-for="(r, n) in preview.rows.slice(0, 5)" :key="n" class="border-t border-outline-variant">
+                <td v-for="(c, k) in r" :key="k" class="mono px-3 py-2">{{ c }}</td>
+              </tr>
             </tbody>
-          </v-table>
-          <p class="text-body-medium text-on-surface-variant">{{ $t('labels.previewRows', { n: Math.min(5, preview.rowCount), total: preview.rowCount }) }}</p>
-        </template>
-      </v-card-text>
-      <v-card-actions>
-        <v-spacer />
-        <v-btn variant="text" @click="$emit('update:modelValue', false)">{{ $t('common.close') }}</v-btn>
-        <v-btn :disabled="!preview?.valid" :loading="action.pending.value" prepend-icon="mdi-upload" @click="submit">{{ $t('labels.upload') }}</v-btn>
-      </v-card-actions>
-    </v-card>
-  </v-dialog>
+          </table>
+        </div>
+        <p class="text-body-medium text-on-surface-variant">{{ $t('labels.previewRows', { n: Math.min(5, preview.rowCount), total: preview.rowCount }) }}</p>
+      </template>
+    </div>
+    <template #actions>
+      <M3Button variant="text" @click="$emit('update:modelValue', false)">{{ $t('common.close') }}</M3Button>
+      <M3Button :disabled="!preview?.valid" :loading="action.pending.value" :loading-label="$t('common.loading')" icon="mdi-upload" @click="submit">
+        {{ $t('labels.upload') }}
+      </M3Button>
+    </template>
+  </M3Dialog>
 </template>
 
 <script setup lang="ts">
@@ -52,13 +50,12 @@ defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [boolean], 'imported': [] }>()
 
 const labels = useLabels()
-const file = ref<File | File[] | null>(null)
+const fileInput = ref<{ reset: () => void } | null>(null)
 const text = ref('')
 const preview = ref<CsvPreview | null>(null)
 const imported = ref<number | null>(null)
 
-async function onFile() {
-  const f = Array.isArray(file.value) ? file.value[0] : file.value
+async function onFile(f: File | null) {
   imported.value = null
   if (!f) {
     text.value = ''
@@ -78,7 +75,7 @@ const action = useAction(async () => {
 const submit = () => action.run()
 
 function reset() {
-  file.value = null
+  fileInput.value?.reset()
   text.value = ''
   preview.value = null
   imported.value = null

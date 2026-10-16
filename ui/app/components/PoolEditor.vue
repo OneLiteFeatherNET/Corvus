@@ -1,16 +1,16 @@
 <template>
-  <v-row>
-    <v-col cols="12" lg="7">
+  <div class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+    <div>
       <AppProblem :error="save.error.value" />
       <PoolFilterForm :form="form" :show-errors="showErrors" />
-      <div class="d-flex flex-wrap ga-2 mt-4">
-        <v-btn prepend-icon="mdi-content-save-outline" :loading="save.pending.value" @click="submit">
+      <div class="mt-6 flex flex-wrap gap-2">
+        <M3Button icon="mdi-content-save-outline" :loading="save.pending.value" :loading-label="$t('common.loading')" @click="submit">
           {{ $t('common.save') }}
-        </v-btn>
-        <v-btn variant="text" :to="current ? `/pools/${current.id}` : '/pools'">{{ $t('common.cancel') }}</v-btn>
+        </M3Button>
+        <M3Button variant="text" :to="current ? `/pools/${current.id}` : '/pools'">{{ $t('common.cancel') }}</M3Button>
       </div>
-    </v-col>
-    <v-col cols="12" lg="5">
+    </div>
+    <div>
       <PreviewPanel
         :preview="preview"
         :loading="previewPending"
@@ -18,11 +18,11 @@
         :disabled="!filterValid"
         @refresh="refreshPreview"
       />
-      <p class="text-body-medium text-on-surface-variant mt-2">
+      <p class="mt-2 text-body-medium text-on-surface-variant">
         {{ filterValid ? $t('pools.preview.live') : $t('pools.preview.invalid') }}
       </p>
-    </v-col>
-  </v-row>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">

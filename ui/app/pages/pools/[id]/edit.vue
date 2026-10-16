@@ -2,7 +2,7 @@
   <div>
     <PageHeader :title="$t('pools.edit')" />
     <AppProblem :error="error" />
-    <v-progress-linear v-if="!pool && !error" indeterminate :aria-label="$t('common.loading')" />
+    <M3Progress v-if="!pool && !error" :label="$t('common.loading')" />
     <PoolEditor v-if="pool" :pool="pool" />
   </div>
 </template>

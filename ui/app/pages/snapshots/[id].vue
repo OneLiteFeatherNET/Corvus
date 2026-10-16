@@ -1,54 +1,48 @@
 <template>
   <div>
     <AppProblem :error="loadError" />
-    <v-progress-linear v-if="!snapshot && !loadError" indeterminate :aria-label="$t('common.loading')" />
+    <M3Progress v-if="!snapshot && !loadError" :label="$t('common.loading')" />
     <template v-if="snapshot">
       <PageHeader :title="`${$t('snapshots.detail')} ${shortId(snapshot.id)}`" :subtitle="snapshot.pool_name">
         <template #actions>
-          <v-btn v-if="can('jobs.create')" prepend-icon="mdi-play-circle-outline" @click="jobDialog = true">{{ $t('snapshots.startJob') }}</v-btn>
-          <v-btn variant="tonal" :to="`/pools/${snapshot.pool_id}`" prepend-icon="mdi-database-search-outline">{{ $t('snapshots.openPool') }}</v-btn>
+          <M3Button v-if="can('jobs.create')" icon="mdi-play-circle-outline" @click="jobDialog = true">{{ $t('snapshots.startJob') }}</M3Button>
+          <M3Button variant="tonal" :to="`/pools/${snapshot.pool_id}`" icon="mdi-database-search-outline">{{ $t('snapshots.openPool') }}</M3Button>
         </template>
       </PageHeader>
 
-      <v-card variant="flat" color="surface-container-low" class="mb-4">
-        <v-card-text>
-          <dl class="kv">
-            <dt>ID</dt><dd class="mono">{{ snapshot.id }}</dd>
-            <dt>{{ $t('snapshots.manifestHash') }}</dt><dd class="mono">{{ snapshot.sha256 }}</dd>
-            <dt>{{ $t('snapshots.sessions') }}</dt><dd>{{ snapshot.session_count }}</dd>
-            <dt>{{ $t('snapshots.files') }}</dt><dd>{{ snapshot.file_count }}</dd>
-            <dt>{{ $t('common.created') }}</dt><dd>{{ formatDateTime(snapshot.created_at, locale) }} · {{ snapshot.created_by }}</dd>
-          </dl>
-        </v-card-text>
-      </v-card>
+      <M3Card class="mb-4">
+        <dl class="kv">
+          <dt>ID</dt><dd class="mono">{{ snapshot.id }}</dd>
+          <dt>{{ $t('snapshots.manifestHash') }}</dt><dd class="mono">{{ snapshot.sha256 }}</dd>
+          <dt>{{ $t('snapshots.sessions') }}</dt><dd>{{ snapshot.session_count }}</dd>
+          <dt>{{ $t('snapshots.files') }}</dt><dd>{{ snapshot.file_count }}</dd>
+          <dt>{{ $t('common.created') }}</dt><dd>{{ formatDateTime(snapshot.created_at, locale) }} · {{ snapshot.created_by }}</dd>
+        </dl>
+      </M3Card>
 
-      <v-card variant="flat" color="surface-container-low">
-        <v-card-title class="text-title-large">{{ $t('snapshots.filter') }}</v-card-title>
-        <v-card-text><pre class="mono" style="white-space: pre-wrap">{{ JSON.stringify(manifestFilter, null, 2) }}</pre></v-card-text>
-      </v-card>
+      <M3Card :title="$t('snapshots.filter')">
+        <pre class="mono whitespace-pre-wrap">{{ JSON.stringify(manifestFilter, null, 2) }}</pre>
+      </M3Card>
 
-      <v-dialog v-model="jobDialog" max-width="560" @after-leave="create.reset()">
-        <v-card :title="$t('snapshots.startJob')">
-          <v-card-text>
-            <AppProblem :error="create.error.value" />
-            <v-select v-model="jobType" :items="jobTypes" :label="$t('jobs.typeLabel')" />
-            <v-textarea
-              v-model="paramsText"
-              :label="$t('jobs.params')"
-              :hint="$t('jobs.paramsHint')"
-              persistent-hint
-              rows="5"
-              class="mono"
-              :error-messages="paramsError"
-            />
-          </v-card-text>
-          <v-card-actions>
-            <v-spacer />
-            <v-btn variant="text" @click="jobDialog = false">{{ $t('common.cancel') }}</v-btn>
-            <v-btn :loading="create.pending.value" @click="submit">{{ $t('snapshots.startJob') }}</v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
+      <M3Dialog v-model="jobDialog" :title="$t('snapshots.startJob')" @after-leave="create.reset()">
+        <div class="flex flex-col gap-4 pt-1">
+          <AppProblem :error="create.error.value" />
+          <M3Select v-model="jobType" :items="jobTypes" :label="$t('jobs.typeLabel')" />
+          <M3TextField
+            v-model="paramsText"
+            multiline
+            :rows="5"
+            :label="$t('jobs.params')"
+            :hint="$t('jobs.paramsHint')"
+            :error="paramsError"
+            input-class="mono"
+          />
+        </div>
+        <template #actions>
+          <M3Button variant="text" @click="jobDialog = false">{{ $t('common.cancel') }}</M3Button>
+          <M3Button :loading="create.pending.value" :loading-label="$t('common.loading')" @click="submit">{{ $t('snapshots.startJob') }}</M3Button>
+        </template>
+      </M3Dialog>
     </template>
   </div>
 </template>
@@ -96,14 +90,3 @@ onMounted(async () => {
   }
 })
 </script>
-
-<style scoped>
-.kv {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 8px 24px;
-}
-.kv dt {
-  color: rgb(var(--v-theme-on-surface-variant));
-}
-</style>

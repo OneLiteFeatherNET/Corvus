@@ -1,11 +1,10 @@
 <template>
-  <header class="d-flex flex-wrap align-center ga-3 mb-6">
-    <div>
-      <h1 class="text-headline-large">{{ title }}</h1>
-      <p v-if="subtitle" class="text-body-large text-on-surface-variant">{{ subtitle }}</p>
+  <header class="mb-6 flex flex-wrap items-end gap-x-4 gap-y-3">
+    <div class="min-w-0 flex-1 basis-64">
+      <h1 class="text-headline-large break-words text-on-surface">{{ title }}</h1>
+      <p v-if="subtitle" class="mt-1 text-body-large text-on-surface-variant">{{ subtitle }}</p>
     </div>
-    <v-spacer />
-    <div class="d-flex flex-wrap align-center ga-2">
+    <div v-if="$slots.actions" class="flex flex-wrap items-center gap-2">
       <slot name="actions" />
     </div>
   </header>

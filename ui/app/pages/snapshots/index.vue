@@ -2,7 +2,7 @@
   <div>
     <PageHeader :title="$t('snapshots.title')" />
     <SnapshotTable :items="list.items.value" :loading="list.loading.value" :error="list.error.value" />
-    <v-btn v-if="list.hasMore()" class="mt-3" variant="tonal" :loading="list.loading.value" @click="list.loadMore()">{{ $t('common.loadMore') }}</v-btn>
+    <LoadMore :visible="list.hasMore()" :loading="list.loading.value" @more="list.loadMore()" />
   </div>
 </template>
 

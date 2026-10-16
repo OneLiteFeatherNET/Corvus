@@ -1,104 +1,107 @@
 <template>
-  <div>
-    <a class="skip-link" href="#main" @click.prevent="focusMain">{{ $t('common.skipToContent') }}</a>
+  <div class="min-h-screen">
+    <a
+      class="absolute -top-16 left-2 z-[70] rounded-full bg-primary px-4 py-2 text-on-primary focus:top-2"
+      href="#main"
+      @click.prevent="focusMain"
+    >{{ $t('common.skipToContent') }}</a>
 
-    <v-app-bar flat color="surface-container" height="64">
-      <v-app-bar-nav-icon
-        class="d-lg-none"
-        :aria-label="$t('common.menu')"
-        @click="drawer = !drawer"
-      />
-      <NuxtLink to="/" class="d-flex align-center text-decoration-none ml-2" :aria-label="$t('app.name')">
-        <img :src="logo" alt="" width="48" height="48" style="object-fit: contain">
-        <span class="text-title-large ml-3 text-on-surface">Corvus</span>
-      </NuxtLink>
-      <v-spacer />
-      <v-menu>
-        <template #activator="{ props }">
-          <v-btn v-bind="props" icon="mdi-translate" :aria-label="$t('common.language')" />
-        </template>
-        <v-list>
-          <v-list-item
-            v-for="l in locales"
-            :key="l.code"
-            :active="l.code === locale"
-            :title="l.name"
-            @click="setLocale(l.code)"
-          />
-        </v-list>
-      </v-menu>
-      <v-btn
-        :icon="isDark ? 'mdi-weather-sunny' : 'mdi-weather-night'"
-        :aria-label="isDark ? $t('common.lightTheme') : $t('common.darkTheme')"
-        @click="toggleTheme"
-      />
-      <v-menu>
-        <template #activator="{ props }">
-          <v-btn v-bind="props" icon="mdi-account-circle-outline" :aria-label="$t('auth.account')" />
-        </template>
-        <v-card min-width="240">
-          <v-card-text>
-            <div class="text-body-large">{{ session?.subject }}</div>
-            <div class="mt-2 d-flex flex-wrap ga-1">
-              <v-chip v-for="r in roles" :key="r" size="small" label>{{ $t(`roles.${r}`) }}</v-chip>
+    <M3TopAppBar>
+      <template #leading>
+        <M3IconButton v-if="!isDesktop" icon="mdi-menu" :label="$t('common.menu')" :aria-expanded="String(drawer)" @click="drawer = true" />
+      </template>
+      <template #title>
+        <NuxtLink to="/" class="inline-flex items-center gap-3 rounded-full py-1 pr-3 pl-1 text-on-surface no-underline" :aria-label="$t('app.name')">
+          <img :src="logo" alt="" width="40" height="40" class="size-10 object-contain">
+          <span class="text-title-large">Corvus</span>
+        </NuxtLink>
+      </template>
+      <template #actions>
+        <M3Menu :label="$t('common.language')">
+          <template #activator="{ props: a, toggle }">
+            <M3IconButton v-bind="a" icon="mdi-translate" :label="$t('common.language')" @click="toggle" />
+          </template>
+          <template #default="{ close }">
+            <M3MenuItem
+              v-for="l in locales"
+              :key="l.code"
+              :selected="l.code === locale"
+              @click="pick(l.code, close)"
+            >
+              {{ l.name }}
+            </M3MenuItem>
+          </template>
+        </M3Menu>
+        <M3IconButton
+          :icon="isDark ? 'mdi-weather-sunny' : 'mdi-weather-night'"
+          :label="isDark ? $t('common.lightTheme') : $t('common.darkTheme')"
+          @click="toggleTheme"
+        />
+        <M3Menu :label="$t('auth.account')" :menu="false">
+          <template #activator="{ props: a, toggle }">
+            <M3IconButton v-bind="a" icon="mdi-account-circle-outline" :label="$t('auth.account')" @click="toggle" />
+          </template>
+          <div class="w-64 p-4">
+            <p class="break-words text-body-large">{{ session?.subject }}</p>
+            <div class="mt-2 flex flex-wrap gap-1">
+              <M3Chip v-for="r in roles" :key="r" small>{{ $t(`roles.${r}`) }}</M3Chip>
               <span v-if="!roles.length" class="text-body-medium text-on-surface-variant">{{ $t('auth.noRoles') }}</span>
             </div>
-          </v-card-text>
-          <v-card-actions>
-            <v-btn prepend-icon="mdi-logout" @click="logout">{{ $t('auth.logout') }}</v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-menu>
-    </v-app-bar>
+            <div class="mt-4 flex justify-end">
+              <M3Button variant="text" icon="mdi-logout" @click="logout">{{ $t('auth.logout') }}</M3Button>
+            </div>
+          </div>
+        </M3Menu>
+      </template>
+    </M3TopAppBar>
 
-    <v-navigation-drawer v-model="drawer" color="surface-container-low" :permanent="lgAndUp" :aria-label="$t('common.navigation')">
-      <v-list nav aria-label="Corvus">
-        <v-list-item
-          v-for="item in items"
-          :key="item.key"
-          :to="item.to"
-          :prepend-icon="item.icon"
-          :title="$t(`nav.${item.key}`)"
-          :exact="item.to === '/'"
-          rounded="xl"
-        />
-      </v-list>
-    </v-navigation-drawer>
-
-    <v-main>
-      <v-container id="main" tabindex="-1" fluid class="pa-4 pa-md-6" style="max-width: 1400px; outline: none">
-        <slot />
-      </v-container>
-    </v-main>
+    <div class="flex">
+      <M3NavDrawer
+        v-if="isDesktop"
+        class="sticky top-16 h-[calc(100dvh-4rem)] overflow-y-auto"
+        :items="entries"
+        :active-path="route.path"
+        :label="$t('common.navigation')"
+      />
+      <M3NavDrawer
+        v-else
+        v-model:open="drawer"
+        modal
+        :items="entries"
+        :active-path="route.path"
+        :label="$t('common.navigation')"
+        :close-label="$t('common.close')"
+      />
+      <main id="main" tabindex="-1" class="min-w-0 flex-1 px-4 py-6 outline-none md:px-6">
+        <div class="max-w-[88rem]">
+          <slot />
+        </div>
+      </main>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { useDisplay, useTheme } from 'vuetify'
 import { readBasePath } from '~/lib/base'
 import { visibleNav } from '~/lib/nav'
 
 const { session, roles, can, logout } = useAuth()
 const { locale, locales, setLocale } = useI18n()
-const theme = useTheme()
-const { lgAndUp } = useDisplay()
+const { isDark, toggle: toggleTheme } = useColorTheme()
+const route = useRoute()
+const { t } = useI18n()
 
+const isDesktop = useMediaQuery('(min-width: 1024px)')
 const logo = `${readBasePath()}logo.png`
-const drawer = ref(lgAndUp.value)
-const items = computed(() => visibleNav(can))
-const isDark = computed(() => theme.global.current.value.dark)
+const drawer = ref(false)
+const entries = computed(() => visibleNav(can).map(i => ({ to: i.to, icon: i.icon, label: t(`nav.${i.key}`) })))
 
-function toggleTheme() {
-  const next = isDark.value ? 'light' : 'dark'
-  theme.global.name.value = next
-  try {
-    localStorage.setItem('corvus.theme', next)
-  }
-  catch { /* storage unavailable: the choice just does not persist */ }
+function pick(code: 'de' | 'en', close: () => void) {
+  void setLocale(code)
+  close()
 }
 
 // Move focus to the new page after a navigation so keyboard and screen reader users start at the content.
-const route = useRoute()
 watch(() => route.path, () => nextTick(() => document.getElementById('main')?.focus({ preventScroll: true })))
 
 function focusMain() {

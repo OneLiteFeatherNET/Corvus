@@ -1,7 +1,7 @@
 <template>
   <div>
     <PageHeader :title="$t('errors.forbiddenTitle')" />
-    <v-alert type="warning" variant="tonal" role="alert">{{ $t('errors.forbiddenText') }}</v-alert>
-    <v-btn class="mt-4" to="/" prepend-icon="mdi-home-outline">{{ $t('nav.dashboard') }}</v-btn>
+    <M3Alert tone="warning" role="alert">{{ $t('errors.forbiddenText') }}</M3Alert>
+    <M3Button class="mt-4" to="/" icon="mdi-home-outline">{{ $t('nav.dashboard') }}</M3Button>
   </div>
 </template>

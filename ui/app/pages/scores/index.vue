@@ -2,75 +2,69 @@
   <div>
     <PageHeader :title="$t('scores.title')" :subtitle="$t('scores.subtitle')" />
 
-    <v-alert type="info" variant="tonal" density="comfortable" class="mb-6" icon="mdi-information-outline">
-      {{ $t('scores.disclaimer') }}
-    </v-alert>
+    <M3Alert tone="info" class="mb-6">{{ $t('scores.disclaimer') }}</M3Alert>
 
-    <v-card variant="flat" color="surface-container-low" class="mb-6">
-      <v-card-text>
-        <v-form class="d-flex flex-wrap ga-3 align-start" @submit.prevent="submit">
-          <v-text-field
-            v-model="input"
-            :label="$t('scores.pseudonym')"
-            :error-messages="input && !isPseudonym(input) ? $t('scores.invalidPseudonym') : ''"
-            autocomplete="off"
-            spellcheck="false"
-            class="mono"
-            style="min-width: 320px; flex: 1"
-          />
-          <v-btn type="submit" :disabled="!isPseudonym(input)" :loading="loading" prepend-icon="mdi-chart-line" class="mt-1">
-            {{ $t('scores.submit') }}
-          </v-btn>
-        </v-form>
-      </v-card-text>
-    </v-card>
+    <M3Card class="mb-6">
+      <form class="flex flex-wrap items-start gap-3" @submit.prevent="submit">
+        <M3TextField
+          v-model="input"
+          :label="$t('scores.pseudonym')"
+          :error="input && !isPseudonym(input) ? $t('scores.invalidPseudonym') : ''"
+          autocomplete="off"
+          spellcheck="false"
+          input-class="mono"
+          class="min-w-64 flex-1"
+        />
+        <M3Button type="submit" class="mt-2" :disabled="!isPseudonym(input)" :loading="loading" :loading-label="$t('common.loading')" icon="mdi-chart-line">
+          {{ $t('scores.submit') }}
+        </M3Button>
+      </form>
+    </M3Card>
 
     <AppProblem :error="error" />
 
     <div aria-live="polite">
       <template v-if="loaded">
-        <h2 class="text-headline-small mb-1">{{ $t('scores.latest') }}</h2>
-        <p class="text-body-medium text-on-surface-variant mb-3">{{ $t('scores.stageHint') }}</p>
+        <h2 class="mb-1 text-headline-small">{{ $t('scores.latest') }}</h2>
+        <p class="mb-3 text-body-medium text-on-surface-variant">{{ $t('scores.stageHint') }}</p>
         <p v-if="!latest.length" class="text-on-surface-variant">{{ $t('scores.empty') }}</p>
         <template v-else>
-          <v-table v-for="g in groups" :key="g.gameContext" class="mb-4" density="comfortable">
-            <caption class="text-title-medium text-start pa-2">{{ g.gameContext }}</caption>
-            <thead>
-              <tr>
-                <th scope="col">{{ $t('scores.model') }}</th>
-                <th scope="col">{{ $t('scores.domain') }}</th>
-                <th scope="col">{{ $t('scores.stage') }}</th>
-                <th scope="col" class="text-end">{{ $t('scores.score') }}</th>
-                <th scope="col" class="text-end">{{ $t('scores.smoothed') }}</th>
-                <th scope="col" class="text-end">{{ $t('scores.windows') }}</th>
-                <th scope="col">{{ $t('scores.updatedAt') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="s in g.rows" :key="seriesKey(s)">
-                <th scope="row">{{ s.model_name }} {{ s.model_version }}</th>
-                <td>{{ s.domain }}</td>
-                <td><StatusChip kind="stage" :value="s.stage" /></td>
-                <td class="text-end">{{ s.score.toFixed(3) }}</td>
-                <td class="text-end">{{ s.smoothed.toFixed(3) }}</td>
-                <td class="text-end">{{ formatNumber(s.windows, locale) }}</td>
-                <td>{{ formatDateTime(s.updated_at, locale) }}</td>
-              </tr>
-            </tbody>
-          </v-table>
+          <div v-for="g in groups" :key="g.gameContext" class="mb-4 overflow-x-auto rounded-md border border-outline-variant">
+            <table class="w-full border-collapse text-body-medium">
+              <caption class="px-4 py-3 text-title-medium">{{ g.gameContext }}</caption>
+              <thead>
+                <tr class="bg-surface-container text-title-small text-on-surface-variant">
+                  <th scope="col" class="h-12 px-4 text-start">{{ $t('scores.model') }}</th>
+                  <th scope="col" class="px-4 text-start">{{ $t('scores.domain') }}</th>
+                  <th scope="col" class="px-4 text-start">{{ $t('scores.stage') }}</th>
+                  <th scope="col" class="px-4 text-end">{{ $t('scores.score') }}</th>
+                  <th scope="col" class="px-4 text-end">{{ $t('scores.smoothed') }}</th>
+                  <th scope="col" class="px-4 text-end">{{ $t('scores.windows') }}</th>
+                  <th scope="col" class="px-4 text-start">{{ $t('scores.updatedAt') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="s in g.rows" :key="seriesKey(s)" class="border-t border-outline-variant">
+                  <th scope="row" class="px-4 py-3 text-start font-medium">{{ s.model_name }} {{ s.model_version }}</th>
+                  <td class="px-4">{{ s.domain }}</td>
+                  <td class="px-4"><StatusChip kind="stage" :value="s.stage" /></td>
+                  <td class="px-4 text-end">{{ s.score.toFixed(3) }}</td>
+                  <td class="px-4 text-end">{{ s.smoothed.toFixed(3) }}</td>
+                  <td class="px-4 text-end">{{ formatNumber(s.windows, locale) }}</td>
+                  <td class="px-4 whitespace-nowrap">{{ formatDateTime(s.updated_at, locale) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </template>
 
-        <h2 class="text-headline-small mt-8 mb-1">{{ $t('scores.history') }}</h2>
-        <p class="text-body-medium text-on-surface-variant mb-3">{{ $t('scores.retention') }}</p>
-        <v-row dense class="mb-2">
-          <v-col cols="12" sm="6" md="4">
-            <v-select v-model="context" :items="contextItems" :label="$t('scores.historyContext')" hide-details />
-          </v-col>
-          <v-col cols="12" sm="6" md="3">
-            <v-select v-model="limit" :items="LIMITS" :label="$t('scores.historyLimit')" hide-details />
-          </v-col>
-        </v-row>
-        <v-progress-linear v-if="historyLoading" indeterminate :aria-label="$t('common.loading')" />
+        <h2 class="mt-8 mb-1 text-headline-small">{{ $t('scores.history') }}</h2>
+        <p class="mb-3 text-body-medium text-on-surface-variant">{{ $t('scores.retention') }}</p>
+        <div class="mb-4 flex flex-wrap gap-3">
+          <M3Select v-model="context" :items="contextItems" :label="$t('scores.historyContext')" class="w-full sm:w-72" />
+          <M3Select v-model="limit" :items="LIMITS" :label="$t('scores.historyLimit')" class="w-full sm:w-40" />
+        </div>
+        <M3Progress v-if="historyLoading" :label="$t('common.loading')" />
         <p v-if="!series.length && !historyLoading" class="text-on-surface-variant">{{ $t('scores.historyEmpty') }}</p>
         <ScoreChart v-else-if="series.length" :series="series" :labels="chartLabels" :locale="locale" />
       </template>

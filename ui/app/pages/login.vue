@@ -1,36 +1,22 @@
 <template>
-  <v-card class="pa-4 w-100" variant="flat" color="surface-container-low">
-    <v-card-title class="d-flex align-center ga-3">
-      <img :src="logo" alt="" width="48" height="48" style="object-fit: contain">
+  <M3Card class="w-full p-6">
+    <div class="flex items-center gap-3">
+      <img :src="logo" alt="" width="48" height="48" class="size-12 object-contain">
       <h1 class="text-headline-small">{{ $t('auth.title') }}</h1>
-    </v-card-title>
-    <v-card-text>
-      <p class="mb-4 text-body-large">{{ $t(mode === 'oidc' ? 'auth.oidcHint' : 'auth.tokenHint') }}</p>
-      <v-form v-if="mode === 'token'" @submit.prevent="submit">
-        <v-text-field
-          v-model="token"
-          type="password"
-          autocomplete="off"
-          :label="$t('auth.token')"
-          required
-        />
-        <fieldset class="border-0 pa-0">
-          <legend class="text-label-large mb-1">{{ $t('auth.rolesLegend') }}</legend>
-          <v-checkbox
-            v-for="r in ROLES"
-            :key="r"
-            v-model="selected"
-            :value="r"
-            :label="$t(`roles.${r}`)"
-            density="compact"
-            hide-details
-          />
-        </fieldset>
-        <v-btn type="submit" class="mt-4" :disabled="!token" prepend-icon="mdi-login">{{ $t('auth.login') }}</v-btn>
-      </v-form>
-      <v-btn v-else prepend-icon="mdi-login" @click="submit">{{ $t('auth.login') }}</v-btn>
-    </v-card-text>
-  </v-card>
+    </div>
+    <p class="my-4 text-body-large text-on-surface-variant">{{ $t(mode === 'oidc' ? 'auth.oidcHint' : 'auth.tokenHint') }}</p>
+    <form v-if="mode === 'token'" class="flex flex-col gap-4" @submit.prevent="submit">
+      <M3TextField v-model="token" type="password" autocomplete="off" :label="$t('auth.token')" required />
+      <fieldset class="m-0 border-0 p-0">
+        <legend class="mb-1 text-label-large">{{ $t('auth.rolesLegend') }}</legend>
+        <M3Checkbox v-for="r in ROLES" :key="r" :model-value="selected.includes(r)" @update:model-value="toggleRole(r, $event)">{{ $t(`roles.${r}`) }}</M3Checkbox>
+      </fieldset>
+      <div>
+        <M3Button type="submit" icon="mdi-login" :disabled="!token">{{ $t('auth.login') }}</M3Button>
+      </div>
+    </form>
+    <M3Button v-else icon="mdi-login" @click="submit">{{ $t('auth.login') }}</M3Button>
+  </M3Card>
 </template>
 
 <script setup lang="ts">
@@ -45,6 +31,10 @@ const route = useRoute()
 const logo = `${readBasePath()}logo.png`
 const token = ref('')
 const selected = ref<Role[]>(['admin'])
+
+function toggleRole(role: Role, on: boolean) {
+  selected.value = on ? [...selected.value.filter(r => r !== role), role] : selected.value.filter(r => r !== role)
+}
 
 function nextPath(): string {
   const n = route.query.next

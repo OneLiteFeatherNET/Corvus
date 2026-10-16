@@ -54,3 +54,10 @@ export function jobIcon(status: string): string {
     default: return 'mdi-timer-sand'
   }
 }
+
+export type ChipTone = 'neutral' | 'primary' | 'secondary' | 'tertiary' | 'error'
+
+/** Maps the colour names of stageColor and jobColor to a chip tone. */
+export function chipTone(color: string): ChipTone {
+  return color === 'primary' || color === 'secondary' || color === 'tertiary' || color === 'error' ? color : 'neutral'
+}

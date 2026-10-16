@@ -1,44 +1,34 @@
 <template>
   <div>
-    <PageHeader :title="$t('pools.title')">
-      <template #actions>
-        <v-text-field
-          v-model="search"
-          :label="$t('common.search')"
-          prepend-inner-icon="mdi-magnify"
-          density="compact"
-          hide-details
-          clearable
-          style="min-width: 240px"
-        />
-        <v-btn v-if="can('pools.write')" to="/pools/new" prepend-icon="mdi-plus">{{ $t('pools.new') }}</v-btn>
-      </template>
-    </PageHeader>
+    <PageHeader :title="$t('pools.title')" />
+
+    <div class="mb-4 flex flex-wrap items-start gap-3">
+      <M3TextField
+        v-model="search"
+        :label="$t('common.search')"
+        leading-icon="mdi-magnify"
+        clearable
+        :clear-label="$t('common.delete')"
+        class="w-full sm:w-72"
+      />
+      <M3Button v-if="can('pools.write')" class="mt-2 sm:ml-auto" to="/pools/new" icon="mdi-plus">{{ $t('pools.new') }}</M3Button>
+    </div>
 
     <AppProblem :error="list.error.value" />
-    <v-data-table
-      :headers="headers"
-      :items="rows"
-      :loading="list.loading.value"
-      :no-data-text="$t('common.empty')"
-      item-value="id"
-      hover
-    >
+    <M3DataTable :columns="headers" :items="rows" :loading="list.loading.value">
       <template #[`item.name`]="{ item }">
-        <NuxtLink :to="`/pools/${item.id}`" class="text-primary font-weight-medium">{{ item.name }}</NuxtLink>
+        <NuxtLink :to="`/pools/${item.id}`" class="font-medium">{{ item.name }}</NuxtLink>
       </template>
       <template #[`item.filter`]="{ item }">
-        <div class="d-flex flex-wrap ga-1">
-          <v-chip v-for="c in summarizeFilter(item.filter)" :key="c.key" size="x-small" label variant="tonal">
+        <div class="flex flex-wrap gap-1">
+          <M3Chip v-for="c in summarizeFilter(item.filter)" :key="c.key" small>
             {{ $t(`pools.summary.${c.key}`) }}: {{ c.value }}
-          </v-chip>
+          </M3Chip>
         </div>
       </template>
       <template #[`item.updated_at`]="{ item }">{{ formatDateTime(item.updated_at, locale) }}</template>
-    </v-data-table>
-    <div class="mt-4">
-      <v-btn v-if="list.hasMore()" variant="tonal" :loading="list.loading.value" @click="list.loadMore()">{{ $t('common.loadMore') }}</v-btn>
-    </div>
+    </M3DataTable>
+    <LoadMore :visible="list.hasMore()" :loading="list.loading.value" @more="list.loadMore()" />
   </div>
 </template>
 

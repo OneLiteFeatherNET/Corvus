@@ -1,7 +1,7 @@
 <template>
-  <figure class="score-chart">
+  <figure ref="root" class="score-chart">
     <svg
-      :viewBox="`0 0 ${DEFAULT_GEOMETRY.width} ${DEFAULT_GEOMETRY.height}`"
+      :viewBox="`0 0 ${geo.width} ${geo.height}`"
       role="img"
       :aria-labelledby="`${uid}-title ${uid}-desc`"
       preserveAspectRatio="xMidYMid meet"
@@ -12,8 +12,8 @@
         <line
           v-for="tick in plot.yTicks"
           :key="tick.value"
-          :x1="DEFAULT_GEOMETRY.margin.left"
-          :x2="DEFAULT_GEOMETRY.width - DEFAULT_GEOMETRY.margin.right"
+          :x1="geo.margin.left"
+          :x2="geo.width - geo.margin.right"
           :y1="tick.y"
           :y2="tick.y"
         />
@@ -21,17 +21,17 @@
           v-for="tick in plot.yTicks"
           :key="`l${tick.value}`"
           class="axis"
-          :x="DEFAULT_GEOMETRY.margin.left - 6"
+          :x="geo.margin.left - 6"
           :y="tick.y + 4"
           text-anchor="end"
         >{{ tick.value }}</text>
         <text
-          v-for="tick in plot.xTicks"
+          v-for="(tick, i) in plot.xTicks"
           :key="tick.t"
           class="axis"
           :x="tick.x"
-          :y="DEFAULT_GEOMETRY.height - 8"
-          text-anchor="middle"
+          :y="geo.height - 8"
+          :text-anchor="anchorFor(i)"
         >{{ formatTick(tick.t) }}</text>
       </g>
       <g v-for="(s, i) in plot.series" :key="s.key" :class="['series', `c${i % COLORS}`, `d${i % DASHES}`]" aria-hidden="true">
@@ -75,9 +75,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, useId } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useId } from 'vue'
 import { DEFAULT_GEOMETRY, plotSeries } from '~/lib/score-view'
-import type { ChartSeries } from '~/lib/score-view'
+import type { ChartGeometry, ChartSeries } from '~/lib/score-view'
 
 export interface ScoreChartLabels {
   title: string
@@ -95,7 +95,27 @@ const props = defineProps<{ series: ChartSeries[], labels: ScoreChartLabels, loc
 const COLORS = 5
 const DASHES = 3
 const uid = useId()
-const plot = computed(() => plotSeries(props.series))
+
+// The chart is drawn at the width of its container (1 SVG unit = 1 CSS pixel), so text keeps its size.
+const root = ref<HTMLElement>()
+const width = ref(DEFAULT_GEOMETRY.width)
+const geo = computed<ChartGeometry>(() => {
+  const w = Math.max(280, width.value)
+  return { ...DEFAULT_GEOMETRY, width: w, height: Math.round(Math.min(340, Math.max(200, w * 0.36))), margin: { ...DEFAULT_GEOMETRY.margin, right: 24 } }
+})
+let observer: ResizeObserver | undefined
+onMounted(() => {
+  if (typeof ResizeObserver === 'undefined' || !root.value) return
+  observer = new ResizeObserver(([entry]) => {
+    if (entry && entry.contentRect.width > 0) width.value = Math.floor(entry.contentRect.width)
+  })
+  observer.observe(root.value)
+})
+onBeforeUnmount(() => observer?.disconnect())
+
+const plot = computed(() => plotSeries(props.series, geo.value))
+// The first and the last tick label stay inside the plot.
+const anchorFor = (i: number) => (i === 0 ? 'start' : i === plot.value.xTicks.length - 1 ? 'end' : 'middle')
 const summary = computed(() => props.labels.summary)
 const fmt = computed(() => new Intl.DateTimeFormat(props.locale ?? 'de', { dateStyle: 'short', timeStyle: 'short' }))
 const formatTick = (t: number) => fmt.value.format(new Date(t))
@@ -105,44 +125,44 @@ const formatTick = (t: number) => fmt.value.format(new Date(t))
 .score-chart {
   margin: 0;
 }
-svg {
+figure > svg {
   width: 100%;
   height: auto;
   display: block;
 }
 .grid line {
-  stroke: rgba(var(--v-border-color), var(--v-border-opacity));
+  stroke: var(--md-sys-color-outline-variant);
 }
 .axis {
-  fill: rgb(var(--v-theme-on-surface-variant));
+  fill: var(--md-sys-color-on-surface-variant);
   font-size: 11px;
 }
 .series {
   fill: none;
-  --c: var(--v-theme-primary);
-  stroke: rgb(var(--c));
+  --c: var(--md-sys-color-primary);
+  stroke: var(--c);
 }
-.c0 { --c: var(--v-theme-primary); }
-.c1 { --c: var(--v-theme-secondary); }
-.c2 { --c: var(--v-theme-tertiary, var(--v-theme-info)); }
-.c3 { --c: var(--v-theme-error); }
-.c4 { --c: var(--v-theme-info); }
+.c0 { --c: var(--md-sys-color-primary); }
+.c1 { --c: var(--md-sys-color-tertiary); }
+.c2 { --c: var(--md-sys-color-success); }
+.c3 { --c: var(--md-sys-color-error); }
+.c4 { --c: var(--md-sys-color-warning); }
 .series .smoothed {
   fill: none;
-  stroke: rgb(var(--c));
+  stroke: var(--c);
   stroke-width: 2.5;
 }
 .d1 .smoothed { stroke-dasharray: 8 4; }
 .d2 .smoothed { stroke-dasharray: 2 4; stroke-linecap: round; }
 .series .raw {
   fill: none;
-  stroke: rgb(var(--c));
+  stroke: var(--c);
   stroke-width: 1;
   opacity: 0.4;
 }
 .series circle {
-  fill: rgb(var(--c));
-  stroke: rgb(var(--v-theme-surface));
+  fill: var(--c);
+  stroke: var(--md-sys-color-surface);
 }
 .legend {
   list-style: none;

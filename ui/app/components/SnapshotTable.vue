@@ -1,16 +1,16 @@
 <template>
   <div>
     <AppProblem :error="error ?? null" />
-    <v-data-table :headers="headers" :items="items" :loading="loading" :no-data-text="$t('common.empty')" item-value="id" hover>
+    <M3DataTable :columns="headers" :items="items" :loading="loading">
       <template #[`item.id`]="{ item }">
-        <NuxtLink :to="`/snapshots/${item.id}`" class="text-primary font-weight-medium mono">{{ shortId(item.id) }}</NuxtLink>
+        <NuxtLink :to="`/snapshots/${item.id}`" class="mono font-medium">{{ shortId(item.id) }}</NuxtLink>
       </template>
       <template #[`item.pool_name`]="{ item }">
         <NuxtLink :to="`/pools/${item.pool_id}`">{{ item.pool_name }}</NuxtLink>
       </template>
       <template #[`item.sha256`]="{ item }"><span class="mono">{{ item.sha256.slice(0, 12) }}…</span></template>
       <template #[`item.created_at`]="{ item }">{{ formatDateTime(item.created_at, locale) }}</template>
-    </v-data-table>
+    </M3DataTable>
   </div>
 </template>
 
