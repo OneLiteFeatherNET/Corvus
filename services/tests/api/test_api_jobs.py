@@ -10,6 +10,7 @@ from api_fakes import FIXED_NOW, FakeJobRepo, FakeRunner, FakeSnapshotRepo
 from api_support import Env
 
 from corvus_services.api.jobs import (
+    JobGoneError,
     JobSpec,
     JobState,
     JobType,
@@ -20,6 +21,7 @@ from corvus_services.api.jobs import (
     SnapshotMissingError,
     child_environment,
     create_job,
+    reconcile_jobs,
     refresh_job,
 )
 from corvus_services.api.ports import SnapshotRecord
@@ -121,6 +123,7 @@ class FakeBatchApi:
         )
         self.read_calls: list[tuple[str, str]] = []
         self.fail_create = False
+        self.read_error: Exception | None = None
 
     def create_namespaced_job(self, namespace, body):
         if self.fail_create:
@@ -130,7 +133,36 @@ class FakeBatchApi:
 
     def read_namespaced_job_status(self, name, namespace):
         self.read_calls.append((name, namespace))
+        if self.read_error is not None:
+            raise self.read_error
         return self.status_obj
+
+
+class FakeApiException(Exception):
+    def __init__(self, status: int) -> None:
+        super().__init__(f"HTTP {status}")
+        self.status = status
+
+
+class FakeCoreApi:
+    def __init__(self, pods: list[Any] | None = None, error: Exception | None = None) -> None:
+        self.pods = pods or []
+        self.error = error
+        self.calls: list[tuple[str, str]] = []
+
+    def list_namespaced_pod(self, namespace, label_selector):
+        self.calls.append((namespace, label_selector))
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(items=self.pods)
+
+
+def _pod(reason, exit_code, *, last=False):
+    term = SimpleNamespace(reason=reason, exit_code=exit_code)
+    state = SimpleNamespace(terminated=None if last else term)
+    last_state = SimpleNamespace(terminated=term if last else None)
+    cs = SimpleNamespace(state=state, last_state=last_state)
+    return SimpleNamespace(status=SimpleNamespace(container_statuses=[cs], reason=None))
 
 
 CONFIG = K8sJobConfig(
@@ -263,12 +295,80 @@ async def test_kubernetes_status_is_mapped(status, expected):
 
 async def test_kubernetes_failure_carries_the_reason():
     api = FakeBatchApi()
-    cond = SimpleNamespace(type="Failed", status="True", reason="DeadlineExceeded")
+    cond = SimpleNamespace(type="Failed", status="True", reason="BackoffLimitExceeded")
     api.status_obj = SimpleNamespace(status=SimpleNamespace(conditions=[cond]))
 
     result = await KubernetesRunner(api, CONFIG).status("x")
 
-    assert result == RunnerStatus(JobState.FAILED, "DeadlineExceeded")
+    assert result == RunnerStatus(JobState.FAILED, "BackoffLimitExceeded")
+
+
+def _failed(reason):
+    cond = SimpleNamespace(type="Failed", status="True", reason=reason)
+    return SimpleNamespace(status=SimpleNamespace(conditions=[cond]))
+
+
+@pytest.mark.parametrize(
+    ("pod", "expected"),
+    [
+        (_pod("OOMKilled", 137), "OOMKilled (exit 137)"),
+        (_pod("Error", 1), "Error (exit 1)"),
+        (_pod("OOMKilled", 137, last=True), "OOMKilled (exit 137)"),
+        (_pod(None, 2), "Error (exit 2)"),
+    ],
+)
+async def test_failed_job_reports_the_pod_termination_instead_of_backoff_limit(pod, expected):
+    api, core = FakeBatchApi(), FakeCoreApi([pod])
+    api.status_obj = _failed("BackoffLimitExceeded")
+
+    result = await KubernetesRunner(api, CONFIG, core).status("corvus-train-1a2b3c4d")
+
+    assert result == RunnerStatus(JobState.FAILED, expected)
+    assert core.calls == [("corvus-ml", "job-name=corvus-train-1a2b3c4d")]
+
+
+async def test_failed_job_without_pod_info_keeps_the_condition_reason():
+    api = FakeBatchApi()
+    api.status_obj = _failed("BackoffLimitExceeded")
+
+    result = await KubernetesRunner(api, CONFIG, FakeCoreApi([])).status("x")
+
+    assert result == RunnerStatus(JobState.FAILED, "BackoffLimitExceeded")
+
+
+async def test_pod_lookup_errors_do_not_hide_the_job_failure():
+    api = FakeBatchApi()
+    api.status_obj = _failed("BackoffLimitExceeded")
+
+    result = await KubernetesRunner(api, CONFIG, FakeCoreApi(error=RuntimeError("x"))).status("x")
+
+    assert result == RunnerStatus(JobState.FAILED, "BackoffLimitExceeded")
+
+
+async def test_deadline_exceeded_has_a_clear_message():
+    api = FakeBatchApi()
+    api.status_obj = _failed("DeadlineExceeded")
+
+    result = await KubernetesRunner(api, CONFIG, FakeCoreApi([_pod("Error", 143)])).status("x")
+
+    assert result.state == JobState.FAILED
+    assert result.message == "DeadlineExceeded: job ran longer than the 7200 s deadline"
+
+
+async def test_missing_kubernetes_job_raises_job_gone():
+    api = FakeBatchApi()
+    api.read_error = FakeApiException(404)
+
+    with pytest.raises(JobGoneError):
+        await KubernetesRunner(api, CONFIG).status("x")
+
+
+async def test_other_kubernetes_api_errors_propagate_unchanged():
+    api = FakeBatchApi()
+    api.read_error = FakeApiException(503)
+
+    with pytest.raises(FakeApiException):
+        await KubernetesRunner(api, CONFIG).status("x")
 
 
 # --- use cases ----------------------------------------------------------------------------------
@@ -488,3 +588,93 @@ def test_kubernetes_job_passes_the_job_type_as_first_argument_and_in_the_environ
 
     env = {e["name"]: e["value"] for e in container["env"]}
     assert container["args"][0] == env["CORVUS_JOB_TYPE"] == "train"
+
+
+# --- refresh and reconcile ----------------------------------------------------------------------
+
+
+async def test_refresh_marks_a_job_gone_from_the_cluster_as_failed(repos):
+    runner = FakeRunner()
+    job = await _create(repos, runner)
+    runner.gone = True
+
+    refreshed = await refresh_job(repos[0], runner, job, FIXED_NOW)
+
+    assert (refreshed.status, refreshed.message) == (
+        "failed",
+        "job disappeared from the cluster",
+    )
+    assert refreshed.finished_at == FIXED_NOW
+
+
+async def test_refresh_keeps_the_status_on_transient_runner_errors(repos):
+    runner = FakeRunner()
+    job = await _create(repos, runner)
+    runner.fail_status = True
+
+    assert await refresh_job(repos[0], runner, job, FIXED_NOW) == job
+
+
+async def test_refresh_does_not_overwrite_a_status_the_job_reported_meanwhile(repos):
+    runner = FakeRunner()
+    job = await _create(repos, runner)
+    await repos[0].update(
+        JOB_ID, status="succeeded", runner_ref=None, message="done", now=FIXED_NOW, finished=True
+    )
+    runner.states[job.runner_ref] = RunnerStatus(JobState.FAILED, "OOMKilled (exit 137)")
+
+    refreshed = await refresh_job(repos[0], runner, job, FIXED_NOW)
+
+    assert refreshed.status == "succeeded"
+    assert repos[0].rows[JOB_ID].status == "succeeded"
+
+
+async def test_reconcile_fails_killed_jobs_and_leaves_the_others(repos):
+    runner = FakeRunner()
+    killed = await _create(repos, runner, new_id=lambda: UUID(int=101 << 112))
+    alive = await _create(repos, runner, new_id=lambda: UUID(int=102 << 112))
+    done = await _create(repos, runner, new_id=lambda: UUID(int=103 << 112))
+    runner.states[killed.runner_ref] = RunnerStatus(JobState.FAILED, "OOMKilled (exit 137)")
+    await repos[0].update(
+        done.id, status="succeeded", runner_ref=None, message="", now=FIXED_NOW, finished=True
+    )
+
+    changed = await reconcile_jobs(repos[0], runner, FIXED_NOW)
+
+    rows = repos[0].rows
+    assert changed == [killed.id]
+    assert (rows[killed.id].status, rows[killed.id].message) == ("failed", "OOMKilled (exit 137)")
+    assert rows[alive.id].status == "running"
+    assert rows[done.id].status == "succeeded"
+
+
+async def test_reconcile_continues_after_a_failing_refresh(repos):
+    runner = FakeRunner(fail_status=True)
+    await _create(repos, runner, new_id=lambda: UUID(int=101 << 112))
+    await _create(repos, runner, new_id=lambda: UUID(int=102 << 112))
+
+    assert await reconcile_jobs(repos[0], runner, FIXED_NOW) == []
+    assert {j.status for j in repos[0].rows.values()} == {"running"}
+
+
+async def test_reconcile_once_counts_changed_jobs_and_survives_errors(repos):
+    from corvus_services.api.app import reconcile_once
+    from corvus_services.api.deps import Deps
+
+    runner = FakeRunner()
+    job = await _create(repos, runner)
+    runner.states[job.runner_ref] = RunnerStatus(JobState.FAILED, "OOMKilled (exit 137)")
+    deps = SimpleNamespace(
+        repos=SimpleNamespace(jobs=repos[0]),
+        runner=runner,
+        clock=lambda: FIXED_NOW,
+        metrics=Deps.__dataclass_fields__["metrics"].default_factory(),
+    )
+
+    await reconcile_once(deps)  # type: ignore[arg-type]
+    await reconcile_once(deps)  # type: ignore[arg-type]  # idempotent: nothing left to change
+
+    assert repos[0].rows[job.id].status == "failed"
+    assert deps.metrics.jobs_reconciled.labels("failed")._value.get() == 1
+    deps.repos = None  # a broken repo must not raise out of the loop
+    await reconcile_once(deps)  # type: ignore[arg-type]

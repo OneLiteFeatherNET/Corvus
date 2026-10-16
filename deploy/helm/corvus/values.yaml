@@ -183,6 +183,9 @@ api:
     # kubernetes: the API creates batch/v1 Jobs in its own namespace (RBAC is created).
     # local: subprocesses inside the API pod (single-host setups only).
     runner: kubernetes
+    # Seconds between background passes that pull the runner status into running jobs, so killed
+    # (OOMKilled) or vanished jobs are marked failed without anyone opening them; 0 disables it.
+    reconcileIntervalSeconds: 30
     image:
       repository: harbor.onelitefeather.dev/onelitefeather/corvus-ml
       tag: ""

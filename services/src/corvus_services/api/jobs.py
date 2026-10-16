@@ -64,6 +64,10 @@ class RunnerStatus:
     message: str = ""
 
 
+class JobGoneError(Exception):
+    """The runner no longer knows the job (for example the Kubernetes Job was garbage collected)."""
+
+
 class JobRunner(Protocol):
     name: str
 
@@ -71,7 +75,9 @@ class JobRunner(Protocol):
         """Start the job; returns the runner reference (process key, Kubernetes job name)."""
         ...
 
-    async def status(self, ref: str) -> RunnerStatus: ...
+    async def status(self, ref: str) -> RunnerStatus:
+        """Raises ``JobGoneError`` when the job is certainly gone; other errors are transient."""
+        ...
 
 
 # --- local (subprocess) -------------------------------------------------------------------------
@@ -154,6 +160,12 @@ class BatchApi(Protocol):
     def read_namespaced_job_status(self, name: str, namespace: str) -> Any: ...
 
 
+class CoreApi(Protocol):
+    """The subset of ``kubernetes.client.CoreV1Api`` that is used."""
+
+    def list_namespaced_pod(self, namespace: str, label_selector: str) -> Any: ...
+
+
 @dataclass(frozen=True)
 class K8sJobConfig:
     namespace: str
@@ -177,10 +189,11 @@ SCRATCH_MOUNT = "/scratch"
 class KubernetesRunner:
     name = "kubernetes"
 
-    def __init__(self, api: BatchApi, config: K8sJobConfig) -> None:
+    def __init__(self, api: BatchApi, config: K8sJobConfig, core: CoreApi | None = None) -> None:
         if not config.image:
             raise ValueError("CORVUS_API_JOB_K8S_IMAGE is required for the kubernetes runner")
         self._api = api
+        self._core = core
         self._cfg = config
 
     @staticmethod
@@ -249,9 +262,14 @@ class KubernetesRunner:
         return str(body["metadata"]["name"])
 
     async def status(self, ref: str) -> RunnerStatus:
-        job = await asyncio.to_thread(
-            self._api.read_namespaced_job_status, ref, self._cfg.namespace
-        )
+        try:
+            job = await asyncio.to_thread(
+                self._api.read_namespaced_job_status, ref, self._cfg.namespace
+            )
+        except Exception as e:
+            if getattr(e, "status", None) == 404:
+                raise JobGoneError(ref) from e
+            raise
         st = getattr(job, "status", None)
         for cond in getattr(st, "conditions", None) or []:
             if getattr(cond, "status", None) != "True":
@@ -259,12 +277,37 @@ class KubernetesRunner:
             if cond.type == "Complete":
                 return RunnerStatus(JobState.SUCCEEDED)
             if cond.type == "Failed":
-                return RunnerStatus(JobState.FAILED, str(getattr(cond, "reason", None) or "failed"))
+                reason = str(getattr(cond, "reason", None) or "failed")
+                return RunnerStatus(JobState.FAILED, await self._failure_message(ref, reason))
         if getattr(st, "active", None):
             return RunnerStatus(JobState.RUNNING)
         if getattr(st, "succeeded", None):
             return RunnerStatus(JobState.SUCCEEDED)
         return RunnerStatus(JobState.QUEUED)
+
+    async def _failure_message(self, ref: str, reason: str) -> str:
+        """The Job condition only says ``BackoffLimitExceeded``; the pod knows why it died."""
+        if reason == "DeadlineExceeded":
+            return f"DeadlineExceeded: job ran longer than the {self._cfg.active_deadline_s} s deadline"
+        if self._core is None:
+            return reason
+        try:
+            pods = await asyncio.to_thread(
+                self._core.list_namespaced_pod, self._cfg.namespace, f"job-name={ref}"
+            )
+        except Exception as e:  # best effort: the Job condition is still a valid answer
+            log.warning("pod lookup for job %s failed (%s)", ref, type(e).__name__)
+            return reason
+        found: str | None = None
+        for pod in getattr(pods, "items", None) or []:
+            for cs in getattr(getattr(pod, "status", None), "container_statuses", None) or []:
+                for holder in (getattr(cs, "state", None), getattr(cs, "last_state", None)):
+                    term = getattr(holder, "terminated", None)
+                    code = getattr(term, "exit_code", None)
+                    if term is not None and code not in (None, 0):
+                        found = f"{getattr(term, 'reason', None) or 'Error'} (exit {code})"
+                        break
+        return found or reason
 
 
 def build_runner(settings: ApiSettings) -> JobRunner:
@@ -291,7 +334,7 @@ def build_runner(settings: ApiSettings) -> JobRunner:
         env_secret=settings.job_k8s_env_secret,
         scratch_size_limit=settings.job_k8s_scratch_size_limit,
     )
-    return KubernetesRunner(client.BatchV1Api(), cfg)
+    return KubernetesRunner(client.BatchV1Api(), cfg, client.CoreV1Api())
 
 
 # --- use cases ----------------------------------------------------------------------------------
@@ -372,16 +415,25 @@ async def report_job(
 
 
 async def refresh_job(jobs: JobRepo, runner: JobRunner, job: JobRecord, now: datetime) -> JobRecord:
-    """Pulls the runner status into the stored job. Runner errors leave the stored status unchanged."""
+    """Pulls the runner status into the stored job. Transient runner errors leave the stored status
+    unchanged; a job the runner no longer knows becomes failed. A final status is never overwritten."""
     if JobState(job.status) in TERMINAL or job.runner_ref is None or job.runner != runner.name:
         return job
     try:
         st = await runner.status(job.runner_ref)
+    except JobGoneError:
+        st = RunnerStatus(JobState.FAILED, "job disappeared from the cluster")
     except Exception as e:
         log.warning("job %s status refresh failed (%s)", job.id, type(e).__name__)
         return job
     if st.state.value == job.status and (st.message == job.message or not st.message):
         return job  # a message the job itself reported is not overwritten by an empty one
+    if st.state in TERMINAL:
+        # The job may have reported its own final status since `job` was read (or another replica
+        # reconciled it): the stored final status wins.
+        current = await jobs.get(job.id)
+        if current is not None and JobState(current.status) in TERMINAL:
+            return current
     return await jobs.update(
         job.id,
         status=st.state.value,
@@ -390,3 +442,19 @@ async def refresh_job(jobs: JobRepo, runner: JobRunner, job: JobRecord, now: dat
         now=now,
         finished=st.state in TERMINAL,
     )
+
+
+async def reconcile_jobs(jobs: JobRepo, runner: JobRunner, now: datetime) -> list[UUID]:
+    """One reconciler pass: refreshes every non-final job and returns the ids that changed status.
+    Idempotent, so several API replicas may run it concurrently."""
+    changed: list[UUID] = []
+    for job in await jobs.list_active():
+        try:
+            refreshed = await refresh_job(jobs, runner, job, now)
+        except Exception as e:  # one broken job must not stop the pass
+            log.warning("job %s reconcile failed (%s)", job.id, type(e).__name__)
+            continue
+        if refreshed.status != job.status:
+            changed.append(job.id)
+            log.info("job %s reconciled to %s: %s", job.id, refreshed.status, refreshed.message)
+    return changed

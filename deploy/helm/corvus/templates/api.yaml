@@ -68,6 +68,8 @@ spec:
             {{- end }}
             - name: CORVUS_API_JOB_RUNNER
               value: {{ .Values.api.jobs.runner | quote }}
+            - name: CORVUS_API_JOB_RECONCILE_INTERVAL_S
+              value: {{ .Values.api.jobs.reconcileIntervalSeconds | quote }}
             {{- if $k8sJobs }}
             - name: CORVUS_API_JOB_K8S_NAMESPACE
               value: {{ .Release.Namespace | quote }}
@@ -167,7 +169,8 @@ spec:
 {{- end }}
 {{- if $k8sJobs }}
 ---
-# The job runner creates and watches batch/v1 Jobs in the release namespace, nothing else.
+# The job runner creates and watches batch/v1 Jobs in the release namespace and reads their pods
+# (termination reason of a killed job), nothing else.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -178,6 +181,9 @@ rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["create", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

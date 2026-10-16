@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -14,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from ..clock import system_clock
 from .auth import build_authenticator
 from .deps import Deps
-from .jobs import build_runner
+from .jobs import build_runner, reconcile_jobs
 from .pg import open_repos
 from .problems import install_problem_handlers
 from .pseudonym import Pseudonymizer
@@ -64,6 +65,23 @@ async def _default_deps(settings: ApiSettings) -> Deps:
     )
 
 
+async def reconcile_once(deps: Deps) -> None:
+    """One reconciler pass; never raises, so the loop survives a database or cluster outage."""
+    try:
+        for job_id in await reconcile_jobs(deps.repos.jobs, deps.runner, deps.clock()):
+            job = await deps.repos.jobs.get(job_id)
+            if job is not None:
+                deps.metrics.jobs_reconciled.labels(job.status).inc()
+    except Exception as e:
+        log.warning("job reconcile pass failed (%s)", type(e).__name__)
+
+
+async def _reconcile_loop(deps: Deps, interval_s: float) -> None:
+    while True:
+        await reconcile_once(deps)
+        await asyncio.sleep(interval_s)
+
+
 def create_app(settings: ApiSettings | None = None, deps: Deps | None = None) -> FastAPI:
     """``deps`` is injected by tests; production builds them from the settings on startup."""
     cfg = settings or (deps.settings if deps else ApiSettings())
@@ -76,9 +94,16 @@ def create_app(settings: ApiSettings | None = None, deps: Deps | None = None) ->
             log.warning(
                 "CORVUS_PSEUDONYM_KEY is not set: player lookup and UUID erasure are disabled"
             )
+        interval = cfg.job_reconcile_interval_s
+        reconciler = (
+            asyncio.create_task(_reconcile_loop(app.state.deps, interval)) if interval > 0 else None
+        )
         try:
             yield
         finally:
+            if reconciler is not None:
+                reconciler.cancel()
+                await asyncio.gather(reconciler, return_exceptions=True)
             if owned:
                 for close in app.state.deps.repos.closers:
                     await close()

@@ -103,8 +103,11 @@ off (non-root, read-only root filesystem, no capabilities, `RuntimeDefault` secc
   `CORVUS_SCORE_REPLICA_INDEX` from the pod ordinal. Change the count only through `score.replicas`; never use
   `kubectl scale` or an HPA, because the two values would drift and partitions would be dropped or scored twice.
 - **api** training jobs: with `api.jobs.runner: kubernetes` (default) the chart creates a Role that allows
-  `create`, `get`, `list` and `watch` on `batch/jobs` in the release namespace and binds it to the api ServiceAccount;
-  that is the only component whose pod mounts a ServiceAccount token. Set `api.jobs.image` to the ML image.
+  `create`, `get`, `list` and `watch` on `batch/jobs` and `get` and `list` on `pods` (to report why a job pod died,
+  for example `OOMKilled (exit 137)`) in the release namespace and binds it to the api ServiceAccount; that is the
+  only component whose pod mounts a ServiceAccount token. Set `api.jobs.image` to the ML image.
+  `api.jobs.reconcileIntervalSeconds` (default 30, 0 = off) sets how often the api marks killed or vanished jobs
+  failed.
 
 ## Optional parts
 

@@ -2,7 +2,7 @@ suite: api job runner rbac
 templates:
   - api.yaml
 tests:
-  - it: grants the api only create, get, list and watch on jobs
+  - it: grants the api create, get, list and watch on jobs and get and list on pods
     documentSelector:
       path: kind
       value: Role
@@ -13,6 +13,9 @@ tests:
             - apiGroups: ["batch"]
               resources: ["jobs"]
               verbs: ["create", "get", "list", "watch"]
+            - apiGroups: [""]
+              resources: ["pods"]
+              verbs: ["get", "list"]
 
   - it: binds the role to the api service account
     documentSelector:
@@ -22,6 +25,17 @@ tests:
       - equal:
           path: subjects[0].name
           value: RELEASE-NAME-corvus-api
+
+  - it: passes the reconcile interval to the api
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_API_JOB_RECONCILE_INTERVAL_S
+            value: "30"
 
   - it: renders no rbac for the local runner
     set:

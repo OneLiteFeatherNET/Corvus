@@ -445,6 +445,22 @@ async def test_job_results_are_stored_and_kept_by_later_updates(repos: Repos):
     assert again.result == {"model": "m:1"}
 
 
+async def test_list_active_returns_only_non_final_jobs(repos: Repos):
+    from corvus_services.api.ports import JobRecord
+
+    snap = await _snapshot(repos)
+    ids = {}
+    for status in ("queued", "running", "succeeded", "failed"):
+        job = JobRecord(uuid4(), "train", snap.id, {}, status, "local", None, "", "it", NOW, NOW)
+        await repos.jobs.create(job)
+        ids[status] = job.id
+
+    active = {j.id for j in await repos.jobs.list_active()}
+
+    assert {ids["queued"], ids["running"]} <= active
+    assert not ({ids["succeeded"], ids["failed"]} & active)
+
+
 async def test_models_filter_by_name_and_version(repos: Repos):
     from corvus_services.api.ports import ModelFilter
 

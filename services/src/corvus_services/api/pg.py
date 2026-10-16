@@ -914,6 +914,15 @@ class PgJobRepo:
             key=lambda j: (j.created_at, str(j.id)),
         )
 
+    async def list_active(self) -> list[JobRecord]:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                f"SELECT {_JOB_COLS} FROM corvus.jobs WHERE status IN ('queued', 'running')"
+                " ORDER BY created_at, id".encode()
+            )
+            rows = await cur.fetchall()
+        return [_job(tuple(r)) for r in rows]
+
     async def update(
         self,
         job_id: UUID,

@@ -10,7 +10,7 @@ from itertools import count
 from typing import Any
 from uuid import UUID
 
-from corvus_services.api.jobs import JobSpec, RunnerStatus
+from corvus_services.api.jobs import JobGoneError, JobSpec, RunnerStatus
 from corvus_services.api.jobs import JobState as JS
 from corvus_services.api.pagination import Page, PageRequest, paginate
 from corvus_services.api.pools import PoolFilter, RawPreview
@@ -401,6 +401,9 @@ class FakeJobRepo:
         rows = [j for j in self.rows.values() if status is None or j.status == status]
         return paginate(rows, req, _created_key)
 
+    async def list_active(self) -> list[JobRecord]:
+        return [j for j in self.rows.values() if j.status in ("queued", "running")]
+
     async def update(
         self,
         job_id: UUID,
@@ -517,6 +520,7 @@ class FakeRunner:
     states: dict[str, RunnerStatus] = field(default_factory=dict)
     fail_submit: bool = False
     fail_status: bool = False
+    gone: bool = False
 
     async def submit(self, spec: JobSpec) -> str:
         if self.fail_submit:
@@ -527,6 +531,8 @@ class FakeRunner:
         return ref
 
     async def status(self, ref: str) -> RunnerStatus:
+        if self.gone:
+            raise JobGoneError(ref)
         if self.fail_status:
             raise RuntimeError("cluster unreachable")
         return self.states[ref]
