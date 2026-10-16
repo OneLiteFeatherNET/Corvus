@@ -111,6 +111,8 @@ spec:
           readinessProbe:
             httpGet: {path: /readyz, port: http}
             periodSeconds: 10
+            # Above the 3 s database ping inside /readyz.
+            timeoutSeconds: 5
             failureThreshold: 3
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}

@@ -64,14 +64,19 @@ spec:
           startupProbe:
             httpGet: {path: /healthz, port: metrics}
             periodSeconds: 5
+            timeoutSeconds: 5
             failureThreshold: 36
+          # Liveness never touches a dependency: a slow database must not get the pod killed.
           livenessProbe:
-            httpGet: {path: /healthz, port: metrics}
+            httpGet: {path: /livez, port: metrics}
             periodSeconds: 20
+            timeoutSeconds: 5
             failureThreshold: 3
+          # Readiness runs the dependency checks (2 s each, in parallel); timeout stays above that.
           readinessProbe:
             httpGet: {path: /healthz, port: metrics}
             periodSeconds: 10
+            timeoutSeconds: 5
             failureThreshold: 3
           resources:
             {{- toYaml .Values.score.resources | nindent 12 }}

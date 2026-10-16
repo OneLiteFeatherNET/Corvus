@@ -18,6 +18,7 @@ from nats.js.api import (
 )
 from nats.js.errors import NotFoundError
 
+from ..nats_shutdown import close_connection
 from ..nats_source import NatsMessage, connect_options, ensure_stream, raise_replicas
 from .partitions import filter_subjects
 from .settings import ScoreSettings
@@ -123,7 +124,7 @@ class NatsScoreIO:
     async def fetch(self) -> list[Any]:
         try:
             msgs = await self._sub.fetch(self._s.fetch_batch, timeout=self._s.fetch_timeout_s)
-        except NatsTimeout:
+        except (NatsTimeout, TimeoutError):
             return []
         return [NatsMessage(m) for m in msgs]
 
@@ -131,4 +132,4 @@ class NatsScoreIO:
         await self._js.publish(subject, data)
 
     async def close(self) -> None:
-        await self._nc.drain()
+        await close_connection(self._nc)
