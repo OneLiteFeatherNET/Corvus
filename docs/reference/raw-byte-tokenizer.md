@@ -106,6 +106,13 @@ iterator is streamed, so memory is bounded by the number of distinct payload pre
 deterministic for the same payloads in the same order (the job samples sessions evenly from the
 sorted session ids). `tokenizer.json` is written compactly and hashed (SHA-256) into the spec.
 
+`TokenizerConfig.mode = "bytes"` (job parameter `tokenizer_mode`, `[raw.tokenizer] mode` in an eval
+config) builds the **plain-byte tokenizer** instead: no merges, no training data, one token per payload
+byte, byte `b` has id `n_special + b` (vocabulary `n_special + 256`; `vocab_size` is ignored). The mode is
+recorded in the spec (`tokenizer.mode`, default `bpe` for older specs) next to the file hash, so a model
+trained on one tokenizer is refused by a runtime that expects the other. A packet row then holds one token
+per byte: raise `max_tokens_per_packet` (for example 96) and expect a longer local sequence.
+
 ## 4. Artefacts
 
 Written by `build_features` with `kind = "raw_bytes"` below `features/<snapshot_id>/raw/`
@@ -240,7 +247,7 @@ checked on a sample of the test windows (`parity_ok`).
 
 ```json
 "raw_bytes": {
-  "tokenizer": {"file": "tokenizer.json", "sha256": "…", "vocab_size": 4096, "byte_mapping": "chr(0x100 + byte)"},
+  "tokenizer": {"file": "tokenizer.json", "sha256": "…", "vocab_size": 4096, "mode": "bpe", "byte_mapping": "chr(0x100 + byte)"},
   "layout": {"dt_buckets": 16, "dt_min_ms": 0.5, "dt_max_ms": 5000.0, "protocols": [47, 340, …], "packet_type_max": 255},
   "packet": {"max_tokens_per_packet": 48, "proto_mode": "first"},
   "window": {"window_seconds": 10.0, "stride_seconds": 5.0, "max_packets": 1024, "overflow": "recent",
@@ -340,3 +347,29 @@ the limit.
   retention. A rebuild drops erased players, whose DEK is gone. The tokenizer itself is trained on a payload
   sample and contains no player identifier.
 - An unregistered prefix is invisible to erasure and retention, so register every build.
+
+## 12. Variants for the tokenizer ablation
+
+Every variant is an option of `ModelConfig` / the raw-byte candidates and **off by default**; a candidate
+without these parameters is byte-for-byte the model of section 6 (same state dict, same score). The options
+are candidate parameters, so `corvus-eval tune` can search them. A table `[candidates.<candidate>__<label>]`
+runs `<candidate>` under its own name, so one run can hold several parameter sets of the same model (output
+files, report rows and tuning studies use the full name; the tuning space is that of the candidate). The
+tokenizer is part of the source, so plain bytes versus BPE is a separate run (see "Ablation of the raw-byte variants" in
+[evaluate-models.md](../how-to/evaluate-models.md)).
+
+| Variant | Parameters | What it does |
+|---|---|---|
+| Plain-byte tokenizer | `[raw.tokenizer] mode = "bytes"` | one token per byte, see section 3; recorded in the spec |
+| Packet-type position | `type_pos`, `type_buckets` 64 | the position embedding of token `i` gets a second table indexed by (type bucket, `i`), added to the shared one, so the same byte offset of different packet types has different embeddings. The bucket of `[PKT_n]` is `1 + (n - 1) mod (type_buckets - 1)`; `[PKT_OTHER]`, `[MASK]` and padding are bucket 0, so a masked packet type is not leaked through the position. Cost: `type_buckets * max_tokens * local_dim` weights. A gather on a computed index, exports as plain ONNX. Works for the classifier too |
+| MAE-style masking | `p_packet` (0 to 0.95, default 0.1), `packet_mask` `"partial"` / `"full"`, `p_token`, `span_mean` 1 | `p_packet` 0.3 to 0.9 masks that share of the packets. `"full"` replaces **all** byte tokens of a masked packet (default: the packet type and the first `first_tokens` only) and predicts them. `span_mean > 1` masks byte spans with a geometric length of that mean instead of independent positions; the share of masked bytes stays `p_token` |
+| Entropy-weighted byte loss | `entropy_weight`, `entropy_score` false | masked-byte loss weight per (type bucket, offset) = inverse of the empirical entropy of that cell, `1 / (H + 0.25)`, normalised to mean 1 over seen cells; cells with fewer than 8 byte tokens, and types not seen in training, keep weight 1. The table (`byte_w`) is computed in `fit` from the training windows (`corvus_ml.raw.entropy`, deterministic, no sampling) and stored in the state dict. It weights the training loss only; with `entropy_score` the score is weighted too. Nothing is computed at inference |
+| JEPA latent target | `objective` `"jepa"` / `"both"`, `jepa_loss` `"smooth_l1"` / `"cosine"`, `ema_momentum` 0.99 | masked packets (all bytes masked, time and direction kept) are predicted in representation space: target = the global-transformer output of an **EMA copy** of the encoder (`target`) on the unmasked window, no gradient, L2-normalised; predictor = a two-layer MLP on the context output of the masked packet. The EMA is updated at the start of every training step. The score is the mean latent error of the packets masked by the fixed score pattern, so the exported graph runs the online encoder on the masked and the target encoder on the unmasked window in one graph (no custom operators; Huber loss is written out because `smooth_l1_loss` has no ONNX operator). `"both"` adds the reconstruction terms. The byte heads are not built for `"jepa"`. `n_params` counts the target encoder, because it is in the exported graph |
+| kNN combination | `combine` `"rank"` / `"zsum"`, `knn_bank` 256, `knn_k` 5, `knn_weight` 0.5 | after training, `fit_memory` draws `knn_bank` training windows with `run.seed`, stores their L2-normalised mean-pooled packet embeddings as a bank, and the distribution of the reconstruction score and of the leave-one-out kNN distance (mean cosine distance to the `knn_k` nearest) of those windows. Score = `(1 - knn_weight) * f(reconstruction) + knn_weight * f(knn)`; `f` is a smoothed empirical CDF against the stored scores (`rank`, in [0, 1]) or the z-score (`zsum`). In the ONNX graph the bank is a constant `[knn_bank, d_model]` matrix, one matmul and a TopK per window, plus one more encoder pass on the unmasked window. Memory and latency grow linearly with `knn_bank`; the default adds about `256 * d_model` floats. Without a fitted bank the score is the plain reconstruction score |
+
+All of this is deterministic for a seed: masks and the bank use `torch` / `numpy` generators seeded from
+`run.seed`, the entropy table has no randomness.
+
+Latency: `benchmark.latency_budget_ms` (default 10) is the p99 target per window of at most 256 packets on
+CPU. Together with `raw_packets = [..., 256]` the report prints parameters, p50, p99 and `p99 <= budget` for
+every candidate and every packet count.

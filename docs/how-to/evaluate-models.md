@@ -242,6 +242,70 @@ parameters of the first candidate in the config.
 nothing about real players. The anomaly model in particular does not separate the toy cheaters, which
 are more regular than the toy legit players; a reconstruction loss does not see regularity.
 
+### Ablation of the raw-byte variants
+
+To compare the current model with plain bytes, packet-type positions, MAE-style masking with the
+entropy-weighted loss, and JEPA on the same data and split, use two configs that differ only in
+`[raw.tokenizer]` (the tokenizer belongs to the source, see
+[raw-byte-tokenizer.md](../reference/raw-byte-tokenizer.md), section 12):
+
+```toml
+# ablation-bytes.toml (ablation-bpe.toml: mode = "bpe", vocab_size = 4096, max_tokens_per_packet = 48)
+[raw]
+dir = "lake/raw"
+window_seconds = 10.0
+stride_seconds = 10.0
+max_packets = 256
+
+[raw.tokenizer]            # only for [raw.synthetic]; with dir the build's tokenizer is used
+mode = "bytes"
+[raw.packet]
+max_tokens_per_packet = 96
+
+[candidates.raw_hier_anomaly__base]       # current model
+epochs = 12
+[candidates.raw_hier_anomaly__typepos]    # + packet-type position embedding
+epochs = 12
+type_pos = true
+[candidates.raw_hier_anomaly__mae]        # + 50 % full-packet masks, byte spans, entropy weights
+epochs = 12
+type_pos = true
+p_packet = 0.5
+packet_mask = "full"
+span_mean = 3.0
+entropy_weight = true
+[candidates.raw_hier_anomaly__jepa]       # latent prediction instead of bytes
+epochs = 12
+type_pos = true
+objective = "jepa"
+p_packet = 0.5
+[candidates.raw_hier_anomaly__jepa_knn]   # + kNN memory bank in the score
+epochs = 12
+type_pos = true
+objective = "jepa"
+p_packet = 0.5
+combine = "rank"
+
+[benchmark]
+raw_packets = [64, 256]
+latency_budget_ms = 10.0
+```
+
+```
+uv run corvus-eval run --config ablation-bpe.toml   --out reports/ablation-bpe
+uv run corvus-eval run --config ablation-bytes.toml --out reports/ablation-bytes
+```
+
+For a real snapshot, `[raw] dir` points to a build made with `tokenizer_mode = "bpe"` and one made with
+`"bytes"` (two `build_features` jobs, or `train_tokenizer` once per mode and `tokenizer_prefix`). Both runs
+use the same seed and the same player split, so the rows are comparable. Read each report for ROC/PR-AUC
+and recall at the FPR targets, the parameter count, and p50/p99 latency; the column `p99 <= 10 ms` marks the
+scorer budget, and the table "CPU latency per window by packet count" shows it at 64 and 256 packets.
+`corvus-eval tune` searches the same candidates (`[tune.space] p_packet = [0.3, 0.9]` adds a mask-ratio
+range). `ml/eval.ablation-raw-bpe.toml` and `ml/eval.ablation-raw-bytes.toml` are runnable smoke versions on
+synthetic packets; like every synthetic run they prove the variants train, export and fit the latency
+budget, and say nothing about detection quality.
+
 ## 7. Hyper-parameter search (`corvus-eval tune`)
 
 ```
