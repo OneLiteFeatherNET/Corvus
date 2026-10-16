@@ -198,7 +198,10 @@ final. Anything else is `409`.
 
 **Quality gate for `enforce`.** The candidate's metrics must satisfy:
 
-1. `p99_latency_ms` is present and below `CORVUS_API_GATE_MAX_P99_LATENCY_MS` (default 10, strictly).
+1. `p99_latency_ms` is present and below `CORVUS_API_GATE_MAX_P99_LATENCY_MS` (default 5000, strictly). The limit is a sanity bound, not a
+   real-time requirement: scores are asynchronous decision aids computed by the scorer, so windows may take
+   seconds. Whether the scorer keeps up is a capacity question, not a gate (see the scoring metrics
+   `corvus_score_model_estimated_capacity_players` and `corvus_score_consumer_pending`).
 2. If a model is currently in `enforce` for the same snapshot and game context, `recall_at_fpr_0_1pct` is present and
    at least that model's. If the incumbent has no such metric the gate fails closed. Without an incumbent only the
    latency applies.
