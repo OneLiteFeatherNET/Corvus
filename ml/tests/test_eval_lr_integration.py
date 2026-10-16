@@ -130,3 +130,63 @@ local_heads = 2
     rows = (out / "lr/pvp__raw_hier_classifier.csv").read_text().splitlines()
     assert rows[0] == "lr,smoothed_loss"
     assert len(rows) > 3
+
+
+def test_the_range_test_runs_once_per_study_not_once_per_trial(tmp_path, monkeypatch):
+    from corvus_ml.eval import lr as lr_module
+
+    calls = []
+    real = lr_module.find_lr
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(lr_module, "find_lr", counting)
+    cfg = config(
+        {"raw_hier_classifier": FAST | SMALL | {"lr": "auto", "lr_steps": 10}},
+        tune={"trials": 3, "storage": "memory", "tune_windows": False},
+        benchmark={"enabled": False},
+    )
+
+    info = run(cfg, tmp_path, tune=True)["contexts"]["pvp"]
+
+    study = info["tune"]["raw_hier_classifier"]
+    assert study["n_trials"] == 3
+    # one for the study, one for the final fit with the best parameters
+    assert len(calls) == 2
+    assert study["lr_find"]["source"] == "auto"
+    assert "Range test run once for all trials" in to_markdown({**_stub_report(info)})
+
+
+def _stub_report(info):
+    return {
+        "name": "x", "synthetic": False, "seed": 0, "threads": 1, "unlabelled": "exclude",
+        "assumed_legit_windows": 0, "fpr_targets": [0.05], "contexts": {"pvp": info},
+    }  # fmt: skip
+
+
+def test_the_report_warns_when_the_range_test_was_inconclusive(auto_report):
+    plan = training(auto_report)["lr_plan"]
+    flat = {
+        **plan,
+        "lr_find": {**plan["lr_find"], "flat": True, "warning": "range test inconclusive: x"},
+    }
+    info = auto_report["contexts"]["pvp"]
+    cand = info["candidates"]["raw_hier_classifier"]
+    patched = {
+        **auto_report,
+        "contexts": {
+            "pvp": {
+                **info,
+                "candidates": {
+                    "raw_hier_classifier": {
+                        **cand,
+                        "training": {**cand["training"], "lr_plan": flat},
+                    }
+                },
+            }
+        },
+    }
+
+    assert "Warning: range test inconclusive" in to_markdown(patched)

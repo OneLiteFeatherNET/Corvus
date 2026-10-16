@@ -103,6 +103,7 @@ def fit(
     lr_find: LrFindConfig | None = None,
     lr_mult: float = 1.0,
     schedule_kind: str = "cosine",
+    lr_precomputed: LrFindResult | None = None,
 ) -> FitHistory:
     """AdamW + linear warmup / cosine decay + early stopping on validation loss.
 
@@ -114,6 +115,7 @@ def fit(
     plan = plan_lr(
         lr, model, loss_fn, train, epochs=epochs, batch_size=batch_size, find=lr_find,
         multiplier=lr_mult, schedule_kind=schedule_kind, legacy_warmup_frac=warmup_frac,
+        precomputed=lr_precomputed,
     )  # fmt: skip
     schedule = plan.schedule
     opt = torch.optim.AdamW(model.parameters(), lr=plan.peak_lr, weight_decay=weight_decay)

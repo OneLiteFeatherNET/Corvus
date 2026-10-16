@@ -36,7 +36,8 @@ SCHEDULES = ("cosine", "wsd")
 # Parameters of a candidate / job that steer the learning rate; ``pretrain_`` + name for the
 # masked pretraining. ``lr`` itself is a number or "auto".
 LR_PARAM_NAMES = ("lr", "lr_mult", "lr_steps", "lr_rule", "lr_schedule")
-LR_PARAM_KEYS = LR_PARAM_NAMES
+# ``lr_find_result``: an already computed LrFindResult (the tuner runs the finder once per study).
+LR_PARAM_KEYS = (*LR_PARAM_NAMES, "lr_find_result")
 PRETRAIN_LR_PARAM_KEYS = tuple(f"pretrain_{k}" for k in LR_PARAM_NAMES)
 
 # Defaults of the schedule built for "auto": 5 % warmup (at least 5, at most 2000 steps, never
@@ -130,6 +131,47 @@ def suggest(lrs: np.ndarray, losses: np.ndarray) -> dict[str, float | None]:
     return {"steepest": suggest_steepest(lrs, losses), "valley": suggest_valley(lrs, losses)}
 
 
+@dataclass(frozen=True)
+class CurveCheck:
+    flat: bool
+    rel_drop: float
+    noise: float
+    reason: str = ""
+
+
+def assess_curve(
+    raw: np.ndarray | list[float],
+    smoothed: np.ndarray | list[float],
+    min_rel_drop: float = 0.05,
+    noise_factor: float = 2.0,
+) -> CurveCheck:
+    """Flat-curve guard: does the smoothed loss fall by more than the noise?
+
+    ``drop = max(smoothed[:k + 1]) - smoothed[k]`` with ``k`` the index of the minimum;
+    ``rel_drop = drop / |smoothed[0]|``; ``noise = std(raw - smoothed)``. The curve is *flat*
+    (the argmin is noise, any rule's suggestion meaningless) if
+    ``drop < max(min_rel_drop * |smoothed[0]|, noise_factor * noise)``.
+    """
+    raw_a, sm = np.asarray(raw, float), np.asarray(smoothed, float)
+    if len(sm) < 3:
+        return CurveCheck(True, 0.0, 0.0, "flat: fewer than 3 steps")
+    k = int(np.argmin(sm))
+    drop = float(sm[: k + 1].max() - sm[k])
+    ref = max(abs(float(sm[0])), 1e-12)
+    noise = float(np.std(raw_a - sm))
+    need = max(min_rel_drop * ref, noise_factor * noise)
+    if drop < need:
+        return CurveCheck(
+            True,
+            drop / ref,
+            noise,
+            f"flat: smoothed loss falls by {drop:.3g} ({drop / ref:.1%}), "
+            f"needs {need:.3g} (max of {min_rel_drop:.0%} and {noise_factor:g} x noise "
+            f"{noise:.3g})",
+        )
+    return CurveCheck(False, drop / ref, noise)
+
+
 def downsample(lrs: np.ndarray | list[float], losses: np.ndarray | list[float], max_points: int):
     """At most ``max_points`` evenly spaced ``[lr, loss]`` pairs, first and last always kept."""
     n = len(lrs)
@@ -155,6 +197,8 @@ class LrFindConfig:
     grad_clip: float = 1.0  # as in the training loop; None-like 0 disables
     rule: str = "valley"  # robust on small / noisy data; "steepest" is bolder
     fallback_lr: float = 2e-3  # used when the curve is too short / flat to read a suggestion
+    min_rel_drop: float = 0.05  # flat-curve guard: smaller relative drop than this is inconclusive
+    noise_factor: float = 2.0  # ... and so is a drop smaller than noise_factor * noise
 
     def __post_init__(self) -> None:
         if self.rule not in RULES:
@@ -174,6 +218,11 @@ class LrFindResult:
     stop_reason: str | None = None
     config: dict[str, Any] = field(default_factory=dict)
     subset_size: int = 0
+    flat: bool = False  # the curve does not fall by more than its noise: lr is the fallback
+    flat_reason: str = ""
+    warning: str = ""
+    rel_drop: float = 0.0
+    noise: float = 0.0
 
     def curve(self, max_points: int = 50) -> list[list[float]]:
         return downsample(self.lrs, self.losses, max_points)
@@ -188,6 +237,10 @@ class LrFindResult:
             "stopped_early": self.stopped_early,
             "stop_reason": self.stop_reason,
             "subset_size": self.subset_size,
+            "flat": self.flat,
+            "warning": self.warning,
+            "rel_drop": self.rel_drop,
+            "noise": self.noise,
             "config": dict(self.config),
             "curve": self.curve(max_points),
         }
@@ -266,6 +319,11 @@ def find_lr(
     smoothed_all = smooth_ema(raw, cfg.beta) if raw else np.zeros(0)
     suggestions = suggest(np.asarray(lrs), smoothed_all)
     chosen, used_rule = _pick(suggestions, cfg.rule, cfg.fallback_lr)
+    check = assess_curve(raw, smoothed_all, cfg.min_rel_drop, cfg.noise_factor)
+    warning = ""
+    if check.flat:
+        chosen, used_rule = cfg.fallback_lr, "fallback"
+        warning = f"range test inconclusive: curve too flat, used fallback lr {chosen:g}"
     chosen = min(max(chosen, cfg.lr_min), cfg.lr_max)  # valley / 10 may leave the scanned range
     return LrFindResult(
         lrs=lrs,
@@ -278,6 +336,11 @@ def find_lr(
         stop_reason=stop_reason,
         config=asdict(cfg),
         subset_size=size,
+        flat=check.flat,
+        flat_reason=check.reason,
+        warning=warning,
+        rel_drop=check.rel_drop,
+        noise=check.noise,
     )
 
 
@@ -389,6 +452,7 @@ def plan_lr(
     multiplier: float = 1.0,
     schedule_kind: str = "cosine",
     legacy_warmup_frac: float = 0.1,
+    precomputed: LrFindResult | None = None,
 ) -> LrPlan:
     """Peak lr and schedule of one run.
 
@@ -403,7 +467,7 @@ def plan_lr(
         warmup = max(1, int(total * legacy_warmup_frac))
         return LrPlan(float(value), "fixed", LrSchedule(total, warmup, float(value), 0.0, "cosine"))
     cfg = find or LrFindConfig(batch_size=batch_size)
-    result = find_lr(model, loss_fn, tensors, cfg)
+    result = precomputed if precomputed is not None else find_lr(model, loss_fn, tensors, cfg)
     batch_scale = 1.0
     if cfg.batch_size != batch_size:
         batch_scale = scale_lr_for_batch(1.0, cfg.batch_size, batch_size)
@@ -430,6 +494,7 @@ def lr_kwargs(
     """
     lr = parse_lr(params.get(f"{prefix}lr", default_lr))
     find = LrFindConfig(
+        fallback_lr=float(default_lr),
         steps=int(params.get(f"{prefix}lr_steps", LrFindConfig.steps)),
         rule=str(params.get(f"{prefix}lr_rule", LrFindConfig.rule)),
         batch_size=batch_size,
@@ -444,4 +509,5 @@ def lr_kwargs(
         "lr_find": find,
         "lr_mult": mult,
         "schedule_kind": str(params.get(f"{prefix}lr_schedule", "cosine")),
+        "lr_precomputed": params.get(f"{prefix}lr_find_result"),
     }

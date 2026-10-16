@@ -59,6 +59,23 @@ select the other with `lr_rule = "steepest"`. If a rule finds nothing (no descen
 used, and if neither does, `fallback_lr` (`2e-3`); the report names the rule that was actually used.
 The suggestion is clamped to `[lr_min, lr_max]`.
 
+## Flat-curve guard
+
+A curve whose argmin is noise gives a meaningless suggestion. After the sweep the result is checked:
+
+```
+k     = argmin(s)
+drop  = max(s_0 .. s_k) - s_k            rel_drop = drop / |s_0|
+noise = std(raw - s)
+flat  = drop < max(0.05 * |s_0|, 2 * noise)
+```
+
+If `flat`, the suggestion is replaced by the `fallback_lr`: the candidate's previous numeric default
+(`2e-3`, `1e-3` for the pretraining), the rule is reported as `fallback`, `flat` is `true` and the
+result carries the warning "range test inconclusive: curve too flat, used fallback". The warning
+appears in `report.md` and under `training.warnings` of the job result. The thresholds are
+`min_rel_drop` and `noise_factor` of `LrFindConfig`.
+
 ## From the suggestion to a schedule
 
 The suggestion is the **peak** of the schedule. With `T = epochs * ceil(n_train / batch_size)`
@@ -84,7 +101,7 @@ matters for callers of `plan_lr`.
 With `lr = "auto"` the Optuna search no longer draws `lr` blindly from `3e-4 .. 1e-2`. It draws
 `lr_mult` log-uniformly from `0.3 .. 3` and the training uses `lr_mult * suggestion` as the peak, so
 the search spends its trials around a value that already works. Narrow it with
-`[tune.space] lr_mult = [0.5, 2]`. Each trial runs its own range test (the model differs per trial).
+`[tune.space] lr_mult = [0.5, 2]`. The range test runs once per study, with the base parameters, and all trials reuse its curve (reported once in the study summary under `lr_find`); only the final fit with the best parameters runs it again.
 
 ## Reading the curve
 
@@ -94,7 +111,8 @@ the curve as `[lr, smoothed loss]` pairs, downsampled to at most 50 points.
 * A flat start, then a fall, a minimum and a sharp rise: a healthy curve. The suggestion sits on the
   fall, one decade before the rise.
 * A curve that is flat or noisy everywhere (the total drop is no bigger than the wiggles) says that
-  the subset is too small to see the effect of the learning rate. Read the suggestion as a guess.
+  the subset is too small to see the effect of the learning rate: the guard above fires and the
+  fallback is used.
 * A curve that falls until `lr_max`: raise `lr_max`. A curve that rises from the start: `lr_min` is
   already too large, or the loss is wrong (check the closure).
 * An early stop at a small learning rate with a very narrow valley often means large gradient noise;
@@ -111,4 +129,4 @@ the curve as `[lr, smoothed loss]` pairs, downsampled to at most 50 points.
 * The model starts from random weights (or from the pretrained encoder), so the result depends on
   both; re-run when the architecture, the loss, the batch size or the amount of data changes. The
   eval harness does that on every `lr = "auto"` fit.
-* The range test costs `lr_steps` optimizer steps per fit and per Optuna trial.
+* The range test costs `lr_steps` optimizer steps per fit (once per Optuna study, not per trial; the masked pretraining still runs its own per trial).

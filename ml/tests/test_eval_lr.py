@@ -11,6 +11,7 @@ from corvus_ml.eval import candidates
 from corvus_ml.eval.lr import (
     LrFindConfig,
     LrSchedule,
+    assess_curve,
     exponential_lrs,
     find_lr,
     lr_kwargs,
@@ -304,11 +305,11 @@ def test_candidates_accept_the_lr_parameters():
 
 
 def test_the_default_rule_is_the_robust_valley_rule():
-    res = find_lr(tiny(), mse, regression(), CFG)
+    cfg = LrFindConfig(lr_min=1e-3, lr_max=0.3, steps=40, batch_size=32, seed=1)
+    res = find_lr(tiny(), mse, regression(512), cfg)
+    assert not res.flat, res.flat_reason
     assert res.rule == "valley"
-    assert res.suggested_lr == pytest.approx(
-        min(max(res.suggestions["valley"], CFG.lr_min), CFG.lr_max)
-    )
+    assert res.suggested_lr == pytest.approx(min(max(res.suggestions["valley"], 1e-3), 0.3))
 
 
 def test_a_one_step_noise_dip_does_not_beat_the_real_descent():
@@ -316,3 +317,51 @@ def test_a_one_step_noise_dip_does_not_beat_the_real_descent():
     noisy = loss.copy()
     noisy[20] -= 0.3  # a single-step dip far left of the real descent
     assert math.log10(suggest_steepest(lrs, noisy)) == pytest.approx(-3, abs=0.3)
+
+
+# --- flat-curve guard ---
+
+
+def noisy(loss, sigma, seed=0):
+    return loss + np.random.default_rng(seed).normal(0, sigma, len(loss))
+
+
+def test_a_clear_descent_is_not_flat():
+    _, loss = synthetic_curve()
+    raw = noisy(loss, 0.02)
+    check = assess_curve(raw, smooth_ema(raw, 0.9))
+    assert not check.flat
+    assert check.rel_drop > 0.5
+
+
+def test_a_barely_falling_noisy_curve_is_flat():
+    lrs = np.logspace(-7, 0, 60)
+    loss = 0.95 - 0.05 * np.exp(-((np.log10(lrs) + 4) ** 2)) + (np.log10(lrs) > -1) * 0.5
+    raw = noisy(loss, 0.08, seed=3)
+    check = assess_curve(raw, smooth_ema(raw, 0.9))
+    assert check.flat
+    assert "flat" in check.reason
+
+
+def test_a_small_but_clean_drop_below_the_minimum_relative_drop_is_flat():
+    raw = np.concatenate([np.linspace(1.0, 0.97, 30), np.linspace(0.97, 3.0, 30)])
+    check = assess_curve(raw, smooth_ema(raw, 0.9))
+    assert check.flat, "3 % is below min_rel_drop"
+
+
+def test_a_flat_range_test_uses_the_fallback_and_says_so():
+    def constant(model, batch):  # the loss does not depend on the model: nothing to learn
+        return torch.tensor(1.0) + 0.0 * model.weight.sum()
+
+    cfg = LrFindConfig(**{**CFG.__dict__, "fallback_lr": 3e-3})
+    res = find_lr(tiny(), constant, regression(), cfg)
+    assert res.flat
+    assert res.suggested_lr == 3e-3
+    assert res.rule == "fallback"
+    assert "inconclusive" in res.warning
+    assert res.to_dict()["flat"] is True
+
+
+def test_lr_kwargs_passes_the_numeric_default_as_the_fallback():
+    kw = lr_kwargs({}, default_lr=1e-3, batch_size=16, seed=0, weight_decay=0.0)
+    assert kw["lr_find"].fallback_lr == 1e-3

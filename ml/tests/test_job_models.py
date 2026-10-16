@@ -311,3 +311,13 @@ def test_the_job_summary_carries_the_learning_rate_decision(tmp_path, tables):
     plan = outcome.result["contexts"]["pvp"]["candidates"]["cnn1d"]["training"]["lr_plan"]
     assert plan["source"] == "auto"
     assert plan["lr_find"]["curve"]
+
+
+def test_an_inconclusive_range_test_is_a_warning_in_the_job_result():
+    from corvus_ml.jobs.model_jobs import _training_info
+
+    plan = {"lr_find": {"warning": "range test inconclusive: curve too flat, used fallback"}}
+
+    info = _training_info({"training": {"lr": 0.002, "lr_plan": plan}})
+
+    assert info["training"]["warnings"] == [plan["lr_find"]["warning"]]

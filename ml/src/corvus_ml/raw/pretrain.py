@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from corvus_ml.eval.lr import LrFindConfig
+from corvus_ml.eval.lr import LrFindConfig, LrFindResult
 from corvus_ml.eval.training import FitHistory, fit
 from corvus_ml.raw.model import ModelConfig, RawAnomalyNet
 
@@ -85,6 +85,7 @@ def pretrain(
     lr_find: LrFindConfig | None = None,
     lr_mult: float = 1.0,
     schedule_kind: str = "cosine",
+    lr_precomputed: LrFindResult | None = None,
 ) -> FitHistory:
     """AdamW + warmup + cosine + early stopping on the masked-prediction loss.
 
@@ -110,4 +111,5 @@ def pretrain(
         model, loss_fn, train, val, epochs=epochs, batch_size=batch_size, lr=lr,
         weight_decay=weight_decay, patience=patience, seed=seed, on_epoch=on_epoch,
         lr_find=lr_find, lr_mult=lr_mult, schedule_kind=schedule_kind,
+        lr_precomputed=lr_precomputed,
     )  # fmt: skip

@@ -276,6 +276,13 @@ def _training_info(candidate: dict[str, Any]) -> dict[str, Any]:
     """Learning rate chosen for the candidate and why (rule, schedule, downsampled curve)."""
     t = candidate.get("training") or {}
     out = {k: t[k] for k in ("lr", "lr_plan", "pretrain_lr_plan") if t.get(k) is not None}
+    warnings = [
+        w
+        for plan in (t.get("lr_plan"), t.get("pretrain_lr_plan"))
+        if plan and (w := (plan.get("lr_find") or {}).get("warning"))
+    ]
+    if warnings:
+        out["warnings"] = warnings
     return {"training": json_safe(out)} if out else {}
 
 

@@ -143,6 +143,11 @@ def _tune_section(info: dict) -> list[str]:
             f"Best parameters: {best or 'none (no complete trial)'}",
             "",
         ]
+        if t.get("lr_find"):
+            lines += [
+                _lr_line(t["lr_find"], "Range test run once for all trials (base parameters)"),
+                "",
+            ]
     return lines
 
 
@@ -157,9 +162,11 @@ def _lr_line(plan: dict, label: str) -> str:
             f"{find['steps_run']} range-test steps"
             + (f", stopped: {find['stop_reason']}" if find["stopped_early"] else "")
         )
+    warn = find.get("warning") if find else ""
     return (
         f"{head}); {s['kind']} schedule over {s['total_steps']} steps, warmup "
         f"{s['warmup_steps']}, floor {s['floor_lr']:.3g}."
+        + (f" **Warning: {warn}.**" if warn else "")
     )
 
 
