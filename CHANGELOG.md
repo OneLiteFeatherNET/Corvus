@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.3.1...v0.3.2) (2026-10-16)
+
+
+### Bug Fixes
+
+* **services:** split liveness from readiness and shut down cleanly ([#80](https://github.com/OneLiteFeatherNET/Corvus/issues/80)) ([f0a8be0](https://github.com/OneLiteFeatherNET/Corvus/commit/f0a8be04c236ce0ff18212f7bf5dc2df3d216c96))
+
 ## [0.3.1](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.3.0...v0.3.1) (2026-10-16)
 
 
