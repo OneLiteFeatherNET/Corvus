@@ -86,6 +86,29 @@ Behaviour to know when operating the NATS sink:
   `SessionEnd` counters, and shown as `dropped_transport=` in `/corvus stats` and the 60 s log line.
 - On shutdown the plugin flushes with a bounded 3 s timeout and then closes the connection.
 
+### Proxy id (`proxy_id`)
+
+`proxy_id` identifies the proxy in the capture subject `<nats.subject_prefix>.<proxy_id>.<partition>`, in envelopes
+and in the control plane. It must be a single NATS subject token: not empty, and without `.`, `*`, `>`, whitespace
+or control characters. On CloudNet all instances of a task share one template, so the id can be derived from the
+service instead of being fixed. Placeholders are resolved once, when the config is loaded:
+
+| Placeholder | Resolves to | Example |
+|---|---|---|
+| `${cloudnet.service}` | `<taskName><nameSplitter><taskServiceId>` of the CloudNet service | `Proxy-Corvus-1` |
+| `${cloudnet.task}` | the CloudNet task name | `Proxy-Corvus` |
+| `${env:NAME}` | the value of the environment variable `NAME` | `edge-7` |
+
+Placeholders can be mixed with text (`olf-${cloudnet.service}` gives `olf-Proxy-Corvus-1`); an id without
+placeholders is used as written.
+
+- The CloudNet values are read from `.wrapper/wrapper.json` in the working directory of the proxy, which is the
+  service directory under CloudNet v4. Only `serviceConfiguration.serviceId` is read. The file also holds the
+  node's `connectionKey`; it is skipped while parsing and never kept, logged or included in an error.
+- If a placeholder cannot be resolved (no `wrapper.json`, unreadable or unexpected JSON, unset or empty environment
+  variable, unknown placeholder) or the result is not a valid subject token, the plugin logs an `ERROR` that names
+  the placeholder and does not capture. The proxy itself keeps running; fix `proxy_id` and restart.
+
 ### Private CA for NATS and the control plane (`[tls]`)
 
 If NATS (`tls://`, `wss://`) or the control-plane API (`https://`) are served with certificates from a private CA

@@ -2,6 +2,10 @@
 # Key names follow CorvusConfig.DEFAULT_TOML of the plugin (CorvusConfigTest guards this file).
 # Captures are written to plugins/corvus/captures (mounted from deploy/pilot/data/captures).
 
+# proxy_id is one NATS subject token (corvus.capture.v1.<proxy_id>.<partition>): no ".", "*", ">" or whitespace.
+# Placeholders are resolved once at startup: ${cloudnet.service} = CloudNet service name (Proxy-1, from
+# .wrapper/wrapper.json), ${cloudnet.task} = task name, ${env:NAME} = environment variable; mix with text
+# ("olf-${cloudnet.service}"). The pilot runs outside CloudNet, so it uses a literal id.
 proxy_id = "pilot-proxy"
 
 [pseudonym]

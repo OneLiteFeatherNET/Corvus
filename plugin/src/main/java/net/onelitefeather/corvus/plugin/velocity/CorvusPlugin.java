@@ -31,6 +31,7 @@ import net.onelitefeather.corvus.plugin.capture.Metrics;
 import net.onelitefeather.corvus.plugin.capture.StatsReporter;
 import net.onelitefeather.corvus.plugin.capture.WriterThread;
 import net.onelitefeather.corvus.plugin.config.CorvusConfig;
+import net.onelitefeather.corvus.plugin.config.ProxyIdException;
 import net.onelitefeather.corvus.plugin.nats.JetStreamEnvelopePublisher;
 import net.onelitefeather.corvus.plugin.nats.ScoreSubscriber;
 import net.onelitefeather.corvus.plugin.tls.TlsTrust;
@@ -113,7 +114,14 @@ public final class CorvusPlugin {
             Files.writeString(configFile, CorvusConfig.DEFAULT_TOML, StandardCharsets.UTF_8);
             logger.info("Wrote default config to {}", configFile);
         }
-        CorvusConfig config = CorvusConfig.parse(Files.readString(configFile, StandardCharsets.UTF_8));
+        CorvusConfig config;
+        try {
+            config = CorvusConfig.parse(Files.readString(configFile, StandardCharsets.UTF_8));
+        } catch (ProxyIdException e) {
+            logger.error("{}. Corvus is NOT capturing; fix proxy_id in {} and restart the proxy.", e.getMessage(),
+                    configFile);
+            return;
+        }
 
         if (config.payloadMode() == PayloadMode.ALL) {
             logger.warn("capture.raw_payloads = \"all\": payloads of clientbound packets that may contain names "
