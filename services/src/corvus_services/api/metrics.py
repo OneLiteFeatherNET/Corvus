@@ -37,3 +37,9 @@ class ApiMetrics:
             ["type", "runner"],
             registry=r,
         )
+        self.jobs_reconciled = Counter(
+            "corvus_api_jobs_reconciled_total",
+            "Jobs whose status the reconciler changed, by new status",
+            ["status"],
+            registry=r,
+        )

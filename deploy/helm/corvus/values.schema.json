@@ -238,6 +238,7 @@
           "type": "object",
           "properties": {
             "runner": {"enum": ["kubernetes", "local"]},
+            "reconcileIntervalSeconds": {"type": "integer", "minimum": 0},
             "image": {"$ref": "#/definitions/image"},
             "serviceAccount": {"type": "string"},
             "envSecret": {"type": "string"},

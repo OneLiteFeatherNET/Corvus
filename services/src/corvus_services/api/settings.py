@@ -99,6 +99,9 @@ class ApiSettings(BaseSettings):
 
     # Jobs
     job_runner: Literal["local", "kubernetes"] = "local"
+    # Seconds between background passes that pull the runner status into non-final jobs
+    # (so killed jobs do not stay "running"); 0 disables the reconciler.
+    job_reconcile_interval_s: int = Field(default=30, ge=0)
     # Local runner: argv prefix; the job type and arguments are appended.
     job_local_command: list[str] = ["corvus-job"]
     job_k8s_namespace: str = "corvus"

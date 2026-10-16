@@ -215,8 +215,13 @@ transition (including the automatic archive) is stored in `model_transitions` wi
 
 `POST /jobs` (`202`), `GET /jobs` (filter `status`), `GET /jobs/{id}`, `PATCH /jobs/{id}`. A job has `type` (`build_features`, `evaluate`,
 `train`), a `snapshot_id` that must exist, and free-form `params` (at most 16 KiB; no secrets). Status values:
-`queued`, `running`, `succeeded`, `failed`. `GET /jobs/{id}` refreshes a non-final job from the runner; runner errors
-leave the stored status unchanged.
+`queued`, `running`, `succeeded`, `failed`. `GET /jobs/{id}` refreshes a non-final job from the runner. In addition a
+background reconciler in every API replica refreshes all non-final jobs every `CORVUS_API_JOB_RECONCILE_INTERVAL_S`
+seconds (default `30`, `0` disables it), so a job that was killed before it could report is marked `failed` without
+anyone opening it. A refresh is idempotent and a final status is never overwritten, so several replicas are safe.
+Transient runner errors (API unreachable, `5xx`) leave the stored status unchanged; a job the runner no longer knows
+(for example the Kubernetes Job was deleted after `ttlSecondsAfterFinished`) becomes `failed` with the message
+`job disappeared from the cluster`.
 
 `PATCH /jobs/{id}` is how the job process reports back (DS or a job token, see above): body
 `{"status": "running" | "succeeded" | "failed", "message": "...", "result": {...}}` (`message` at most 2000
@@ -229,7 +234,7 @@ The runner is selected with `CORVUS_API_JOB_RUNNER`:
 | Runner | Behaviour |
 |---|---|
 | `local` | Starts `CORVUS_API_JOB_LOCAL_COMMAND` (JSON list, default `["corvus-job"]`) plus the job type as a subprocess without a shell. The child does not inherit `CORVUS_API_*`, `CORVUS_PSEUDONYM_KEY*` or `CORVUS_KEK`. Process handles are in memory: after an API restart a running job is reported `failed` ("process handle lost"). |
-| `kubernetes` | Creates a `batch/v1` Job through the official Python client (in-cluster config, else kubeconfig) in `CORVUS_API_JOB_K8S_NAMESPACE`: image, command, `CPU`/`memory` requests and limits (`CORVUS_API_JOB_K8S_*`), labels `app.kubernetes.io/name=corvus-job` and `corvus.onelitefeather.net/job-id`/`job-type`, `ttlSecondsAfterFinished`, `activeDeadlineSeconds`, `backoffLimit` 0, a sized `emptyDir` at `/scratch` (`CORVUS_API_JOB_K8S_SCRATCH_SIZE_LIMIT`, default `20Gi`; `CORVUS_JOB_SCRATCH_DIR` and `TMPDIR` point there), `restartPolicy: Never`, non-root, no privilege escalation, all capabilities dropped. `CORVUS_API_JOB_K8S_ENV_SECRET` names a Secret exposed as environment. Status comes from the Job's `Complete` and `Failed` conditions. The API's service account needs `create` and `get` on `jobs` in that namespace. |
+| `kubernetes` | Creates a `batch/v1` Job through the official Python client (in-cluster config, else kubeconfig) in `CORVUS_API_JOB_K8S_NAMESPACE`: image, command, `CPU`/`memory` requests and limits (`CORVUS_API_JOB_K8S_*`), labels `app.kubernetes.io/name=corvus-job` and `corvus.onelitefeather.net/job-id`/`job-type`, `ttlSecondsAfterFinished`, `activeDeadlineSeconds`, `backoffLimit` 0, a sized `emptyDir` at `/scratch` (`CORVUS_API_JOB_K8S_SCRATCH_SIZE_LIMIT`, default `20Gi`; `CORVUS_JOB_SCRATCH_DIR` and `TMPDIR` point there), `restartPolicy: Never`, non-root, no privilege escalation, all capabilities dropped. `CORVUS_API_JOB_K8S_ENV_SECRET` names a Secret exposed as environment. Status comes from the Job's `Complete` and `Failed` conditions; for a failed Job the message is the termination state of its pod (`OOMKilled (exit 137)`, `Error (exit 1)`), `DeadlineExceeded: job ran longer than the <n> s deadline` when the active deadline hit, and the condition reason (`BackoffLimitExceeded`) only when no pod is left. The API's service account needs `create`, `get`, `list` and `watch` on `jobs` and `get` and `list` on `pods` in that namespace (the Helm chart creates this Role). |
 
 Contract with the job process, identical for both runners: arguments are the command followed by the job type; the
 environment carries `CORVUS_JOB_ID`, `CORVUS_JOB_TYPE`, `CORVUS_JOB_SNAPSHOT_ID` and `CORVUS_JOB_PARAMS` (JSON).
@@ -253,7 +258,8 @@ The history keeps `CORVUS_SCORE_HISTORY_RETENTION_DAYS` (default 14) days; `corv
 
 `GET /healthz` (liveness, no dependencies), `GET /readyz` (`503` when PostgreSQL does not answer within 3 s),
 `GET /metrics` (Prometheus: `corvus_api_requests_total`, `corvus_api_request_seconds` by route template and method,
-`corvus_api_erasures_total`, `corvus_api_model_transitions_total`, `corvus_api_jobs_total`). `/metrics` is
+`corvus_api_erasures_total`, `corvus_api_model_transitions_total`, `corvus_api_jobs_total`,
+`corvus_api_jobs_reconciled_total` by new status). `/metrics` is
 unauthenticated; keep it on the cluster network.
 
 ## Configuration summary
@@ -267,6 +273,7 @@ unauthenticated; keep it on the cluster network.
 | `CORVUS_API_DEV_TOKEN`, `CORVUS_API_DEV_TOKEN_ROLES` | unset, `["admin"]` | Development only. |
 | `CORVUS_API_PLUGIN_TOKENS` | empty | Comma separated proxy tokens. |
 | `CORVUS_API_JOB_TOKENS` | empty | Comma separated `<sha256 hex>:<job name>`, see "Job tokens". |
+| `CORVUS_API_JOB_RECONCILE_INTERVAL_S` | `30` | Seconds between background job status refreshes; `0` disables. Helm: `api.jobs.reconcileIntervalSeconds`. |
 | `CORVUS_API_CORS_ORIGINS` | empty | Comma separated browser origins; empty disables CORS. |
 | `CORVUS_API_DISPLAY_NAME_CLAIM` | `name` | Token claim shown by `GET /me` (fallback `preferred_username`). |
 | `CORVUS_PSEUDONYM_KEY`, `CORVUS_PSEUDONYM_KEY_ID` | unset, `k1` | Same as the plugin. |
