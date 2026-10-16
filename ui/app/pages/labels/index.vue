@@ -23,7 +23,7 @@
       <template #[`item.subject`]="{ item }"><span class="mono">{{ item.subject.slice(0, 16) }}…</span></template>
       <template #[`item.label`]="{ item }">
         <M3Chip small :tone="item.label === 'cheat' ? 'error' : 'primary'" :icon="item.label === 'cheat' ? 'mdi-alert-outline' : 'mdi-check'">
-          {{ $t(`labels.value.${item.label}`) }}
+          {{ enumLabel('labels.value', item.label) }}
         </M3Chip>
       </template>
       <template #[`item.confidence`]="{ item }">{{ item.confidence.toFixed(2) }}</template>
@@ -38,6 +38,8 @@
 
 <script setup lang="ts">
 import { formatDateTime } from '~/lib/format'
+
+const enumLabel = useEnumLabel()
 
 const { t, locale } = useI18n()
 const { can } = useAuth()

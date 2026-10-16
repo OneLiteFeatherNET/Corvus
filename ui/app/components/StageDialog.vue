@@ -15,7 +15,7 @@
         v-if="targets.length"
         v-model="target"
         :legend="$t('models.transition.target')"
-        :options="targets.map(s => ({ value: s, label: $t(`models.stage.${s}`) }))"
+        :options="targets.map(s => ({ value: s, label: enumLabel('models.stage', s) }))"
       />
       <p v-else class="text-on-surface-variant">{{ $t('models.transition.final') }}</p>
       <M3TextField
@@ -39,6 +39,8 @@
 <script setup lang="ts">
 import { nextStages } from '~/lib/metrics'
 import type { Model, Stage } from '~/types'
+
+const enumLabel = useEnumLabel()
 
 const props = defineProps<{ modelValue: boolean, model: Model }>()
 const emit = defineEmits<{ 'update:modelValue': [boolean], 'changed': [Model] }>()

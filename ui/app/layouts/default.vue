@@ -72,8 +72,10 @@
         :label="$t('common.navigation')"
         :close-label="$t('common.close')"
       />
-      <main id="main" tabindex="-1" class="mx-auto min-w-0 max-w-[88rem] flex-1 px-4 py-6 outline-none md:px-8">
-        <slot />
+      <main id="main" tabindex="-1" class="min-w-0 flex-1 px-4 py-6 outline-none md:px-6">
+        <div class="max-w-[88rem]">
+          <slot />
+        </div>
       </main>
     </div>
   </div>

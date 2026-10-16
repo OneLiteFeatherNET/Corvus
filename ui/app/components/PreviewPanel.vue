@@ -19,7 +19,7 @@
       <div class="mb-1 text-label-large">{{ $t('pools.preview.labelDistribution') }}</div>
       <ul class="flex list-none flex-wrap gap-2">
         <li v-for="k in ['legit', 'cheat', 'unlabeled']" :key="k">
-          <M3Chip small>{{ $t(`labels.value.${k}`) }}: {{ formatNumber(preview.label_distribution[k] ?? 0, locale) }}</M3Chip>
+          <M3Chip small>{{ enumLabel('labels.value', k) }}: {{ formatNumber(preview.label_distribution[k] ?? 0, locale) }}</M3Chip>
         </li>
       </ul>
     </div>
@@ -29,6 +29,8 @@
 <script setup lang="ts">
 import { formatNumber } from '~/lib/format'
 import type { Preview } from '~/types'
+
+const enumLabel = useEnumLabel()
 
 const props = defineProps<{
   preview: Preview | null

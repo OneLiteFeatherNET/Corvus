@@ -26,7 +26,7 @@
           :tone="chipTone(stageColor(s))"
           :icon="stageIcon(s)"
         >
-          {{ $t(`models.stage.${s}`) }}: {{ stageCounts[s] ?? 0 }}
+          {{ enumLabel('models.stage', s) }}: {{ stageCounts[s] ?? 0 }}
         </M3Chip>
       </div>
     </M3Card>
@@ -40,7 +40,7 @@
               class="state-layer flex items-center justify-between gap-3 rounded-sm px-2 py-2 text-on-surface no-underline"
             >
               <span class="min-w-0">
-                <span class="block truncate text-body-large">{{ $t(`jobs.type.${j.type}`) }} · {{ shortId(j.id) }}</span>
+                <span class="block truncate text-body-large">{{ enumLabel('jobs.type', j.type) }} · {{ shortId(j.id) }}</span>
                 <span class="block text-body-medium text-on-surface-variant">{{ formatDateTime(j.created_at, locale) }}</span>
               </span>
               <StatusChip kind="job" :value="j.status" />
@@ -71,6 +71,8 @@
 import { modelTotal, runningJobs, STAGES, stageCounts as countStages } from '~/lib/dashboard'
 import { chipTone, formatDateTime, formatNumber, shortId, stageColor, stageIcon } from '~/lib/format'
 import type { ErasureBrief, JobBrief } from '~/types'
+
+const enumLabel = useEnumLabel()
 
 const { can } = useAuth()
 const { locale } = useI18n()

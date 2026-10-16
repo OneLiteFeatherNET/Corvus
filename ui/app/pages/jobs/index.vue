@@ -12,7 +12,7 @@
       <template #[`item.id`]="{ item }">
         <NuxtLink :to="`/jobs/${item.id}`" class="mono font-medium">{{ shortId(item.id) }}</NuxtLink>
       </template>
-      <template #[`item.type`]="{ item }">{{ $t(`jobs.type.${item.type}`) }}</template>
+      <template #[`item.type`]="{ item }">{{ enumLabel('jobs.type', item.type) }}</template>
       <template #[`item.status`]="{ item }"><StatusChip kind="job" :value="item.status" /></template>
       <template #[`item.snapshot_id`]="{ item }">
         <NuxtLink :to="`/snapshots/${item.snapshot_id}`" class="mono">{{ shortId(item.snapshot_id) }}</NuxtLink>
@@ -26,6 +26,8 @@
 <script setup lang="ts">
 import { formatDateTime, shortId } from '~/lib/format'
 import type { JobState } from '~/types'
+
+const enumLabel = useEnumLabel()
 
 const { t, locale } = useI18n()
 const jobs = useJobs()

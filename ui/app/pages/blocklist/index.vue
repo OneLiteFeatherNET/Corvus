@@ -12,10 +12,10 @@
       <template #[`item.pseudonym`]="{ item }"><span class="mono">{{ item.pseudonym.slice(0, 16) }}…</span></template>
       <template #[`item.kind`]="{ item }">
         <M3Chip small :tone="item.kind === 'block' ? 'error' : 'primary'" :icon="item.kind === 'block' ? 'mdi-cancel' : 'mdi-check'">
-          {{ $t(`blocklist.kinds.${item.kind}`) }}
+          {{ enumLabel('blocklist.kinds', item.kind) }}
         </M3Chip>
       </template>
-      <template #[`item.source`]="{ item }">{{ $t(`blocklist.sources.${item.source}`) }}</template>
+      <template #[`item.source`]="{ item }">{{ enumLabel('blocklist.sources', item.source) }}</template>
       <template #[`item.created_at`]="{ item }">{{ formatDateTime(item.created_at, locale) }}</template>
       <template #[`item.actions`]="{ item }">
         <M3IconButton
@@ -54,6 +54,8 @@
 <script setup lang="ts">
 import { isPseudonym } from '~/lib/erasure'
 import { formatDateTime } from '~/lib/format'
+
+const enumLabel = useEnumLabel()
 
 const { t, locale } = useI18n()
 const blocklist = useBlocklist()

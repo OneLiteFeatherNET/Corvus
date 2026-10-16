@@ -3,7 +3,7 @@
     <AppProblem :error="loadError" />
     <M3Progress v-if="!job && !loadError" :label="$t('common.loading')" />
     <template v-if="job">
-      <PageHeader :title="`${$t(`jobs.type.${job.type}`)} ${shortId(job.id)}`">
+      <PageHeader :title="`${enumLabel('jobs.type', job.type)} ${shortId(job.id)}`">
         <template #actions>
           <StatusChip kind="job" :value="job.status" />
           <M3Button variant="tonal" icon="mdi-refresh" :loading="refreshing" :loading-label="$t('common.loading')" @click="refresh">{{ $t('common.refresh') }}</M3Button>
@@ -37,6 +37,8 @@
 <script setup lang="ts">
 import { formatDateTime, shortId } from '~/lib/format'
 import type { Job } from '~/types'
+
+const enumLabel = useEnumLabel()
 
 const route = useRoute()
 const { locale } = useI18n()
