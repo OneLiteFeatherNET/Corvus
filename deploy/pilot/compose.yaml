@@ -35,7 +35,7 @@ services:
     # One-shot: copies exactly one corvus-velocity-*.jar (no -sources/-plain/-javadoc)
     # into a volume that the proxy mounts as /plugins, and makes the capture directory
     # writable for the proxy user (a bind mount that Docker creates would belong to root).
-    image: alpine:3.22
+    image: alpine:3.24
     restart: "no"
     cpus: 0.25
     mem_limit: 64m
