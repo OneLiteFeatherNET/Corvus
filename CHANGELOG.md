@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.3.2...v0.4.0) (2026-10-16)
+
+
+### Features
+
+* **plugin:** resolve proxy_id from the cloudnet service ([#82](https://github.com/OneLiteFeatherNET/Corvus/issues/82)) ([336edce](https://github.com/OneLiteFeatherNET/Corvus/commit/336edce9a9772091987e84c8093a85d6532afdec))
+* **ui:** list snapshot sessions with label action ([#83](https://github.com/OneLiteFeatherNET/Corvus/issues/83)) ([72ecbf3](https://github.com/OneLiteFeatherNET/Corvus/commit/72ecbf340d64c3732f7a4694f4af6085bbe02494))
+
 ## [0.3.2](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.3.1...v0.3.2) (2026-10-16)
 
 
