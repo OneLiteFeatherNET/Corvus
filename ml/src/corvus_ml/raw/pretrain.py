@@ -8,7 +8,7 @@ holds the architecture and all weights; a classifier is finetuned from the encod
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import fields
+from dataclasses import fields, replace
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +16,7 @@ import torch
 
 from corvus_ml.eval.lr import LrFindConfig, LrFindResult
 from corvus_ml.eval.training import FitHistory, fit
+from corvus_ml.membudget import plan_micro_batch
 from corvus_ml.raw.model import ModelConfig, RawAnomalyNet
 
 # Settings that define the encoder weights' shapes and meaning; the rest may differ on finetuning.
@@ -31,6 +32,8 @@ def flatten_windows(ids: np.ndarray, time_s: np.ndarray) -> tuple[np.ndarray, np
     flat_ids = ids.reshape(-1, *ids.shape[-2:])
     flat_t = time_s.reshape(-1, time_s.shape[-1])
     keep = (flat_ids[:, :, 0] != 0).any(axis=1)
+    if keep.all():
+        return flat_ids, flat_t  # views: no second copy of the whole window tensor
     return flat_ids[keep], flat_t[keep]
 
 
@@ -89,6 +92,9 @@ def pretrain(
     lr_mult: float = 1.0,
     schedule_kind: str = "cosine",
     lr_precomputed: LrFindResult | None = None,
+    micro_batch: int | None = None,
+    eval_batch: int | None = None,
+    memory_budget_mb: float | None = None,
 ) -> FitHistory:
     """AdamW + warmup + cosine + early stopping on the masked-prediction loss.
 
@@ -97,13 +103,29 @@ def pretrain(
 
     ``ids`` / ``time_s`` are flat windows (:func:`flatten_windows`). A fixed share of them is held
     out for early stopping; the split depends only on ``seed``.
+
+    Rows per forward pass are capped by the memory budget (:mod:`corvus_ml.membudget`; override
+    with ``micro_batch`` / ``eval_batch`` or ``memory_budget_mb``): ``batch_size`` stays the
+    optimiser batch, the gradients of the chunks are accumulated.
     """
     n = ids.shape[0]
     order = np.random.default_rng(seed).permutation(n)
     n_val = int(n * val_fraction) if n >= 10 else 0
     val_idx, train_idx = order[:n_val], order[n_val:]
-    ids_t = torch.from_numpy(ids.astype(np.int16))
-    time_t = torch.from_numpy(time_s.astype(np.float32))
+    ids_t = torch.from_numpy(np.asarray(ids, dtype=np.int16))  # no copy when already int16
+    time_t = torch.from_numpy(np.asarray(time_s, dtype=np.float32))
+    if micro_batch is None:
+        packets = int(ids.shape[1])
+        micro_batch = plan_micro_batch(
+            model.cfg, packets, batch_size, training=True, budget_mb=memory_budget_mb,
+            what="pretraining",
+        ).micro  # fmt: skip
+        eval_batch = eval_batch or plan_micro_batch(
+            model.cfg, packets, 1024, training=False, budget_mb=memory_budget_mb,
+            what="pretraining validation",
+        ).micro  # fmt: skip
+    if lr_find is not None and lr_find.micro_batch is None:
+        lr_find = replace(lr_find, micro_batch=micro_batch)
 
     def loss_fn(m: RawAnomalyNet, batch: tuple[torch.Tensor, ...]) -> torch.Tensor:
         return m.pretrain_loss(batch[0].long(), batch[1])
@@ -114,5 +136,5 @@ def pretrain(
         model, loss_fn, train, val, epochs=epochs, batch_size=batch_size, lr=lr,
         weight_decay=weight_decay, patience=patience, seed=seed, on_epoch=on_epoch,
         lr_find=lr_find, lr_mult=lr_mult, schedule_kind=schedule_kind,
-        lr_precomputed=lr_precomputed,
+        lr_precomputed=lr_precomputed, micro_batch=micro_batch, eval_batch=eval_batch,
     )  # fmt: skip

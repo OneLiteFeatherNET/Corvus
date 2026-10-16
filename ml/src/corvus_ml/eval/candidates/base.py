@@ -84,6 +84,10 @@ class Candidate(ABC):
         # Set by the tuner: called as ``on_epoch(epoch, val_loss)``; may raise to prune the run.
         self.on_epoch = None
 
+    def inference_rows(self, x: np.ndarray) -> int | None:
+        """Rows of ``x`` to feed an exported graph at once (memory cap); None: all of them."""
+        return None
+
     def calibrated_score(self, data: EvalData) -> np.ndarray:
         """The score a deployed model outputs: ``score`` mapped through the calibration."""
         raw = self.score(data)

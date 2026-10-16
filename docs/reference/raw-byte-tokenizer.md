@@ -206,8 +206,48 @@ Parameters of both candidates (all optional; unknown keys are errors): `epochs` 
 `heads`, `ffn_mult` 2, `dropout` 0.1, `local_dim` 32, `local_layers` 1, `local_type`, `local_heads` 2,
 `macro_layers`, `macro_pool`, `pretrain_epochs` 0, `pretrain_lr` 1e-3, `init_from`, `checkpoint_out`,
 `p_token` 0.15, `p_packet` 0.1, `first_tokens` 2, `max_masked` 2048, `score_period` 8,
-`score_passes` 2. Training is AdamW with linear warmup and cosine decay, gradient clipping and early
-stopping on the validation loss.
+`score_passes` 2, `score_batch` 16, `memory_budget_mb` (see below). Training is AdamW with linear warmup
+and cosine decay, gradient clipping and early stopping on the validation loss.
+
+### Memory behaviour
+
+The packet transformer attends over all packets of a window, so the activation memory of one window grows
+with the square of `max_packets` (the byte transformer inside a packet adds a term linear in it). Measured on
+a 4-CPU machine with the default model (`d_model` 64, 2 layers, 4 heads, `local_dim` 32, 48 tokens per packet):
+
+| `max_packets` | training, per window | scoring, per window |
+|---|---|---|
+| 512 | about 0.11 GiB | about 0.06 GiB |
+| 1024 | about 0.25 GiB | about 0.12 GiB |
+| 2048 | about 0.72 GiB | about 0.26 GiB |
+
+A batch of 16 windows at 2048 packets therefore needs about 12 GiB, more than the default job pod limit (8 GiB).
+The ONNX parity check (64 test windows in one session run) needed about 17 GiB, and a validation pass over
+a whole split in one go more still. Every pass over raw windows is capped:
+
+- **Estimate.** With `P` packets, `T = max_tokens_per_packet`, `d = d_model`, `dl = local_dim` and 4-byte floats,
+  `global_att = heads * (P+1)^2 * 4` and `local_att = local_heads * T^2 * P * 4` (0 for `local_type = "cnn"`).
+  Training: `4 * (layers * global_att + local_layers * local_att) + local_layers * (6 + 2 * ffn_mult) * P*T*dl*4
+  + layers * (8 + 2 * ffn_mult) * (P+1)*d*4 + 3 * max_masked * vocab * 4`. Scoring: `3 * max(global_att, local_att)
+  + (6 + 2 * ffn_mult) * P*T*dl*4`. JEPA objectives add one scoring pass, macro windows multiply by
+  `macro_windows`. The estimate is 1.2 to 1.4 times the measurement (see
+  `ml/src/corvus_ml/membudget.py`; `ml/scripts/measure_raw_memory.py` reproduces the numbers).
+- **Budget.** The activations may use `memory_budget_mb` (candidate parameter), else the environment variable
+  `CORVUS_ML_MEMORY_BUDGET_MB`, else half of the container memory limit (cgroup `memory.max`, else the installed
+  RAM). The other half is for the window tensors, weights, optimiser state and runtimes.
+- **Micro-batch.** A pass processes at most `budget / estimate` windows (at least 1). `batch_size` stays the
+  optimiser batch: the gradients of the micro-batches are accumulated, so the update is that of the whole batch
+  (for the masked-token loss, which divides by the number of masked tokens of a chunk, only approximately).
+  Training, pretraining, the LR range test (same `batch_size`, same micro-batch), validation, `score_batch`, the
+  kNN memory bank, the ONNX parity run and the benchmark batch are all capped. A reduced micro-batch is logged
+  at warning level (`micro-batch 4 instead of 16 ...`). Smaller micro-batches only cost time.
+
+Rule of thumb: memory per window is proportional to `max_packets` squared, so halving `max_packets` divides the
+attention part by four. With the default model and the default 4 GiB budget (8 GiB pod) the micro-batch is
+about 4 windows at 2048 packets, 13 at 1024 and the whole batch of 16 at 512. If a job is still killed, lower
+`memory_budget_mb` (or raise `api.jobs.memoryLimit` in the Helm chart, `CORVUS_API_JOB_K8S_MEMORY_LIMIT`); the
+resident window tensors (`windows * P * T * 2` bytes as `int16`, plus a copy per split) come on top of the
+budget.
 
 ## 7. Pretraining
 
@@ -367,7 +407,8 @@ not keep up", the capacity gauge is a forecast.
 
 - Memory: a window of 2048 packets by 48 tokens is 196 KiB as `int16`; the evaluation holds the whole
   dataset in memory (`max_windows` caps it, default 200 000 in jobs). Use `window_seconds` / `max_packets`
-  to size it.
+  to size it. Training memory beyond the dataset is bounded by the micro-batching of section 6
+  ("Memory behaviour") and grows with `max_packets` squared.
 - The tokenizer sees what the lake keeps: serverbound play payloads and the clientbound motion allowlist,
   truncated at 2048 bytes. Chat, signs and other private types never reach it.
 - `raw` has a short retention (21 days by default). A raw-byte build of an old snapshot fails with "no raw

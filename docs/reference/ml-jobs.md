@@ -150,6 +150,7 @@ message names each reason.
 | `select_by` | `recall@fpr0.1pct` | metric that picks the candidate |
 | `tune` | off | `true` or an object (`trials`, `timeout_s`, `storage`, `study_name`, `tune_windows`, `space`): an Optuna study per tunable candidate before the evaluation, see section 8 of [raw-byte-tokenizer.md](raw-byte-tokenizer.md). The API has no `tune` job type, so a search is an `evaluate` or `train` job with this parameter; the result lists `best_params` per candidate |
 | `window_seconds`, `stride_seconds`, `max_packets`, `overflow`, `min_packets`, `macro_window_seconds`, `max_windows` | from the build | raw-byte candidates only: override the window configuration of the raw build (`max_windows` 200 000 caps the dataset); refused for other candidates |
+| `memory_budget_mb` (inside a raw candidate's parameters) | half of the pod memory limit | activation memory a raw-byte candidate may use; larger batches run as accumulated micro-batches. Attention memory grows with `max_packets` squared, see the rule of thumb in section 6 of [raw-byte-tokenizer.md](raw-byte-tokenizer.md). The pod limit is `api.jobs.memoryLimit` in the Helm chart (`CORVUS_API_JOB_K8S_MEMORY_LIMIT`, default 8Gi); the environment variable `CORVUS_ML_MEMORY_BUDGET_MB` overrides the budget for the whole process |
 | `model_name`, `version`, `domain` (`train`) | candidate name, `<snapshot8>-<job8>`, `general` | registry fields; the registered name is `<model_name>-<game_context>` |
 
 ## 4. Output semantics and calibration
