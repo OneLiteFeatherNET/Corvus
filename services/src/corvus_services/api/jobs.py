@@ -168,6 +168,10 @@ class K8sJobConfig:
     backoff_limit: int
     service_account: str | None = None
     env_secret: str | None = None
+    scratch_size_limit: str = "20Gi"
+
+
+SCRATCH_MOUNT = "/scratch"
 
 
 class KubernetesRunner:
@@ -198,7 +202,15 @@ class KubernetesRunner:
             "image": c.image,
             "command": list(c.command),
             "args": [spec.type.value],
-            "env": [{"name": k, "value": v} for k, v in spec.env().items()],
+            "env": [
+                {"name": k, "value": v}
+                for k, v in {
+                    **spec.env(),
+                    "CORVUS_JOB_SCRATCH_DIR": SCRATCH_MOUNT,
+                    "TMPDIR": SCRATCH_MOUNT,
+                }.items()
+            ],
+            "volumeMounts": [{"name": "scratch", "mountPath": SCRATCH_MOUNT}],
             "resources": {
                 "requests": {"cpu": c.cpu_request, "memory": c.memory_request},
                 "limits": {"cpu": c.cpu_limit, "memory": c.memory_limit},
@@ -213,6 +225,8 @@ class KubernetesRunner:
         pod_spec: dict[str, Any] = {
             "restartPolicy": "Never",
             "containers": [container],
+            # Feature builds can be large: scratch space on a sized emptyDir, not the image layer.
+            "volumes": [{"name": "scratch", "emptyDir": {"sizeLimit": c.scratch_size_limit}}],
             "securityContext": {"runAsNonRoot": True, "seccompProfile": {"type": "RuntimeDefault"}},
         }
         if c.service_account:
@@ -275,6 +289,7 @@ def build_runner(settings: ApiSettings) -> JobRunner:
         backoff_limit=settings.job_k8s_backoff_limit,
         service_account=settings.job_k8s_service_account,
         env_secret=settings.job_k8s_env_secret,
+        scratch_size_limit=settings.job_k8s_scratch_size_limit,
     )
     return KubernetesRunner(client.BatchV1Api(), cfg)
 

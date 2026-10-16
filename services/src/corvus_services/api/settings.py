@@ -111,6 +111,8 @@ class ApiSettings(BaseSettings):
     job_k8s_ttl_after_finished_s: int = Field(default=86_400, ge=0)
     job_k8s_active_deadline_s: int = Field(default=14_400, ge=1)
     job_k8s_backoff_limit: int = Field(default=0, ge=0)
+    # Size limit of the emptyDir mounted at /scratch (CORVUS_JOB_SCRATCH_DIR) in job pods.
+    job_k8s_scratch_size_limit: str = "20Gi"
     # Name of a Secret that is exposed as environment (S3/DB credentials of the job); optional.
     job_k8s_env_secret: str | None = None
 
