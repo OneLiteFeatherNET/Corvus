@@ -16,6 +16,25 @@ The control plane runs the same harness as the `evaluate` and `train` jobs; see
 [ml-jobs.md](../reference/ml-jobs.md). Models on raw packet bytes (`raw_hier_classifier`,
 `raw_hier_anomaly`) and the Optuna search (`corvus-eval tune`) are covered in sections 6 and 7.
 
+## Learning rate: `auto`
+
+Every torch candidate (`gru_autoencoder`, `cnn1d`, `raw_hier_classifier`, `raw_hier_anomaly`) takes
+`lr = "auto"` (and the raw-byte models `pretrain_lr = "auto"`). Before the training a range test finds
+the learning rate on a copy of the model; a number keeps the fixed behaviour. Optional parameters (with
+the prefix `pretrain_` for the pretraining): `lr_steps` (default 60), `lr_rule` (`valley` or
+`steepest`), `lr_mult` (factor on the suggestion, what Optuna tunes), `lr_schedule` (`cosine` or `wsd`).
+
+```
+uv run corvus-eval lr-find --config eval.toml --out reports/lr [--steps 100]
+```
+
+prints the suggestion and the schedule per game context and candidate and writes
+`<out>/lr/<context>__<candidate>.json` and `.csv` (`lr,smoothed_loss`; plus a `.png` if matplotlib
+happens to be installed). `run` and `tune` put the same information in `report.md` ("Learning rate")
+and `report.json` (`training.lr_plan`, `training.pretrain_lr_plan`), and the `evaluate` / `train`
+jobs return it in `result.contexts.<ctx>.candidates.<name>.training`. How it works and what its limits
+are: [learning-rate-finder.md](../explanation/learning-rate-finder.md).
+
 ## 1. Inputs
 
 | Table | Source | Needed columns |
@@ -230,7 +249,7 @@ uv run corvus-eval tune --config eval.toml --out reports/tuned [--trials 30]
 ```
 
 For every game context and every tunable candidate (the raw-byte models, `gru_autoencoder`, `cnn1d`) an
-Optuna study searches learning rate, weight decay and the size parameters (for the raw-byte models also
+Optuna study searches learning rate (with `lr = "auto"` a multiplier `lr_mult` of 0.3 to 3 around the found value), weight decay and the size parameters (for the raw-byte models also
 `d_model`, `layers`, `dropout`, `window_seconds` and `max_packets`) with a TPE sampler and a median pruner
 and the seed `run.seed`. The objective is the best validation loss, so the search never sees the test
 split. The candidate is then evaluated with the best parameters; the report gets a "Hyper-parameter

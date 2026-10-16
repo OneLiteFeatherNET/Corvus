@@ -32,7 +32,35 @@ def _parser() -> argparse.ArgumentParser:
     q = sub.add_parser("pretrain", help="masked pretraining of a raw-byte model, saves checkpoints")
     q.add_argument("--config", required=True, type=Path, help="eval.toml with a [raw] table")
     q.add_argument("--out", required=True, type=Path, help="directory for pretrain/<context>.pt")
+    f = sub.add_parser(
+        "lr-find",
+        help="learning-rate range test of the torch candidates (nothing is trained)",
+    )
+    f.add_argument("--config", required=True, type=Path, help="eval.toml")
+    f.add_argument("--out", required=True, type=Path, help="writes <out>/lr/<context>__<cand>.*")
+    f.add_argument("--steps", type=int, default=None, help="range-test steps (default: lr_steps)")
     return p
+
+
+def format_lr_find(found: dict, out_dir: Path) -> str:
+    lines = []
+    for ctx, per_cand in found.items():
+        for name, e in per_cand.items():
+            find = e.get("lr_find", {})
+            s = e["schedule"]
+            sug = ", ".join(f"{k}={v:.3g}" for k, v in find.get("suggestions", {}).items() if v)
+            lines.append(
+                f"{ctx} / {name}: lr {e['lr']:.3g} (rule {find.get('rule')}; {sug}; "
+                f"{find.get('steps_run')} steps"
+                + (f", stopped: {find['stop_reason']}" if find.get("stopped_early") else "")
+                + f"); schedule {s['kind']} {s['total_steps']} steps, warmup {s['warmup_steps']}, "
+                f"floor {s['floor_lr']:.3g}"
+            )
+            pre = (e.get("pretrain") or {}).get("lr_find")
+            if pre:
+                lines.append(f"  pretraining: lr {e['pretrain']['lr']:.3g} (rule {pre['rule']})")
+    lines.append(f"curves written to {out_dir / 'lr'}")
+    return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -54,6 +82,11 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         raise
     cfg = EvalConfig.load(args.config)
+    if args.command == "lr-find":
+        from corvus_ml.eval.runner import find_learning_rates
+
+        print(format_lr_find(find_learning_rates(cfg, args.out, steps=args.steps), args.out))
+        return 0
     if args.command == "pretrain":
         from corvus_ml.eval.runner import pretrain_checkpoints
 

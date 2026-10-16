@@ -19,6 +19,7 @@ from corvus_ml.eval.candidates.base import Candidate
 from corvus_ml.eval.config import EvalConfig
 from corvus_ml.eval.data import LABEL_CHEAT, LABEL_LEGIT, LABEL_UNLABELLED, EvalData
 from corvus_ml.eval.dataset import build_eval_data, load_dataset
+from corvus_ml.eval.lr import lr_kwargs
 from corvus_ml.eval.split import group_split, subsample_groups
 from corvus_ml.eval.synthetic import generate
 from corvus_ml.features.spec import SPEC_FILE, FeatureSpec
@@ -344,7 +345,11 @@ def run_candidate(
             "epochs_run": len(cand.history.train_loss),
             "lr": cand.lr_used,
             "lr_range_suggested": cand.lr_range.suggested_lr if cand.lr_range else None,
+            "lr_plan": cand.history.lr_plan,
         }
+        pre = getattr(cand, "pretrain_history", None)
+        if pre is not None and pre.lr_plan is not None:
+            res["training"]["pretrain_lr_plan"] = pre.lr_plan
     spec = spec or FeatureSpec.current(seq_len=cfg.seq_len)
     res.update(_export_and_bench(cand, cfg, data, split.test, out_dir / "onnx" / ctx, fprs, spec))
     if cfg.learning_curve:
@@ -401,21 +406,128 @@ def pretrain_checkpoints(cfg: EvalConfig, out_dir: Path) -> dict:
         model_cfg = cand.model_config(sub)  # type: ignore[attr-defined]
         net = RawAnomalyNet(replace(model_cfg, macro_windows=1))
         ids, t = flatten_windows(pool.raw_ids, pool.raw_time)  # type: ignore[arg-type]
+        batch = int(params.get("batch_size", 16))
+        wd = float(params.get("weight_decay", 0.01))
         hist = pretrain(
-            net, ids, t, epochs=int(params.get("pretrain_epochs", 5)),
-            batch_size=int(params.get("batch_size", 16)), lr=float(params.get("pretrain_lr", 1e-3)),
-            weight_decay=float(params.get("weight_decay", 0.01)),
-            patience=int(params.get("patience", 3)), seed=cfg.seed,
+            net, ids, t, epochs=int(params.get("pretrain_epochs", 5)), batch_size=batch,
+            weight_decay=wd, patience=int(params.get("patience", 3)), seed=cfg.seed,
+            **lr_kwargs(params, prefix="pretrain_", default_lr=1e-3, batch_size=batch,
+                        seed=cfg.seed, weight_decay=wd),
         )  # fmt: skip
         path = save_checkpoint(out_dir / "pretrain" / f"{_safe(ctx)}.pt", net)
         out[ctx] = {
             "checkpoint": str(path),
             "windows": int(len(ids)),
+            "lr": hist.lr_plan,
             "epochs_run": len(hist.train_loss),
             "train_loss": hist.train_loss,
             "val_loss": hist.val_loss,
         }
     return out
+
+
+def find_learning_rates(cfg: EvalConfig, out_dir: Path, *, steps: int | None = None) -> dict:
+    """Range test for every torch candidate and game context; nothing is trained.
+
+    Each candidate is "fitted" with ``lr = "auto"`` and zero epochs, so the finder sees exactly the
+    model, loss and training windows (and batch size) a real run would. The schedule is computed
+    for the configured number of epochs. Writes ``lr/<context>__<candidate>.json`` (and ``.csv``
+    with the curve) below ``out_dir``.
+    """
+    from corvus_ml.eval.lr import AUTO_FLOOR_FRAC, LrSchedule, total_steps, warmup_steps_for
+    from corvus_ml.eval.training import seed_everything
+
+    seed_everything(cfg.seed, cfg.threads)
+    data, _ = load_data(cfg)
+    if cfg.unlabelled == "assume_legit":
+        data.label[data.label == LABEL_UNLABELLED] = LABEL_LEGIT
+    out: dict = {}
+    for ctx in cfg.contexts or sorted(set(data.game_context.tolist())):
+        sub = data.take(np.flatnonzero(data.game_context == ctx))
+        if len(sub) == 0:
+            continue
+        split = group_split(sub.label, sub.group_codes(), cfg.seed, cfg.split)
+        for name, params in cfg.candidates.items():
+            cls = cand_pkg.REGISTRY[name]
+            if not cls.tunable:  # torch candidates only: sklearn models have no learning rate
+                continue
+            train, val = _training_sets(cls, sub, split.train, split.val)
+            if len(train) == 0 or (cls.supervised and len(np.unique(train.label)) < 2):
+                continue
+            epochs = int(params.get("epochs", 10))
+            probe = {**params, "lr": "auto", "epochs": 0, "pretrain_epochs": 0}
+            if steps is not None:
+                probe["lr_steps"] = steps
+            probe.pop("init_from", None)
+            cand = cand_pkg.create(name, cfg.seed, cfg.threads, probe)
+            if cls.pretrains:
+                cand.fit(train, val if len(val) else None, pool=sub.take(split.train))
+            else:
+                cand.fit(train, val if len(val) else None)
+            entry = dict(cand.history.lr_plan)
+            n_tr = len(train)
+            batch = int(params.get("batch_size", 16 if cls.pretrains else 64))
+            total = total_steps(n_tr, batch, epochs)
+            peak = cand.lr_used
+            entry["schedule"] = LrSchedule(
+                total, warmup_steps_for(total), peak, peak * AUTO_FLOOR_FRAC,
+                str(params.get("lr_schedule", "cosine")),
+            ).to_dict()  # fmt: skip
+            entry["train_windows"] = n_tr
+            if cls.pretrains and int(params.get("pretrain_epochs", 0)) > 0:
+                pool = sub.take(split.train)
+                pre_params = {**params, "pretrain_lr": "auto"}
+                pre_cand = cand_pkg.create(name, cfg.seed, cfg.threads, pre_params)
+                entry["pretrain"] = pre_cand.probe_pretrain_lr(train, pool)  # type: ignore[attr-defined]
+            out.setdefault(ctx, {})[name] = entry
+    write_lr_find(out, out_dir)
+    return out
+
+
+def write_lr_find(found: dict, out_dir: Path) -> list[Path]:
+    """One JSON and one CSV (``lr,smoothed_loss``) per (context, candidate); plus a PNG if
+    matplotlib happens to be installed (it is not a dependency)."""
+    target = out_dir / "lr"
+    target.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for ctx, per_cand in found.items():
+        for name, entry in per_cand.items():
+            stem = f"{_safe(ctx)}__{name}"
+            js = target / f"{stem}.json"
+            js.write_text(json.dumps(entry, indent=2))
+            written.append(js)
+            curve = entry.get("lr_find", {}).get("curve", [])
+            csv = target / f"{stem}.csv"
+            csv.write_text(
+                "lr,smoothed_loss\n" + "".join(f"{lr:.8g},{loss:.8g}\n" for lr, loss in curve)
+            )
+            written.append(csv)
+            png = _plot_curve(target / f"{stem}.png", curve, entry)
+            if png is not None:
+                written.append(png)
+    return written
+
+
+def _plot_curve(path: Path, curve: list, entry: dict) -> Path | None:
+    try:
+        import matplotlib  # not a dependency: plot only if present
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ModuleNotFoundError:
+        return None
+    if not curve:
+        return None
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.plot([c[0] for c in curve], [c[1] for c in curve])
+    ax.axvline(entry["lr"], color="tab:red", linestyle="--", label=f"lr {entry['lr']:.2g}")
+    ax.set_xscale("log")
+    ax.set_xlabel("learning rate")
+    ax.set_ylabel("smoothed loss")
+    ax.legend()
+    fig.savefig(path, dpi=120, bbox_inches="tight")
+    plt.close(fig)
+    return path
 
 
 def _safe(text: str) -> str:

@@ -132,6 +132,15 @@ def _read_params(
         raise JobError("candidates must be a list of names or an object name -> parameters")
     if not candidates:
         raise JobError("candidates must not be empty")
+    from corvus_ml.eval.lr import parse_lr
+
+    for cand_name, cand_params in candidates.items():
+        for key in ("lr", "pretrain_lr"):
+            if key in cand_params:
+                try:
+                    cand_params[key] = parse_lr(cand_params[key])
+                except ValueError as exc:
+                    raise JobError(f"candidates.{cand_name}.{key}: {exc}") from exc
     bench_raw = p.mapping("benchmark")
     known = {f.name for f in dataclasses.fields(BenchConfig)}
     if set(bench_raw) - known:
@@ -263,6 +272,13 @@ def _eval_config(
     )
 
 
+def _training_info(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Learning rate chosen for the candidate and why (rule, schedule, downsampled curve)."""
+    t = candidate.get("training") or {}
+    out = {k: t[k] for k in ("lr", "lr_plan", "pretrain_lr_plan") if t.get(k) is not None}
+    return {"training": json_safe(out)} if out else {}
+
+
 def _summary(info: dict[str, Any], chosen: str | None) -> dict[str, Any]:
     tuned = {
         name: {k: t[k] for k in ("n_trials", "n_complete", "n_pruned", "best_value", "best_params")}
@@ -275,7 +291,7 @@ def _summary(info: dict[str, Any], chosen: str | None) -> dict[str, Any]:
         "players": info["players"],
         "candidates": {
             name: (
-                {"status": "ok", **registry_metrics(c)}
+                {"status": "ok", **registry_metrics(c), **_training_info(c)}
                 if c["status"] == "ok"
                 else {"status": c["status"], "reason": c.get("reason")}
             )

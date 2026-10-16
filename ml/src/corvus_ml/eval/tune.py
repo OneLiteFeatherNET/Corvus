@@ -21,6 +21,7 @@ import numpy as np
 from corvus_ml.eval import candidates as cand_pkg
 from corvus_ml.eval.config import EvalConfig, TuneConfig
 from corvus_ml.eval.data import LABEL_UNLABELLED, EvalData
+from corvus_ml.eval.lr import is_auto
 from corvus_ml.eval.split import Split
 from corvus_ml.eval.training import seed_everything
 from corvus_ml.raw.spec import WindowConfig
@@ -54,9 +55,22 @@ WINDOW_SPACE: dict[str, Range] = {
 }
 
 
-def space_for(name: str, tune: TuneConfig, windows: bool) -> dict[str, Range]:
-    """Default space of the candidate, with ``[tune.space]`` overrides applied."""
+# With ``lr = "auto"`` the learning rate is not searched blindly: Optuna tunes a multiplier around
+# the value the range test found (log-uniform, a factor of ~3 either way).
+LR_MULT_RANGE: Range = ("log", 0.3, 3.0)
+
+
+def space_for(
+    name: str, tune: TuneConfig, windows: bool, auto_lr: bool = False
+) -> dict[str, Range]:
+    """Default space of the candidate, with ``[tune.space]`` overrides applied.
+
+    ``auto_lr``: the candidate's ``lr`` is ``"auto"``; ``lr`` is then replaced by ``lr_mult``.
+    """
     space = dict(DEFAULT_SPACES.get(name, _COMMON))
+    if auto_lr and "lr" in space:
+        del space["lr"]
+        space["lr_mult"] = LR_MULT_RANGE
     if windows:
         space.update(WINDOW_SPACE)
     for key, value in tune.space.items():
@@ -140,7 +154,7 @@ def tune_candidate(
     source = data.meta.get("raw_source")
     base_window: WindowConfig | None = data.meta["raw_spec"].window if source is not None else None
     windows = bool(tune.tune_windows and source is not None)
-    space = space_for(name, tune, windows)
+    space = space_for(name, tune, windows, auto_lr=is_auto(cfg.candidates[name].get("lr")))
     parts = player_parts(data, split)
     base_params = dict(cfg.candidates[name])
     cache: dict[WindowConfig, EvalData] = {}

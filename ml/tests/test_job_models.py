@@ -289,3 +289,25 @@ def test_the_best_candidate_by_the_selection_metric_wins_and_ties_prefer_low_lat
     }
     assert choose_candidate(candidates, "recall@fpr0.1pct") == "fast"
     assert choose_candidate({"x": cand(0.5, 1.0, parity=False)}, "recall@fpr0.1pct") is None
+
+
+def test_a_bad_lr_fails_the_job_and_auto_is_accepted(tmp_path, tables):
+    env = with_features(tmp_path, tables)
+
+    with pytest.raises(JobError, match=r"candidates\.cnn1d\.lr"):
+        evaluate(make_context("evaluate", candidates={"cnn1d": {"lr": "fast"}}), env)
+
+
+def test_the_job_summary_carries_the_learning_rate_decision(tmp_path, tables):
+    env = with_features(tmp_path, tables)
+    params = {
+        **QUICK,
+        "candidates": {"cnn1d": {"epochs": 1, "batch_size": 16, "lr": "auto", "lr_steps": 10}},
+        "game_context": "pvp",
+    }
+
+    outcome = evaluate(make_context("evaluate", **params), env)
+
+    plan = outcome.result["contexts"]["pvp"]["candidates"]["cnn1d"]["training"]["lr_plan"]
+    assert plan["source"] == "auto"
+    assert plan["lr_find"]["curve"]

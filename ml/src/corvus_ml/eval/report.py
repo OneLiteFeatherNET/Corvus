@@ -116,6 +116,7 @@ def to_markdown(report: dict) -> str:
         if skipped:
             lines += ["Skipped:", *skipped, ""]
         lines += _tune_section(info)
+        lines += _lr_section(info)
         lines += _sizes_section(info)
         lines += _int8_section(info, fprs)
         lines += _confusion_section(info, fprs)
@@ -142,6 +143,47 @@ def _tune_section(info: dict) -> list[str]:
             f"Best parameters: {best or 'none (no complete trial)'}",
             "",
         ]
+    return lines
+
+
+def _lr_line(plan: dict, label: str) -> str:
+    s = plan["schedule"]
+    head = f"{label}: lr {plan['lr']:.3g} ({plan['source']}"
+    find = plan.get("lr_find")
+    if find:
+        sug = ", ".join(f"{k} {v:.3g}" for k, v in find["suggestions"].items() if v)
+        head += (
+            f", rule {find['rule']}: {sug}; x{plan['multiplier']:.3g} multiplier, "
+            f"{find['steps_run']} range-test steps"
+            + (f", stopped: {find['stop_reason']}" if find["stopped_early"] else "")
+        )
+    return (
+        f"{head}); {s['kind']} schedule over {s['total_steps']} steps, warmup "
+        f"{s['warmup_steps']}, floor {s['floor_lr']:.3g}."
+    )
+
+
+def _lr_section(info: dict) -> list[str]:
+    lines: list[str] = []
+    for name, c in info["candidates"].items():
+        plan = (c.get("training") or {}).get("lr_plan")
+        pre = (c.get("training") or {}).get("pretrain_lr_plan")
+        if not plan and not pre:
+            continue
+        if not lines:
+            lines = ["### Learning rate", ""]
+        for label, p in ((f"`{name}`", plan), (f"`{name}` pretraining", pre)):
+            if not p:
+                continue
+            lines += [_lr_line(p, label), ""]
+            curve = (p.get("lr_find") or {}).get("curve") or []
+            if curve:
+                pts = curve[:: max(1, len(curve) // 8)]
+                lines += [
+                    "Range-test curve (lr: smoothed loss; full curve in the JSON report): "
+                    + ", ".join(f"{a:.2g}: {b:.3g}" for a, b in pts),
+                    "",
+                ]
     return lines
 
 
