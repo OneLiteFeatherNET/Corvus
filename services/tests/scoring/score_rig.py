@@ -183,6 +183,7 @@ class Rig:
             "metrics_port": 0,
             "score_models_dir": tmp_path / "models",
         }
+        memory_budget_bytes = settings.pop("memory_budget_bytes", None)
         base.update(settings)
         self.settings = ScoreSettings(**base)
         self.clock = FakeClock()
@@ -199,6 +200,7 @@ class Rig:
             2,
             self.metrics,
             self.settings.score_p99_budget_ms or None,
+            memory_budget_bytes,
         )
         self.writer = ScoreWriter(
             self.catalog,

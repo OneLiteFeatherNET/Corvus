@@ -124,6 +124,19 @@ class ScoreMetrics:
             ["model"],
             registry=r,
         )
+        self.model_estimated_window_bytes = Gauge(
+            "corvus_score_model_estimated_window_bytes",
+            "Estimated ONNX Runtime activation bytes of one full window of a raw-byte model "
+            "(default-size model); compare with the memory budget of the replica",
+            ["model"],
+            registry=r,
+        )
+        self.model_max_rows = Gauge(
+            "corvus_score_model_max_rows",
+            "Rows per ONNX run of a raw-byte model after the memory bound (at least 1)",
+            ["model"],
+            registry=r,
+        )
         self.model_estimated_capacity_players = Gauge(
             "corvus_score_model_estimated_capacity_players",
             "Estimated concurrent players this replica serves with the model alone: parallel "
