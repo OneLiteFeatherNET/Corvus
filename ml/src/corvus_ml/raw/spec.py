@@ -40,9 +40,9 @@ class PacketConfig:
 class WindowConfig:
     """Time windows over the packets of one segment (never across segments)."""
 
-    window_seconds: float = 10.0
-    stride_seconds: float = 5.0
-    max_packets: int = 1024
+    window_seconds: float = 20.0
+    stride_seconds: float = 10.0
+    max_packets: int = 2048
     overflow: str = "recent"  # recent = keep the newest packets, uniform = evenly spaced subsample
     min_packets: int = 8  # windows with fewer packets are dropped
     # Second level: this many seconds of consecutive windows form one macro window (needs

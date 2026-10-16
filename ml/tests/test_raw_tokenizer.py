@@ -327,7 +327,7 @@ def test_window_differences_are_ignored_only_when_asked(saved):
     directory, spec = saved
     from dataclasses import replace
 
-    other = replace(spec, window=WindowConfig(window_seconds=20.0, stride_seconds=10.0))
+    other = replace(spec, window=WindowConfig(window_seconds=8.0, stride_seconds=4.0))
     mine = FeatureSpec.current(raw_bytes=spec)
     theirs = FeatureSpec.current(raw_bytes=other)
 

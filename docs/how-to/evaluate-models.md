@@ -204,9 +204,9 @@ others, because they cut their own time windows:
 [raw]
 dir = "lake/raw"          # features/<snapshot>/raw as built by build_features kind=raw_bytes
 # or: [raw.synthetic] (below)
-window_seconds = 10.0     # any window key overrides what the build recorded
-stride_seconds = 5.0
-max_packets = 1024
+window_seconds = 20.0     # any window key overrides what the build recorded
+stride_seconds = 10.0
+max_packets = 2048
 overflow = "recent"       # or "uniform"
 min_packets = 8
 # macro_window_seconds = 60.0   # second-level model over consecutive windows (stride == window)

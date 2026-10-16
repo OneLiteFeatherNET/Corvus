@@ -140,11 +140,27 @@ Per (session, segment), never across segments:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `window_seconds` | 10 | length of a window |
-| `stride_seconds` | 5 | distance between window starts (the grid is anchored at the first packet of the segment) |
-| `max_packets` | 1024 | packets per window; on overflow `overflow = "recent"` keeps the newest, `"uniform"` an evenly spaced subsample |
+| `window_seconds` | 20 | length of a window |
+| `stride_seconds` | 10 | distance between window starts (the grid is anchored at the first packet of the segment) |
+| `max_packets` | 2048 | packets per window; on overflow `overflow = "recent"` keeps the newest, `"uniform"` an evenly spaced subsample |
 | `min_packets` | 8 | windows with fewer packets are dropped |
 | `macro_window_seconds` | none | hierarchy over minutes: this many seconds of consecutive windows form one macro window; needs `stride_seconds == window_seconds` |
+
+The defaults (20 s windows, half-window overlap, 2048 packets) follow the traffic of one real player.
+Pilot measurement 2026-10-16, single player (lobby and survival, 2 h 10 min, 269,566 packets), packets per
+window:
+
+| Window | p50 | p90 | p99 | max |
+|---|---|---|---|---|
+| 20 s, both directions | 524 | 1,386 | 1,969 | 8,180 |
+| 20 s, serverbound only | | | 888 | |
+| 20 s, clientbound only | | | 1,084 | |
+| 10 s (previous default), both directions | | | 1,084 | |
+
+`max_packets = 2048` therefore covers the p99 of a 20 s window, whereas the former 1024 already truncated
+a 10 s window at p99. The windows above the cap are handled by `overflow`. This is one player; re-measure
+with more players before tightening or raising the cap. A model keeps the window recorded in its own
+spec: the defaults only apply to new builds.
 
 A partial window at the end of a segment is kept only if it contains packets that no earlier window
 contained. A segment shorter than one window gives one window. In a macro window a missing window
@@ -226,7 +242,7 @@ parameters, and the exported spec carries the best window.
 | `layers` | 1 to 4 |
 | `dropout` | 0 to 0.3 |
 | `window_seconds` | 5, 10, 20 (stride and macro window scale with it) |
-| `max_packets` | 256, 512, 1024 |
+| `max_packets` | 256, 512, 1024, 2048 |
 | `hidden`, `latent` (`gru_autoencoder`), `channels` (`cnn1d`) | categorical |
 
 `[tune]` keys: `trials` 20, `timeout_s`, `storage`, `study_name`, `tune_windows` true, `space` (per
@@ -250,7 +266,7 @@ checked on a sample of the test windows (`parity_ok`).
   "tokenizer": {"file": "tokenizer.json", "sha256": "…", "vocab_size": 4096, "mode": "bpe", "byte_mapping": "chr(0x100 + byte)"},
   "layout": {"dt_buckets": 16, "dt_min_ms": 0.5, "dt_max_ms": 5000.0, "protocols": [47, 340, …], "packet_type_max": 255},
   "packet": {"max_tokens_per_packet": 48, "proto_mode": "first"},
-  "window": {"window_seconds": 10.0, "stride_seconds": 5.0, "max_packets": 1024, "overflow": "recent",
+  "window": {"window_seconds": 20.0, "stride_seconds": 10.0, "max_packets": 2048, "overflow": "recent",
              "min_packets": 8, "macro_window_seconds": null},
   "input": {"dtype": "float32", "shape": "(batch, [macro,] packets, max_tokens_per_packet + 1)", "channels": "…"}
 }
@@ -349,7 +365,7 @@ not keep up", the capacity gauge is a forecast.
 
 ## 11. Limits
 
-- Memory: a window of 1024 packets by 48 tokens is 98 KiB as `int16`; the evaluation holds the whole
+- Memory: a window of 2048 packets by 48 tokens is 196 KiB as `int16`; the evaluation holds the whole
   dataset in memory (`max_windows` caps it, default 200 000 in jobs). Use `window_seconds` / `max_packets`
   to size it.
 - The tokenizer sees what the lake keeps: serverbound play payloads and the clientbound motion allowlist,

@@ -115,7 +115,9 @@ partitions of the sessions' start dates. Parameters (all optional): `kind` (`agg
 `train_bytes_per_payload` (256), `max_train_payloads`, `max_train_bytes`, `tokenizer_sessions` (2000),
 `tokenizer_prefix`, `dt_buckets`, `dt_min_ms`, `dt_max_ms`, `protocols`, `packet_type_max`,
 `max_tokens_per_packet` (48), `proto_mode` and the window defaults recorded in the spec (`window_seconds`,
-`stride_seconds`, `max_packets`, `overflow`, `min_packets`, `macro_window_seconds`). The build runs in one
+`stride_seconds`, `max_packets`, `overflow`, `min_packets`, `macro_window_seconds`; new builds default to 20 s
+windows, 10 s stride and 2048 packets, see [raw-byte-tokenizer.md](raw-byte-tokenizer.md) section 5 for the pilot measurement
+behind them). The build runs in one
 process (decryption and tokenization are not parallelised).
 
 **`evaluate`** needs a complete feature build and runs `corvus-eval` on it ([evaluate-models.md](../how-to/evaluate-models.md));

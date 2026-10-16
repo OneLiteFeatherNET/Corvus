@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import math
 
 import numpy as np
 import pytest
@@ -19,7 +20,14 @@ from score_rig import (
 )
 
 from corvus_services.scoring.models import ModelRejectedError, check_raw_shape
-from corvus_services.scoring.raw import RawWindow, estimate_p99_ms, raw_frame, stack_inputs
+from corvus_services.scoring.raw import (
+    RawWindow,
+    estimate_capacity_players,
+    estimate_mean_ms,
+    estimate_p99_ms,
+    raw_frame,
+    stack_inputs,
+)
 from helpers import SESSION
 
 
@@ -405,3 +413,21 @@ def test_the_estimate_scales_with_threads_and_the_anomaly_heads_and_grows_with_p
     assert estimate_p99_ms(512, 2) == pytest.approx(one * 0.6)
     assert estimate_p99_ms(512, 1, anomaly=True) == pytest.approx(one * 2.6)
     assert estimate_p99_ms(64, 1) < estimate_p99_ms(256, 1) < estimate_p99_ms(2048, 1)
+
+
+def test_the_estimate_at_the_default_2048_packets_is_finite_and_continues_the_last_slope():
+    at_1024, at_2048, at_3072 = (estimate_p99_ms(n, 1) for n in (1024, 2048, 3072))
+
+    assert math.isfinite(at_2048)
+    assert at_1024 < at_2048 < at_3072
+    assert at_2048 - at_1024 == pytest.approx(at_3072 - at_2048, rel=1e-6)
+
+
+def test_the_mean_and_p99_estimates_at_2048_packets_agree_and_capacity_is_finite_and_positive():
+    mean, p99 = estimate_mean_ms(2048, 1), estimate_p99_ms(2048, 1)
+    capacity = estimate_capacity_players(8, 1, 10.0, mean)
+
+    assert math.isfinite(mean)
+    assert mean > estimate_mean_ms(1024, 1)
+    assert p99 == pytest.approx(mean * 1.15)
+    assert 0 < capacity < estimate_capacity_players(8, 1, 10.0, estimate_mean_ms(1024, 1))
