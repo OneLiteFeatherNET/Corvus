@@ -70,3 +70,25 @@ jobs:
       - name: Generate static site
         if: steps.detect.outputs.present == 'true'
         run: pnpm exec nuxi generate
+
+  image:
+    name: Build and smoke-test image (ui)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -f ui/Dockerfile -t corvus-ui:ci .
+
+      - name: Entrypoint script is executable
+        run: |
+          docker run --rm --entrypoint sh corvus-ui:ci -c 'test -x /docker-entrypoint.d/15-corvus-ui.envsh'
+
+      - name: nginx starts with the chart settings
+        run: |
+          docker run -d --name ui -e CORVUS_UI_BASE_PATH=/ -e CORVUS_UI_API_UPSTREAM=http://127.0.0.1:9 \
+            -e CORVUS_UI_API_ORIGIN=https://corvus.example.org -p 8080:8080 corvus-ui:ci
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8080/healthz
+          docker logs ui 2>&1 | grep -q 'Launching\|Sourcing.*15-corvus-ui'
+          docker rm -f ui
