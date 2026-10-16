@@ -84,6 +84,20 @@ Behaviour to know when operating the NATS sink:
   `SessionEnd` counters, and shown as `dropped_transport=` in `/corvus stats` and the 60 s log line.
 - On shutdown the plugin flushes with a bounded 3 s timeout and then closes the connection.
 
+### Private CA for NATS and the control plane (`[tls]`)
+
+If NATS (`tls://`, `wss://`) or the control-plane API (`https://`) are served with certificates from a private CA
+(for example a step-ca behind an internal gateway), set `tls.ca_file` to a PEM bundle with that CA. The path is
+relative to `plugins/corvus` or absolute; empty (the default) means the JVM default CAs only.
+
+- The bundle is trusted **in addition to** the JVM default CAs, and only by the plugin's NATS connections (sink and
+  scores) and the blocklist sync client. The JVM-wide truststore is not changed, so other TLS clients of the proxy
+  (Mojang, ...) are unaffected.
+- A chain is accepted if either the JVM default trust or the bundle accepts it. Hostname checks still apply.
+- If `tls.ca_file` is set but unreadable or contains no certificate, the plugin logs an `ERROR` and does not start
+  the NATS sink (nothing is captured when `sink.type = "nats"`), the scores subscription and the blocklist sync. It
+  never falls back silently to the JVM default trust. The proxy itself keeps running; fix the file and restart.
+
 ### Online scores (`[scores]`)
 
 With `sink.type = "nats"` (or `scores.enabled = true`) the plugin also subscribes to `corvus.score.v1.>` and serves

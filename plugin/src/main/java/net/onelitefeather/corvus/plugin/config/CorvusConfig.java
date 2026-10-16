@@ -30,7 +30,8 @@ public record CorvusConfig(
         SinkType sinkType,
         Nats nats,
         Scores scores,
-        BlocklistSync blocklistSync) {
+        BlocklistSync blocklistSync,
+        Tls tls) {
 
     public enum ListMode { ALL, ALLOWLIST }
 
@@ -69,6 +70,13 @@ public record CorvusConfig(
 
         public static final int DEFAULT_INTERVAL_SECONDS = 300;
         public static final int DEFAULT_TIMEOUT_SECONDS = 10;
+    }
+
+    /**
+     * Extra trust for the NATS and control-plane connections: a PEM CA bundle that is trusted in addition to the
+     * JVM default CAs. Empty = JVM default only. Relative paths are resolved against the plugin directory.
+     */
+    public record Tls(String caFile) {
     }
 
     public static final String DEFAULT_TOML = """
@@ -145,6 +153,13 @@ public record CorvusConfig(
             interval_seconds = 300
             timeout_seconds = 10
 
+            [tls]
+            # Optional PEM file with extra CA certificates (for example a private step-ca) trusted IN ADDITION to
+            # the JVM default CAs for [nats] (tls:// and wss://) and [blocklist_sync] (https://). Relative to the
+            # plugin directory, or absolute. Empty = JVM default CAs only. The JVM truststore is not changed.
+            # If the file cannot be read, the NATS sink, scores and blocklist sync are not started (ERROR logged).
+            ca_file = ""
+
             [game_context]
             default = "unknown"
 
@@ -199,7 +214,8 @@ public record CorvusConfig(
                 sinkType,
                 parseNats(toml, sinkType),
                 parseScores(toml, sinkType),
-                parseBlocklistSync(toml));
+                parseBlocklistSync(toml),
+                new Tls(toml.getString("tls.ca_file", "").trim()));
     }
 
     private static BlocklistSync parseBlocklistSync(Toml toml) {

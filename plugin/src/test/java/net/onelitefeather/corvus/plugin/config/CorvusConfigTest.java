@@ -200,4 +200,15 @@ class CorvusConfigTest {
         assertThrows(IllegalArgumentException.class,
                 () -> CorvusConfig.parse("[blocklist_sync]\nenabled = true\n"));
     }
+
+    @Test
+    void tlsCaFileDefaultsToEmpty() {
+        assertEquals("", CorvusConfig.parse("").tls().caFile());
+        assertEquals("", CorvusConfig.parse(CorvusConfig.DEFAULT_TOML).tls().caFile());
+    }
+
+    @Test
+    void tlsCaFileIsParsedAndTrimmed() {
+        assertEquals("certs/step-ca.pem", CorvusConfig.parse("[tls]\nca_file = \" certs/step-ca.pem \"\n").tls().caFile());
+    }
 }
