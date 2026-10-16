@@ -11,6 +11,7 @@ from corvus_services.api.registry import (
     evaluate_gate,
     is_allowed_transition,
 )
+from corvus_services.api.settings import ApiSettings
 
 # --- stage machine --------------------------------------------------------------------------------
 
@@ -72,6 +73,19 @@ def test_gate_requires_latency_strictly_below_the_limit():
 
     assert not result.passed
     assert "p99_latency_ms" in result.reasons[0]
+
+
+def test_gate_accepts_a_200_ms_model_under_the_default_limit():
+    default = ApiSettings().gate_max_p99_latency_ms
+
+    assert evaluate_gate(_model(p99_latency_ms=200.0), [], default).passed
+
+
+def test_gate_still_rejects_a_model_at_or_above_the_configured_limit():
+    assert not evaluate_gate(_model(p99_latency_ms=200.0), [], 150).passed
+    assert not evaluate_gate(
+        _model(p99_latency_ms=5000.0), [], ApiSettings().gate_max_p99_latency_ms
+    ).passed
 
 
 def test_gate_requires_the_latency_metric():
@@ -256,6 +270,7 @@ def test_first_model_reaches_enforce_with_good_latency(env: Env, ds, snapshot_id
 
 
 def test_slow_model_is_refused_with_reasons(env: Env, ds, snapshot_id):
+    env.deps.settings.gate_max_p99_latency_ms = 10
     mid = _register(env, ds, snapshot_id, p99_latency_ms=12.5).json()["id"]
     _promote_to_canary(env, ds, mid)
 

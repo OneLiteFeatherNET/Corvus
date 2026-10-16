@@ -39,10 +39,16 @@ class ScoreSettings(Settings):
     # ids are buffered, for about one window. This caps the frames buffered per session, segment
     # and windowing (the oldest are dropped and counted).
     score_raw_max_buffered_frames: int = Field(default=16_384, ge=64)
-    # p99 latency budget of one raw-byte window; a model whose max_packets is estimated to exceed
-    # it logs a warning at load time (the model is still served). Mirrors the registry gate
-    # CORVUS_GATE_MAX_P99_LATENCY_MS; 0 disables the check.
-    score_p99_budget_ms: float = Field(default=10.0, ge=0)
+    # Sanity bound on the p99 latency of one raw-byte window; a model whose max_packets is
+    # estimated to exceed it logs a warning at load time (the model is still served). Scoring is
+    # asynchronous, so this is not a real-time budget: what matters is that the scorer keeps up
+    # (capacity gauge, consumer lag). Mirrors the registry gate CORVUS_API_GATE_MAX_P99_LATENCY_MS;
+    # 0 disables the check.
+    score_p99_budget_ms: float = Field(default=5000.0, ge=0)
+    # Consumer lag watch: poll the capture consumer's pending count every ``score_lag_poll_s`` and
+    # warn when it grew over ``score_lag_growth_polls`` consecutive polls (0 disables the watch).
+    score_lag_poll_s: float = Field(default=15.0, gt=0)
+    score_lag_growth_polls: int = Field(default=4, ge=0)
 
     # Models
     score_models_dir: Path = Path(

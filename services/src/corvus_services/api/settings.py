@@ -87,8 +87,9 @@ class ApiSettings(BaseSettings):
         ),
     )  # fmt: skip
 
-    # Models: quality gate for promotion to ``enforce``.
-    gate_max_p99_latency_ms: float = Field(default=10.0, gt=0)
+    # Models: quality gate for promotion to ``enforce``. Scores are asynchronous decision aids, so
+    # this is a sanity bound on one window, not a real-time requirement; throughput is what counts.
+    gate_max_p99_latency_ms: float = Field(default=5000.0, gt=0)
 
     # Pagination and bulk limits
     default_page_size: int = Field(default=50, ge=1)

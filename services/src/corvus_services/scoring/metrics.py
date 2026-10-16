@@ -124,6 +124,23 @@ class ScoreMetrics:
             ["model"],
             registry=r,
         )
+        self.model_estimated_capacity_players = Gauge(
+            "corvus_score_model_estimated_capacity_players",
+            "Estimated concurrent players this replica serves with the model alone: parallel "
+            "windows * stride / mean latency (default-size model estimate)",
+            ["model"],
+            registry=r,
+        )
+        self.consumer_pending = Gauge(
+            "corvus_score_consumer_pending",
+            "Capture messages the replica's consumer has not been delivered yet (NATS num_pending)",
+            registry=r,
+        )
+        self.falling_behind = Gauge(
+            "corvus_score_falling_behind",
+            "1 while the consumer backlog grew over the configured number of consecutive polls",
+            registry=r,
+        )
         self.raw_window_packets = Histogram(
             "corvus_score_raw_window_packets",
             "Packets per raw-byte window handed to the models",
