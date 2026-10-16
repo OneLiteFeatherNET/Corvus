@@ -49,7 +49,7 @@ def lake_reader(syn: SyntheticRaw, tmp_path, erased: frozenset[bytes] = frozense
     )
 
 
-def tiny_source(workdir, *, window=None, packet=None, **synthetic):
+def tiny_source(workdir, *, window=None, packet=None, tokenizer=None, **synthetic):
     """A tokenized synthetic source with small windows (fast model tests)."""
     from corvus_ml.raw.pipeline import synthetic_source
     from corvus_ml.raw.spec import PacketConfig, WindowConfig
@@ -58,7 +58,7 @@ def tiny_source(workdir, *, window=None, packet=None, **synthetic):
     return synthetic_source(
         syn,
         workdir,
-        TokenizerConfig(vocab_size=SMALL_VOCAB, layout=SMALL_LAYOUT),
+        tokenizer or TokenizerConfig(vocab_size=SMALL_VOCAB, layout=SMALL_LAYOUT),
         packet or PacketConfig(max_tokens_per_packet=16),
         window
         or WindowConfig(window_seconds=8.0, stride_seconds=8.0, max_packets=24, min_packets=6),

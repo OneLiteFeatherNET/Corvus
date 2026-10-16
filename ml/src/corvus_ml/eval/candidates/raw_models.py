@@ -20,6 +20,7 @@ from corvus_ml.eval.candidates.base import Candidate, register
 from corvus_ml.eval.data import LABEL_CHEAT, EvalData
 from corvus_ml.eval.lr import LR_PARAM_KEYS, PRETRAIN_LR_PARAM_KEYS, lr_kwargs
 from corvus_ml.eval.training import fit, seed_everything
+from corvus_ml.raw.entropy import byte_entropy_weights
 from corvus_ml.raw.model import ModelConfig, RawAnomalyNet, RawHierNet
 from corvus_ml.raw.pretrain import flatten_windows, load_encoder, pretrain, save_checkpoint
 from corvus_ml.raw.spec import RawBytesSpec
@@ -30,6 +31,9 @@ _MODEL_KEYS = (
     "d_model", "layers", "heads", "ffn_mult", "dropout", "local_dim", "local_layers", "local_type",
     "local_heads", "macro_layers", "macro_pool", "p_token", "p_packet", "first_tokens",
     "max_masked", "score_period", "score_passes", "time_freqs", "time_min_s", "time_max_s",
+    # variants of the tokenizer ablation (docs/reference/raw-byte-tokenizer.md, section 12)
+    "type_pos", "type_buckets", "span_mean", "packet_mask", "entropy_weight", "entropy_score",
+    "objective", "jepa_loss", "ema_momentum", "combine", "knn_bank", "knn_k", "knn_weight",
 )  # fmt: skip
 _TRAIN_KEYS = (
     "epochs", "batch_size", "weight_decay", "patience", "pretrain_epochs",
@@ -104,6 +108,7 @@ class RawCandidate(Candidate):
         ids, t = flatten_windows(pool.raw_ids, pool.raw_time)  # type: ignore[arg-type]
         if len(ids) == 0:
             return net
+        self._fit_statistics(net, ids)
         probe = epochs is not None
         epochs = int(self.params.get("pretrain_epochs", 0)) if epochs is None else epochs
         batch = int(self.params.get("batch_size", 16))
@@ -125,6 +130,12 @@ class RawCandidate(Candidate):
         self._pretrain(self.model_config(data), pool if pool is not None else data, epochs=0)
         hist = getattr(self, "pretrain_history", None)
         return hist.lr_plan if hist is not None else None
+
+    @staticmethod
+    def _fit_statistics(net: RawAnomalyNet, ids: np.ndarray) -> None:
+        """Statistics of the training windows the objectives need (deterministic, no sampling)."""
+        if net.cfg.entropy_weight:
+            net.set_byte_weights(byte_entropy_weights(ids, net.cfg))
 
     def _init_encoder(self, model: nn.Module, cfg: ModelConfig, pool: EvalData | None) -> None:
         if "init_from" in self.params:
@@ -243,6 +254,9 @@ class RawHierAnomaly(RawCandidate):
         self.model = self.build(cfg)
         if "init_from" in self.params:
             load_encoder(self.model, Path(self.params["init_from"]))
+            self.model.sync_target()
+        ids, t = flatten_windows(train.raw_ids, train.raw_time)  # type: ignore[arg-type]
+        self._fit_statistics(self.model, ids)
 
         def tensors(d: EvalData):
             return self._tensors(d)
@@ -253,6 +267,8 @@ class RawHierAnomaly(RawCandidate):
         self._run_fit(
             tensors(train), tensors(val) if val is not None and len(val) else None, loss_fn
         )
+        if cfg.combine != "none" and len(ids):
+            self.model.fit_memory(ids, t, seed=self.seed)
         if "checkpoint_out" in self.params:
             save_checkpoint(Path(self.params["checkpoint_out"]), self.model)
 

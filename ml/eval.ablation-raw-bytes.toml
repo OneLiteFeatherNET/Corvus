@@ -1,0 +1,109 @@
+# Ablation of the raw-byte variants on SYNTHETIC packets (smoke run: it proves the variants run,
+# export to ONNX and meet the latency budget; it says nothing about detection quality). For a real
+# comparison replace [raw.synthetic] by `dir = "lake/raw"` (see docs/how-to/evaluate-models.md,
+# section "Ablation of the raw-byte variants").
+#   uv run corvus-eval run --config eval.ablation-raw-bpe.toml   --out reports/ablation-bpe
+#   uv run corvus-eval run --config eval.ablation-raw-bytes.toml --out reports/ablation-bytes
+# The tokenizer is part of the source, so BPE and plain bytes are two runs; everything else is
+# identical between the two files.
+name = "ablation-raw-bytes"
+
+[run]
+seed = 7
+threads = 1
+unlabelled = "exclude"
+fpr_targets = [0.01, 0.001]
+
+[raw]
+window_seconds = 10.0
+stride_seconds = 10.0
+max_packets = 256
+min_packets = 16
+overflow = "recent"
+
+[raw.synthetic]
+n_legit = 30
+n_cheat = 18
+n_unlabelled = 4
+sessions_per_player = 2
+seconds_per_session = 40.0
+contexts = ["pvp"]
+cheat_strength = 0.8
+
+[raw.tokenizer]
+mode = "bytes"          # one token per byte, vocab_size is ignored
+
+[raw.packet]
+max_tokens_per_packet = 96
+
+# Each table is one model; "<candidate>__<label>" runs the candidate with these parameters under
+# its own name (reports, ONNX files). Shared knobs are repeated, nothing is inherited.
+[candidates.raw_hier_anomaly__base]          # the current model
+epochs = 12
+lr = 0.002
+d_model = 48
+layers = 2
+heads = 4
+local_dim = 24
+local_heads = 2
+
+[candidates.raw_hier_anomaly__typepos]       # + packet-type conditioned byte positions
+epochs = 12
+lr = 0.002
+d_model = 48
+layers = 2
+heads = 4
+local_dim = 24
+local_heads = 2
+type_pos = true
+
+[candidates.raw_hier_anomaly__mae]           # MAE-style masking + entropy-weighted byte loss
+epochs = 12
+lr = 0.002
+d_model = 48
+layers = 2
+heads = 4
+local_dim = 24
+local_heads = 2
+type_pos = true
+p_packet = 0.5
+packet_mask = "full"
+span_mean = 3.0
+entropy_weight = true
+
+[candidates.raw_hier_anomaly__jepa]          # latent prediction of masked packets (EMA target)
+epochs = 12
+lr = 0.002
+d_model = 48
+layers = 2
+heads = 4
+local_dim = 24
+local_heads = 2
+type_pos = true
+objective = "jepa"
+p_packet = 0.5
+ema_momentum = 0.99
+
+[candidates.raw_hier_anomaly__jepa_knn]      # JEPA score combined with the kNN memory bank
+epochs = 12
+lr = 0.002
+d_model = 48
+layers = 2
+heads = 4
+local_dim = 24
+local_heads = 2
+type_pos = true
+objective = "jepa"
+p_packet = 0.5
+combine = "rank"
+knn_bank = 256
+knn_k = 5
+
+[benchmark]
+warmup = 5
+iters = 50
+batch = 8
+isolated = false
+quantize = false
+raw_packets = [64, 256]
+latency_budget_ms = 10.0

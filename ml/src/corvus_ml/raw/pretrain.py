@@ -22,7 +22,7 @@ from corvus_ml.raw.model import ModelConfig, RawAnomalyNet
 ARCHITECTURE_KEYS = (
     "vocab_size", "max_tokens", "n_special", "local_dim", "local_layers", "local_type",
     "local_heads", "d_model", "layers", "heads", "ffn_mult", "time_freqs", "time_min_s",
-    "time_max_s",
+    "time_max_s", "type_pos", "type_buckets", "pkt_lo", "pkt_hi",
 )  # fmt: skip
 
 
@@ -44,10 +44,13 @@ def save_checkpoint(path: Path, model: RawAnomalyNet, extra: dict | None = None)
 
 
 def _architecture_differences(saved: dict, wanted: ModelConfig) -> list[str]:
+    # Keys a checkpoint predates (variant options) count as their default.
+    defaults = {f.name: f.default for f in fields(ModelConfig)}
     return [
-        f"{k}: checkpoint has {saved.get(k)!r}, model wants {getattr(wanted, k)!r}"
+        f"{k}: checkpoint has {saved.get(k, defaults.get(k))!r}, model wants {getattr(wanted, k)!r}"
         for k in ARCHITECTURE_KEYS
-        if saved.get(k) != getattr(wanted, k)
+        if (wanted.type_pos or k not in ("pkt_lo", "pkt_hi"))  # the type bucket needs them
+        and saved.get(k, defaults.get(k)) != getattr(wanted, k)
     ]
 
 

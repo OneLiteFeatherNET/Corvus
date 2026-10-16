@@ -16,6 +16,7 @@ from corvus_ml.raw.layout import TokenLayout
 TOKENIZER_FILE = "tokenizer.json"
 PROTO_MODES = ("first", "every", "none")
 OVERFLOW_MODES = ("recent", "uniform")
+TOKENIZER_MODES = ("bpe", "bytes")  # byte-level BPE, or one token per byte (no merges)
 
 
 def sha256_file(path: Path) -> str:
@@ -79,6 +80,7 @@ class RawBytesSpec:
     packet: PacketConfig
     window: WindowConfig
     tokenizer_file: str = TOKENIZER_FILE
+    tokenizer_mode: str = "bpe"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -86,6 +88,7 @@ class RawBytesSpec:
                 "file": self.tokenizer_file,
                 "sha256": self.tokenizer_sha256,
                 "vocab_size": self.vocab_size,
+                "mode": self.tokenizer_mode,
                 "byte_mapping": "chr(0x100 + byte)",
             },
             "layout": self.layout.to_dict(),
@@ -108,11 +111,13 @@ class RawBytesSpec:
             packet=PacketConfig(**raw["packet"]),
             window=WindowConfig(**raw["window"]),
             tokenizer_file=str(tok.get("file", TOKENIZER_FILE)),
+            tokenizer_mode=str(tok.get("mode", "bpe")),
         )
 
     def differences(self, other: RawBytesSpec, *, window: bool = True) -> list[str]:
         out: list[str] = []
         pairs = [
+            ("tokenizer.mode", self.tokenizer_mode, other.tokenizer_mode),
             ("tokenizer.sha256", self.tokenizer_sha256, other.tokenizer_sha256),
             ("tokenizer.vocab_size", self.vocab_size, other.vocab_size),
             ("layout", self.layout, other.layout),

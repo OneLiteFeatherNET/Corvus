@@ -27,6 +27,8 @@ class BenchConfig:
     quantize: bool = True  # int8 dynamic quantisation variant of the torch models
     # Raw-byte models: extra single-window latencies at these packet counts (full-width rows).
     raw_packets: tuple[int, ...] = ()
+    # Scorer latency target: p99 per window (<= 256 packets) on CPU; the report marks it.
+    latency_budget_ms: float = 10.0
 
 
 @dataclass

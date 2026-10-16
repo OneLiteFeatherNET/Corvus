@@ -21,6 +21,10 @@ def _f(v, digits: int = 3) -> str:
     return f"{v:.{digits}f}"
 
 
+def _within(p99, budget) -> str:
+    return "-" if p99 is None else ("yes" if p99 <= budget else "NO")
+
+
 def _tag(fpr: float) -> str:
     return f"{fpr * 100:g}pct"
 
@@ -55,7 +59,8 @@ def to_markdown(report: dict) -> str:
         w = raw["window"]
         lines += [
             f"Raw-byte input: tokenizer `{raw['tokenizer_sha256'][:12]}` "
-            f"(vocab {raw['vocab_size']}), windows of {w['window_seconds']:g} s every "
+            f"({raw.get('tokenizer_mode', 'bpe')}, vocab {raw['vocab_size']}), "
+            f"windows of {w['window_seconds']:g} s every "
             f"{w['stride_seconds']:g} s, at most "
             f"{w['max_packets']} packets ({w['overflow']}), "
             f"{raw['packet']['max_tokens_per_packet']} tokens per packet"
@@ -82,7 +87,10 @@ def to_markdown(report: dict) -> str:
         head = ["candidate", "params", "ROC-AUC", "PR-AUC"]
         for f in fprs:
             head += [f"R@{f * 100:g}% win", f"R@{f * 100:g}% player"]
-        head += ["ECE", "p50 ms", "p99 ms", "batch w/s", "RSS MB", "ONNX diff"]
+        budget = report.get("latency_budget_ms")
+        head += ["ECE", "p50 ms", "p99 ms"]
+        head += [f"p99 <= {budget:g} ms"] if budget else []
+        head += ["batch w/s", "RSS MB", "ONNX diff"]
         rows = []
         for name, c in info["candidates"].items():
             if c["status"] != "ok":
@@ -98,6 +106,7 @@ def to_markdown(report: dict) -> str:
                 _f(t.get("ece")),
                 _f(b.get("latency_p50_ms"), 3),
                 _f(b.get("latency_p99_ms"), 3),
+                *([_within(b.get("latency_p99_ms"), budget)] if budget else []),
                 _f(b.get("batch_throughput_wps"), 0),
                 _f(b.get("peak_rss_mb"), 0),
                 _f(o.get("max_abs_diff"), 6),
@@ -117,7 +126,7 @@ def to_markdown(report: dict) -> str:
             lines += ["Skipped:", *skipped, ""]
         lines += _tune_section(info)
         lines += _lr_section(info)
-        lines += _sizes_section(info)
+        lines += _sizes_section(info, budget)
         lines += _int8_section(info, fprs)
         lines += _confusion_section(info, fprs)
         lines += _curve_section(info, fprs)
@@ -194,7 +203,7 @@ def _lr_section(info: dict) -> list[str]:
     return lines
 
 
-def _sizes_section(info: dict) -> list[str]:
+def _sizes_section(info: dict, budget: float | None = None) -> list[str]:
     rows = []
     for name, c in info["candidates"].items():
         for count, b in (c.get("bench_sizes") or {}).items():
@@ -204,12 +213,15 @@ def _sizes_section(info: dict) -> list[str]:
                     count,
                     _f(b["latency_p50_ms"], 2),
                     _f(b["latency_p99_ms"], 2),
+                    *([_within(b["latency_p99_ms"], budget)] if budget else []),
                     f"{b['threads']}",
                 ]
             )
     if not rows:
         return []
-    head = ["candidate", "packets", "p50 ms", "p99 ms", "threads"]
+    head = ["candidate", "packets", "p50 ms", "p99 ms"]
+    head += [f"p99 <= {budget:g} ms"] if budget else []
+    head += ["threads"]
     return ["### CPU latency per window by packet count (batch of 1)", "", *_table(head, rows), ""]
 
 

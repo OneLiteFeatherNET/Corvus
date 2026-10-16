@@ -60,21 +60,28 @@ WINDOW_SPACE: dict[str, Range] = {
 LR_MULT_RANGE: Range = ("log", 0.3, 3.0)
 
 
+# Options without a default range: ``[tune.space] key = [low, high]`` searches them as floats.
+OPTION_KINDS: dict[str, Range] = dict.fromkeys(
+    ("p_token", "p_packet", "span_mean", "ema_momentum", "knn_weight"), ("float",)
+)
+
+
 def space_for(
     name: str, tune: TuneConfig, windows: bool, auto_lr: bool = False
 ) -> dict[str, Range]:
     """Default space of the candidate, with ``[tune.space]`` overrides applied.
 
+    A variant name (``raw_hier_anomaly__jepa``) uses the space of its candidate.
     ``auto_lr``: the candidate's ``lr`` is ``"auto"``; ``lr`` is then replaced by ``lr_mult``.
     """
-    space = dict(DEFAULT_SPACES.get(name, _COMMON))
+    space = dict(DEFAULT_SPACES.get(name.partition("__")[0], _COMMON))
     if auto_lr and "lr" in space:
         del space["lr"]
         space["lr_mult"] = LR_MULT_RANGE
     if windows:
         space.update(WINDOW_SPACE)
     for key, value in tune.space.items():
-        default = space.get(key)
+        default = space.get(key) or OPTION_KINDS.get(key)
         numeric = isinstance(value, list) and all(
             isinstance(v, (int, float)) and not isinstance(v, bool) for v in value
         )

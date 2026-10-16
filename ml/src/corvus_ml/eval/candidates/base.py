@@ -20,7 +20,37 @@ from corvus_ml.features.featurizer import CompletedWindow
 from corvus_ml.features.model_input import model_inputs
 from corvus_ml.features.spec import FeatureSpec
 
-REGISTRY: dict[str, type[Candidate]] = {}
+VARIANT_SEP = "__"
+
+
+class Registry(dict):
+    """Candidate classes by name. ``<candidate>__<label>`` resolves to the class of ``<candidate>``
+    under its own name, so one run can compare several parameter sets of the same model
+    (``[candidates.raw_hier_anomaly__jepa]``); output files and report rows use the full name."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._variants: dict[str, type[Candidate]] = {}
+
+    def _base(self, key: str) -> type[Candidate] | None:
+        base, sep, label = key.partition(VARIANT_SEP)
+        return dict.get(self, base) if sep and label else None
+
+    def __contains__(self, key: object) -> bool:
+        return dict.__contains__(self, key) or (
+            isinstance(key, str) and self._base(key) is not None
+        )
+
+    def __missing__(self, key: str) -> type[Candidate]:
+        base = self._base(key)
+        if base is None:
+            raise KeyError(key)
+        if key not in self._variants:
+            self._variants[key] = type(base.__name__, (base,), {"name": key})
+        return self._variants[key]
+
+
+REGISTRY: dict[str, type[Candidate]] = Registry()
 
 
 def register(cls: type[Candidate]) -> type[Candidate]:
