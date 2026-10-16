@@ -12,7 +12,7 @@ RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY ui/ ./
 RUN pnpm exec nuxt generate && node docker/postprocess.mjs .output/public
 
-FROM nginxinc/nginx-unprivileged:1.30.6-alpine
+FROM nginxinc/nginx-unprivileged:1.31.6-alpine
 COPY --from=build /app/.output/public /usr/share/nginx/html
 COPY --from=build /app/.output/csp-script-hashes.txt /etc/corvus-ui/csp-script-hashes.txt
 COPY ui/docker/default.conf.template /etc/nginx/templates/default.conf.template
