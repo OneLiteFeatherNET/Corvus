@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import math
 
 import numpy as np
 import pytest
@@ -405,3 +406,11 @@ def test_the_estimate_scales_with_threads_and_the_anomaly_heads_and_grows_with_p
     assert estimate_p99_ms(512, 2) == pytest.approx(one * 0.6)
     assert estimate_p99_ms(512, 1, anomaly=True) == pytest.approx(one * 2.6)
     assert estimate_p99_ms(64, 1) < estimate_p99_ms(256, 1) < estimate_p99_ms(2048, 1)
+
+
+def test_the_estimate_at_the_default_2048_packets_is_finite_and_continues_the_last_slope():
+    at_1024, at_2048, at_3072 = (estimate_p99_ms(n, 1) for n in (1024, 2048, 3072))
+
+    assert math.isfinite(at_2048)
+    assert at_1024 < at_2048 < at_3072
+    assert at_2048 - at_1024 == pytest.approx(at_3072 - at_2048, rel=1e-6)

@@ -25,6 +25,7 @@ from corvus_ml.jobs import layout
 from corvus_ml.jobs.context import JobContext
 from corvus_ml.jobs.lifecycle import JobEnv, JobError, JobOutcome, json_safe
 from corvus_ml.jobs.params import Params
+from corvus_ml.raw.spec import WindowConfig
 
 log = logging.getLogger("corvus.job.model")
 
@@ -80,6 +81,8 @@ def choose_candidate(candidates: dict[str, dict[str, Any]], select_by: str) -> s
     ]
     return max(usable, key=sort_key)[0] if usable else None
 
+
+_W = WindowConfig()  # defaults of the window parameters (only used when a job sets one)
 
 RAW_WINDOW_KEYS = ("window_seconds", "stride_seconds", "max_packets", "overflow", "min_packets")
 
@@ -168,11 +171,11 @@ def _read_params(
             raise JobError("macro_window_seconds must be a number")
         window: dict[str, Any] = {}  # only what the job sets overrides the build's window
         if p.has("window_seconds"):
-            window["window_seconds"] = p.number("window_seconds", 10.0, 0.01, 86_400.0)
+            window["window_seconds"] = p.number("window_seconds", _W.window_seconds, 0.01, 86_400.0)
         if p.has("stride_seconds"):
-            window["stride_seconds"] = p.number("stride_seconds", 5.0, 0.01, 86_400.0)
+            window["stride_seconds"] = p.number("stride_seconds", _W.stride_seconds, 0.01, 86_400.0)
         if p.has("max_packets"):
-            window["max_packets"] = p.integer("max_packets", 1024, 1, 100_000)
+            window["max_packets"] = p.integer("max_packets", _W.max_packets, 1, 100_000)
         if p.has("overflow"):
             window["overflow"] = p.string("overflow", "recent")
         if p.has("min_packets"):

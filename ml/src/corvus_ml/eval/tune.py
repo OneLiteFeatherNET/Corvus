@@ -51,7 +51,7 @@ DEFAULT_SPACES: dict[str, dict[str, Range]] = {
 DEFAULT_SPACES["raw_hier_anomaly"] = DEFAULT_SPACES["raw_hier_classifier"]
 WINDOW_SPACE: dict[str, Range] = {
     "window_seconds": ("cat", [5.0, 10.0, 20.0]),
-    "max_packets": ("cat", [256, 512, 1024]),
+    "max_packets": ("cat", [256, 512, 1024, 2048]),
 }
 
 

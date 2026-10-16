@@ -49,6 +49,9 @@ RAW_SESSIONS_SCHEMA = pa.schema(
 )
 
 
+_W = WindowConfig()  # the documented window defaults
+
+
 def _tokenizer_mode(p: Params) -> str:
     mode = p.string("tokenizer_mode", "bpe") or "bpe"
     if mode not in TOKENIZER_MODES:
@@ -156,9 +159,9 @@ def _read_params(ctx: JobContext, kind: str) -> dict[str, Any]:
             proto_mode=p.string("proto_mode", "first") or "first",
         ),
         "window": WindowConfig(
-            window_seconds=p.number("window_seconds", 10.0, 0.01, 86_400.0),
-            stride_seconds=p.number("stride_seconds", 5.0, 0.01, 86_400.0),
-            max_packets=p.integer("max_packets", 1024, 1, 100_000),
+            window_seconds=p.number("window_seconds", _W.window_seconds, 0.01, 86_400.0),
+            stride_seconds=p.number("stride_seconds", _W.stride_seconds, 0.01, 86_400.0),
+            max_packets=p.integer("max_packets", _W.max_packets, 1, 100_000),
             overflow=p.string("overflow", "recent") or "recent",
             min_packets=p.integer("min_packets", 8, 1, 100_000),
             macro_window_seconds=None if macro is None else float(macro),
