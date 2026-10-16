@@ -134,6 +134,17 @@ class ProxyIdResolverTest {
     }
 
     @Test
+    void rejectsNonIntegerTaskServiceIdWithoutLeakingConnectionKey() throws IOException {
+        Path file = wrapper(WRAPPER_JSON.replace("\"taskServiceId\": 1,", "\"taskServiceId\": 1.5,"));
+        ProxyIdException e = assertThrows(ProxyIdException.class,
+                () -> new ProxyIdResolver(file, env(Map.of())).resolve("${cloudnet.service}"));
+
+        assertTrue(e.getMessage().contains("${cloudnet.service}"), "message names the placeholder: " + e.getMessage());
+        assertFalse(e.getMessage().contains(SECRET), "message must not leak the connectionKey");
+        assertEquals(null, e.getCause(), "no cause that could carry file content");
+    }
+
+    @Test
     void missingEnvironmentVariableNamesThePlaceholderAndFails() throws IOException {
         ProxyIdException e = assertThrows(ProxyIdException.class,
                 () -> resolver(Map.of()).resolve("${env:PROXY_NAME}"));

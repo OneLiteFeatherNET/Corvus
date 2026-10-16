@@ -109,7 +109,7 @@ public final class ProxyIdResolver {
                 throw new ProxyIdException(unreadable + wrapperFile + " has no usable serviceConfiguration.serviceId");
             }
             return found;
-        } catch (IOException | JsonParseException | IllegalStateException e) {
+        } catch (IOException | JsonParseException | IllegalStateException | NumberFormatException e) {
             // Deliberately without the cause: parser messages may quote parts of the file.
             throw new ProxyIdException(unreadable + wrapperFile + " could not be read as CloudNet wrapper JSON");
         }
