@@ -7,7 +7,8 @@
     "edit": "Edit", "delete": "Delete", "close": "Close", "yes": "Yes", "no": "No", "all": "All",
     "updated": "Updated", "created": "Created", "createdBy": "Created by", "line": "Line {n}",
     "removeItem": "Remove",
-    "saved": "Saved", "deleted": "Deleted", "dismiss": "Dismiss",
+    "saved": "Saved", "copy": "Copy", "copied": "Copied", "copyFailed": "Copying failed",
+    "deleted": "Deleted", "dismiss": "Dismiss",
     "table": {
       "selectRow": "Select row", "sortBy": "Sort by", "rowsPerPage": "Rows per page",
       "previous": "Previous page", "next": "Next page", "range": "{from}–{to} of {total}"
@@ -70,7 +71,9 @@
   },
   "snapshots": {
     "title": "Snapshots", "detail": "Snapshot", "pool": "Pool", "manifestHash": "Manifest hash", "sessions": "Sessions",
-    "files": "Files", "startJob": "Start job", "openPool": "Open pool", "filter": "Filter at snapshot time"
+    "files": "Files", "startJob": "Start job", "openPool": "Open pool", "filter": "Filter at snapshot time",
+    "sessionList": "Session list", "sessionId": "Session ID", "pseudonym": "Pseudonym",
+    "started": "Start", "gameContexts": "Game contexts", "labelSession": "Label"
   },
   "jobs": {
     "title": "Jobs", "typeLabel": "Type", "statusLabel": "Status", "snapshot": "Snapshot", "params": "Parameters",

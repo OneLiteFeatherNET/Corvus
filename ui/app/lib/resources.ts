@@ -1,7 +1,7 @@
 import type { ApiClient } from './api-client'
 import type {
   BlockEntry, BlockInput, Erasure, Job, JobInput, JobState, Label, LabelInput, Me, Model, ModelTransition,
-  Paged, PlayerLookup, Pool, PoolFilter, PoolInput, Preview, ScoreHistory, ScoreLatest, Snapshot, Stage, Summary,
+  Paged, PlayerLookup, Pool, PoolFilter, PoolInput, Preview, ScoreHistory, ScoreLatest, Session, Snapshot, Stage, Summary,
 } from '~/types'
 
 export interface PageQuery {
@@ -40,6 +40,9 @@ export function snapshotsResource(c: ApiClient) {
   return {
     list: (p?: PageQuery) => c.get<Paged<Snapshot>>('/snapshots', { query: q(p) }),
     get: (id: string) => c.get<Snapshot>(`/snapshots/${id}`),
+    /** Sessions of a snapshot in manifest order; `excludeErased` leaves out sessions of erased players. */
+    sessions: (id: string, p?: PageQuery & { excludeErased?: boolean }) =>
+      c.get<Paged<Session>>(`/snapshots/${id}/sessions`, { query: { ...q(p), exclude_erased: p?.excludeErased } }),
   }
 }
 

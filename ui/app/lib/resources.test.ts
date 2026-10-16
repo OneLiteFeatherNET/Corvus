@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { createApiClient } from './api-client'
 import {
-  jobsResource, labelsResource, meResource, modelsResource, playersResource, poolsResource, scoresResource, summaryResource,
+  jobsResource, labelsResource, meResource, modelsResource, playersResource, poolsResource, scoresResource, snapshotsResource,
+  summaryResource,
 } from './resources'
 import type { Model } from '~/types'
 
@@ -116,5 +117,16 @@ describe('endpoints of the extended API', () => {
     await scoresResource(client).history(pseudonym, { gameContext: 'bw', limit: 250 })
     expect(calls[0]!.url).toBe(`/api/v1/scores/players/${pseudonym}`)
     expect(calls[1]!.url).toBe(`/api/v1/scores/players/${pseudonym}/history?game_context=bw&limit=250`)
+  })
+})
+
+describe('snapshot sessions', () => {
+  it('sends the cursor, the limit and exclude_erased, and omits an absent cursor', async () => {
+    const { client, calls } = harness(() => ({ items: [], next_cursor: null }))
+    const snapshots = snapshotsResource(client)
+    await snapshots.sessions('s1', { limit: 50, cursor: 'abc', excludeErased: true })
+    await snapshots.sessions('s1', { limit: 50, cursor: null })
+    expect(calls[0]!.url).toBe('/api/v1/snapshots/s1/sessions?limit=50&cursor=abc&exclude_erased=true')
+    expect(calls[1]!.url).toBe('/api/v1/snapshots/s1/sessions?limit=50')
   })
 })

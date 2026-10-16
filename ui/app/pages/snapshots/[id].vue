@@ -24,6 +24,8 @@
         <pre class="mono whitespace-pre-wrap">{{ JSON.stringify(manifestFilter, null, 2) }}</pre>
       </M3Card>
 
+      <SnapshotSessions class="mt-6" :snapshot-id="id" />
+
       <M3Dialog v-model="jobDialog" :title="$t('snapshots.startJob')" @after-leave="create.reset()">
         <div class="flex flex-col gap-4 pt-1">
           <AppProblem :error="create.error.value" />

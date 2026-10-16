@@ -1,5 +1,5 @@
 <template>
-  <M3Dialog :model-value="modelValue" :title="$t('labels.create')" @update:model-value="$emit('update:modelValue', $event)" @after-leave="reset">
+  <M3Dialog :model-value="modelValue" :title="$t('labels.create')" @update:model-value="$emit('update:modelValue', $event)">
     <div class="flex flex-col gap-4 pt-1">
       <AppProblem :error="action.error.value" />
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -25,17 +25,17 @@
 </template>
 
 <script setup lang="ts">
-import { isValidSubject } from '~/lib/label-form'
-import type { LabelInput } from '~/types'
+import { blankLabelInput, isValidSubject } from '~/lib/label-form'
+import type { LabelSubject } from '~/lib/label-form'
 
-defineProps<{ modelValue: boolean }>()
+// `subject` prefills the form each time the dialog opens, e.g. with the session a list row is about.
+const props = defineProps<{ modelValue: boolean, subject?: LabelSubject | null }>()
 const emit = defineEmits<{ 'update:modelValue': [boolean], 'created': [] }>()
 
 const { t } = useI18n()
 const labels = useLabels()
 
-const blank = (): LabelInput => ({ subject_type: 'pseudonym', subject: '', label: 'cheat', source: 'staff_verdict', confidence: 1, note: '' })
-const form = reactive<LabelInput>(blank())
+const form = reactive(blankLabelInput(props.subject))
 const validFrom = ref('')
 const validTo = ref('')
 const showErrors = ref(false)
@@ -60,8 +60,12 @@ const action = useAction(async () => {
 })
 const submit = () => action.run()
 
+watch(() => props.modelValue, (open) => {
+  if (open) reset()
+})
+
 function reset() {
-  Object.assign(form, blank())
+  Object.assign(form, blankLabelInput(props.subject))
   validFrom.value = ''
   validTo.value = ''
   showErrors.value = false

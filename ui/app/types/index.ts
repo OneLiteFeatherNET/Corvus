@@ -8,6 +8,7 @@ export type PoolInput = S['PoolIn']
 export type PoolFilter = S['PoolFilter']
 export type Preview = S['PreviewOut']
 export type Snapshot = S['SnapshotOut']
+export type Session = S['SessionOut']
 // Two API models are called LabelOut; FastAPI disambiguates them with the module path.
 export type Label = S['corvus_services__api__schemas__LabelOut']
 export type LabelInput = S['LabelIn']
