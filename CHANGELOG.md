@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.1.1...v0.2.0) (2026-10-16)
+
+
+### Features
+
+* **ui:** rebuild the interface with tailwind css and material 3 ([#72](https://github.com/OneLiteFeatherNET/Corvus/issues/72)) ([985adee](https://github.com/OneLiteFeatherNET/Corvus/commit/985adee53997d3077b35e000983b744b221f9dbd))
+
 ## [0.1.1](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.1.0...v0.1.1) (2026-10-16)
 
 
