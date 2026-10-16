@@ -1,60 +1,50 @@
 <template>
   <div>
     <AppProblem :error="loadError" />
-    <v-progress-linear v-if="!pool && !loadError" indeterminate :aria-label="$t('common.loading')" />
+    <M3Progress v-if="!pool && !loadError" :label="$t('common.loading')" />
     <template v-if="pool">
       <PageHeader :title="pool.name" :subtitle="pool.description">
         <template #actions>
-          <v-btn v-if="can('snapshots.create')" prepend-icon="mdi-camera-plus-outline" :loading="snapshot.pending.value" @click="snapshot.run()">
+          <M3Button v-if="can('snapshots.create')" icon="mdi-camera-plus-outline" :loading="snapshot.pending.value" :loading-label="$t('common.loading')" @click="snapshot.run()">
             {{ $t('pools.createSnapshot') }}
-          </v-btn>
-          <v-btn v-if="can('pools.write')" variant="tonal" :to="`/pools/${pool.id}/edit`" prepend-icon="mdi-pencil-outline">{{ $t('common.edit') }}</v-btn>
-          <v-btn v-if="can('pools.write')" variant="text" color="error" prepend-icon="mdi-delete-outline" @click="confirmDelete = true">{{ $t('common.delete') }}</v-btn>
+          </M3Button>
+          <M3Button v-if="can('pools.write')" variant="tonal" :to="`/pools/${pool.id}/edit`" icon="mdi-pencil-outline">{{ $t('common.edit') }}</M3Button>
+          <M3Button v-if="can('pools.write')" variant="text" tone="error" icon="mdi-delete-outline" @click="confirmDelete = true">{{ $t('common.delete') }}</M3Button>
         </template>
       </PageHeader>
 
       <AppProblem :error="snapshot.error.value" />
-      <v-alert v-if="created" type="success" variant="tonal" class="mb-4" role="status">
+      <M3Alert v-if="created" tone="success" class="mb-4">
         {{ $t('pools.snapshotCreated') }}
-        <NuxtLink :to="`/snapshots/${created.id}`" class="font-weight-medium">{{ shortId(created.id) }}</NuxtLink>
-      </v-alert>
+        <NuxtLink :to="`/snapshots/${created.id}`" class="font-medium">{{ shortId(created.id) }}</NuxtLink>
+      </M3Alert>
 
-      <v-row>
-        <v-col cols="12" lg="6">
-          <v-card variant="flat" color="surface-container-low">
-            <v-card-title class="text-title-large">{{ $t('pools.form.filter') }}</v-card-title>
-            <v-card-text>
-              <div class="d-flex flex-wrap ga-1 mb-3">
-                <v-chip v-for="c in summary" :key="c.key" label variant="tonal">{{ $t(`pools.summary.${c.key}`) }}: {{ c.value }}</v-chip>
-                <span v-if="!summary.length" class="text-on-surface-variant">{{ $t('pools.noFilter') }}</span>
-              </div>
-              <p class="text-body-medium">{{ $t('pools.form.excludeOrphans') }}: {{ pool.filter.exclude_orphans ? $t('common.yes') : $t('common.no') }}</p>
-              <details class="mt-3">
-                <summary class="text-label-large" style="cursor: pointer">{{ $t('pools.rawFilter') }}</summary>
-                <pre class="mono mt-2" style="white-space: pre-wrap">{{ JSON.stringify(pool.filter, null, 2) }}</pre>
-              </details>
-            </v-card-text>
-          </v-card>
-        </v-col>
-        <v-col cols="12" lg="6">
-          <PreviewPanel :preview="preview" :loading="previewAction.pending.value" :error="previewAction.error.value" @refresh="previewAction.run()" />
-        </v-col>
-      </v-row>
+      <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <M3Card :title="$t('pools.form.filter')">
+          <div class="mb-3 flex flex-wrap gap-1">
+            <M3Chip v-for="c in summary" :key="c.key">{{ $t(`pools.summary.${c.key}`) }}: {{ c.value }}</M3Chip>
+            <span v-if="!summary.length" class="text-on-surface-variant">{{ $t('pools.noFilter') }}</span>
+          </div>
+          <p class="text-body-medium">{{ $t('pools.form.excludeOrphans') }}: {{ pool.filter.exclude_orphans ? $t('common.yes') : $t('common.no') }}</p>
+          <details class="mt-3">
+            <summary class="cursor-pointer text-label-large">{{ $t('pools.rawFilter') }}</summary>
+            <pre class="mono mt-2 whitespace-pre-wrap">{{ JSON.stringify(pool.filter, null, 2) }}</pre>
+          </details>
+        </M3Card>
+        <PreviewPanel :preview="preview" :loading="previewAction.pending.value" :error="previewAction.error.value" @refresh="previewAction.run()" />
+      </div>
 
-      <h2 class="text-headline-small mt-8 mb-3">{{ $t('nav.snapshots') }}</h2>
+      <h2 class="mt-8 mb-3 text-headline-small">{{ $t('nav.snapshots') }}</h2>
       <SnapshotTable :items="snapshots.items.value" :loading="snapshots.loading.value" :error="snapshots.error.value" />
-      <v-btn v-if="snapshots.hasMore()" class="mt-3" variant="tonal" @click="snapshots.loadMore()">{{ $t('common.loadMore') }}</v-btn>
+      <LoadMore :visible="snapshots.hasMore()" :loading="snapshots.loading.value" @more="snapshots.loadMore()" />
 
-      <v-dialog v-model="confirmDelete" max-width="480">
-        <v-card :title="$t('pools.deleteTitle')">
-          <v-card-text>{{ $t('pools.deleteText', { name: pool.name }) }}</v-card-text>
-          <v-card-actions>
-            <v-spacer />
-            <v-btn variant="text" @click="confirmDelete = false">{{ $t('common.cancel') }}</v-btn>
-            <v-btn color="error" :loading="remove.pending.value" @click="remove.run()">{{ $t('common.delete') }}</v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
+      <M3Dialog v-model="confirmDelete" :title="$t('pools.deleteTitle')" width="sm" alert>
+        {{ $t('pools.deleteText', { name: pool.name }) }}
+        <template #actions>
+          <M3Button variant="text" @click="confirmDelete = false">{{ $t('common.cancel') }}</M3Button>
+          <M3Button tone="error" :loading="remove.pending.value" :loading-label="$t('common.loading')" @click="remove.run()">{{ $t('common.delete') }}</M3Button>
+        </template>
+      </M3Dialog>
     </template>
   </div>
 </template>

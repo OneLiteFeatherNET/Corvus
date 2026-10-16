@@ -105,44 +105,45 @@ const formatTick = (t: number) => fmt.value.format(new Date(t))
 .score-chart {
   margin: 0;
 }
-svg {
+figure > svg {
   width: 100%;
+  max-width: 56rem;
   height: auto;
   display: block;
 }
 .grid line {
-  stroke: rgba(var(--v-border-color), var(--v-border-opacity));
+  stroke: var(--md-sys-color-outline-variant);
 }
 .axis {
-  fill: rgb(var(--v-theme-on-surface-variant));
+  fill: var(--md-sys-color-on-surface-variant);
   font-size: 11px;
 }
 .series {
   fill: none;
-  --c: var(--v-theme-primary);
-  stroke: rgb(var(--c));
+  --c: var(--md-sys-color-primary);
+  stroke: var(--c);
 }
-.c0 { --c: var(--v-theme-primary); }
-.c1 { --c: var(--v-theme-secondary); }
-.c2 { --c: var(--v-theme-tertiary, var(--v-theme-info)); }
-.c3 { --c: var(--v-theme-error); }
-.c4 { --c: var(--v-theme-info); }
+.c0 { --c: var(--md-sys-color-primary); }
+.c1 { --c: var(--md-sys-color-tertiary); }
+.c2 { --c: var(--md-sys-color-success); }
+.c3 { --c: var(--md-sys-color-error); }
+.c4 { --c: var(--md-sys-color-warning); }
 .series .smoothed {
   fill: none;
-  stroke: rgb(var(--c));
+  stroke: var(--c);
   stroke-width: 2.5;
 }
 .d1 .smoothed { stroke-dasharray: 8 4; }
 .d2 .smoothed { stroke-dasharray: 2 4; stroke-linecap: round; }
 .series .raw {
   fill: none;
-  stroke: rgb(var(--c));
+  stroke: var(--c);
   stroke-width: 1;
   opacity: 0.4;
 }
 .series circle {
-  fill: rgb(var(--c));
-  stroke: rgb(var(--v-theme-surface));
+  fill: var(--c);
+  stroke: var(--md-sys-color-surface);
 }
 .legend {
   list-style: none;

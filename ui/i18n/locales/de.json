@@ -5,7 +5,13 @@
     "darkTheme": "Zum dunklen Design wechseln", "navigation": "Hauptnavigation", "refresh": "Aktualisieren", "loading": "Lädt",
     "empty": "Noch nichts vorhanden", "loadMore": "Mehr laden", "search": "Suchen", "save": "Speichern", "cancel": "Abbrechen",
     "edit": "Bearbeiten", "delete": "Löschen", "close": "Schließen", "yes": "Ja", "no": "Nein", "all": "Alle",
-    "updated": "Aktualisiert", "created": "Erstellt", "createdBy": "Erstellt von", "line": "Zeile {n}"
+    "updated": "Aktualisiert", "created": "Erstellt", "createdBy": "Erstellt von", "line": "Zeile {n}",
+    "removeItem": "Entfernen",
+    "saved": "Gespeichert", "deleted": "Gelöscht", "dismiss": "Schließen",
+    "table": {
+      "selectRow": "Zeile auswählen", "sortBy": "Sortieren nach", "rowsPerPage": "Zeilen pro Seite",
+      "previous": "Vorherige Seite", "next": "Nächste Seite", "range": "{from}–{to} von {total}"
+    }
   },
   "nav": {
     "dashboard": "Übersicht", "pools": "Pools", "snapshots": "Snapshots", "jobs": "Jobs", "models": "Modelle",

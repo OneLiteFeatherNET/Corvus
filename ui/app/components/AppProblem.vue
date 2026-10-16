@@ -1,16 +1,16 @@
 <template>
-  <v-alert v-if="error" type="error" variant="tonal" role="alert" :title="title" class="mb-4">
+  <M3Alert v-if="error" tone="error" role="alert" :title="title" class="mb-4">
     <p v-if="detail">{{ detail }}</p>
-    <ul v-if="apiError && apiError.reasons.length" class="ml-4 mt-2" data-test="reasons">
+    <ul v-if="apiError && apiError.reasons.length" class="mt-2 list-disc pl-5" data-test="reasons">
       <li v-for="(r, i) in apiError.reasons" :key="i">{{ r }}</li>
     </ul>
-    <ul v-if="apiError && apiError.errors.length" class="ml-4 mt-2" data-test="validation-errors">
+    <ul v-if="apiError && apiError.errors.length" class="mt-2 list-disc pl-5" data-test="validation-errors">
       <li v-for="(e, i) in apiError.errors" :key="i">
         <span v-if="e.line !== undefined">{{ $t('common.line', { n: e.line }) }}: </span>
         <span v-if="e.loc" class="mono">{{ e.loc.join('.') }}: </span>{{ e.msg }}
       </li>
     </ul>
-  </v-alert>
+  </M3Alert>
 </template>
 
 <script setup lang="ts">

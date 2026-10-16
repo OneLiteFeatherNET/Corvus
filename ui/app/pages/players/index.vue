@@ -2,72 +2,77 @@
   <div>
     <PageHeader :title="$t('players.title')" :subtitle="$t('players.subtitle')" />
 
-    <v-card variant="flat" color="surface-container-low" class="mb-6">
-      <v-card-title class="text-title-large">{{ $t('players.lookup.title') }}</v-card-title>
-      <v-card-text>
-        <p class="text-body-medium text-on-surface-variant mb-3">{{ $t('players.lookup.privacy') }}</p>
-        <AppProblem :error="lookup.error.value" />
-        <v-form class="d-flex flex-wrap ga-3 align-start" @submit.prevent="lookup.run()">
-          <v-text-field
-            v-model="uuid"
-            :label="$t('players.lookup.uuid')"
-            :error-messages="uuid && !isUuid(uuid) ? $t('players.lookup.invalid') : ''"
-            autocomplete="off"
-            spellcheck="false"
-            class="mono"
-            style="min-width: 320px; flex: 1"
-          />
-          <v-btn type="submit" :disabled="!isUuid(uuid)" :loading="lookup.pending.value" prepend-icon="mdi-magnify" class="mt-1">{{ $t('players.lookup.submit') }}</v-btn>
-        </v-form>
+    <M3Card class="mb-6" :title="$t('players.lookup.title')">
+      <p class="mb-4 text-body-medium text-on-surface-variant">{{ $t('players.lookup.privacy') }}</p>
+      <AppProblem :error="lookup.error.value" />
+      <form class="flex flex-wrap items-start gap-3" @submit.prevent="lookup.run()">
+        <M3TextField
+          v-model="uuid"
+          :label="$t('players.lookup.uuid')"
+          :error="uuid && !isUuid(uuid) ? $t('players.lookup.invalid') : ''"
+          autocomplete="off"
+          spellcheck="false"
+          input-class="mono"
+          class="min-w-64 flex-1"
+        />
+        <M3Button type="submit" class="mt-2" :disabled="!isUuid(uuid)" :loading="lookup.pending.value" :loading-label="$t('common.loading')" icon="mdi-magnify">
+          {{ $t('players.lookup.submit') }}
+        </M3Button>
+      </form>
 
-        <div v-if="result" class="mt-4" aria-live="polite">
-          <dl class="kv">
-            <dt>{{ $t('players.pseudonym') }}</dt><dd class="mono">{{ result.pseudonym }}</dd>
-            <dt>{{ $t('players.keyId') }}</dt><dd>{{ result.key_id }}</dd>
-            <dt>{{ $t('players.known') }}</dt><dd>{{ result.known ? $t('common.yes') : $t('common.no') }}</dd>
-            <dt>{{ $t('players.firstSeen') }}</dt><dd>{{ formatDateTime(result.first_seen, locale) }}</dd>
-            <dt>{{ $t('players.lastSeen') }}</dt><dd>{{ formatDateTime(result.last_seen, locale) }}</dd>
-            <dt>{{ $t('players.erasedAt') }}</dt><dd>{{ formatDateTime(result.erased_at, locale) }}</dd>
-          </dl>
-          <div class="d-flex flex-wrap ga-3 mt-4">
-            <v-btn color="error" variant="tonal" prepend-icon="mdi-delete-forever-outline" @click="openErasure(result.pseudonym)">{{ $t('players.erasure.open') }}</v-btn>
-            <v-btn variant="tonal" prepend-icon="mdi-chart-line" :to="{ path: '/scores', query: { pseudonym: result.pseudonym } }">{{ $t('players.openScores') }}</v-btn>
-          </div>
+      <div v-if="result" class="mt-6" aria-live="polite">
+        <dl class="kv">
+          <dt>{{ $t('players.pseudonym') }}</dt><dd class="mono">{{ result.pseudonym }}</dd>
+          <dt>{{ $t('players.keyId') }}</dt><dd>{{ result.key_id }}</dd>
+          <dt>{{ $t('players.known') }}</dt><dd>{{ result.known ? $t('common.yes') : $t('common.no') }}</dd>
+          <dt>{{ $t('players.firstSeen') }}</dt><dd>{{ formatDateTime(result.first_seen, locale) }}</dd>
+          <dt>{{ $t('players.lastSeen') }}</dt><dd>{{ formatDateTime(result.last_seen, locale) }}</dd>
+          <dt>{{ $t('players.erasedAt') }}</dt><dd>{{ formatDateTime(result.erased_at, locale) }}</dd>
+        </dl>
+        <div class="mt-4 flex flex-wrap gap-3">
+          <M3Button variant="tonal" tone="error" icon="mdi-delete-forever-outline" @click="openErasure(result.pseudonym)">{{ $t('players.erasure.open') }}</M3Button>
+          <M3Button variant="tonal" icon="mdi-chart-line" :to="{ path: '/scores', query: { pseudonym: result.pseudonym } }">{{ $t('players.openScores') }}</M3Button>
         </div>
-      </v-card-text>
-    </v-card>
+      </div>
+    </M3Card>
 
-    <v-card variant="flat" color="surface-container-low" class="mb-6">
-      <v-card-title class="text-title-large">{{ $t('players.byPseudonym') }}</v-card-title>
-      <v-card-text class="d-flex flex-wrap ga-3 align-start">
-        <v-text-field
+    <M3Card class="mb-6" :title="$t('players.byPseudonym')">
+      <div class="flex flex-wrap items-start gap-3">
+        <M3TextField
           v-model="pseudonymInput"
           :label="$t('players.pseudonym')"
-          :error-messages="pseudonymInput && !isPseudonym(pseudonymInput) ? $t('players.invalidPseudonym') : ''"
+          :error="pseudonymInput && !isPseudonym(pseudonymInput) ? $t('players.invalidPseudonym') : ''"
           autocomplete="off"
-          class="mono"
-          style="min-width: 320px; flex: 1"
+          input-class="mono"
+          class="min-w-64 flex-1"
         />
-        <v-btn color="error" variant="tonal" class="mt-1" :disabled="!isPseudonym(pseudonymInput)" prepend-icon="mdi-delete-forever-outline" @click="openErasure(pseudonymInput.trim().toLowerCase())">
+        <M3Button
+          class="mt-2"
+          variant="tonal"
+          tone="error"
+          :disabled="!isPseudonym(pseudonymInput)"
+          icon="mdi-delete-forever-outline"
+          @click="openErasure(pseudonymInput.trim().toLowerCase())"
+        >
           {{ $t('players.erasure.open') }}
-        </v-btn>
-      </v-card-text>
-    </v-card>
+        </M3Button>
+      </div>
+    </M3Card>
 
-    <h2 class="text-headline-small mb-1">{{ $t('players.requests') }}</h2>
+    <h2 class="mb-3 text-headline-small">{{ $t('players.requests') }}</h2>
     <AppProblem :error="requests.error.value" />
-    <v-data-table :headers="headers" :items="requests.items.value" :loading="requests.loading.value" :no-data-text="$t('common.empty')" item-value="id">
+    <M3DataTable :columns="headers" :items="requests.items.value" :loading="requests.loading.value">
       <template #[`item.pseudonym`]="{ item }"><span class="mono">{{ shortPseudonym(item.pseudonym) }}…</span></template>
       <template #[`item.requested_at`]="{ item }">{{ formatDateTime(item.requested_at, locale) }}</template>
       <template #[`item.key_deleted`]="{ item }">{{ item.key_deleted ? $t('common.yes') : $t('common.no') }}</template>
       <template #[`item.compaction`]="{ item }">
-        <v-chip size="small" label variant="tonal" :color="item.compaction_pending ? 'warning' : 'primary'" :prepend-icon="item.compaction_pending ? 'mdi-timer-sand' : 'mdi-check'">
+        <M3Chip small :tone="item.compaction_pending ? 'warning' : 'success'" :icon="item.compaction_pending ? 'mdi-timer-sand' : 'mdi-check'">
           {{ item.compaction_pending ? $t('players.compactionPending') : $t('players.compactionDone') }}
-        </v-chip>
+        </M3Chip>
       </template>
       <template #[`item.compacted_at`]="{ item }">{{ formatDateTime(item.compacted_at, locale) }}</template>
-    </v-data-table>
-    <v-btn v-if="requests.hasMore()" class="mt-3" variant="tonal" :loading="requests.loading.value" @click="requests.loadMore()">{{ $t('common.loadMore') }}</v-btn>
+    </M3DataTable>
+    <LoadMore :visible="requests.hasMore()" :loading="requests.loading.value" @more="requests.loadMore()" />
 
     <ErasureDialog v-model="dialog" :pseudonym="target" @erased="onErased" />
   </div>
@@ -117,14 +122,3 @@ const headers = computed(() => [
   { title: t('players.compactedAt'), key: 'compacted_at' },
 ])
 </script>
-
-<style scoped>
-.kv {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 8px 24px;
-}
-.kv dt {
-  color: rgb(var(--v-theme-on-surface-variant));
-}
-</style>

@@ -2,48 +2,33 @@
   <div>
     <PageHeader :title="$t('models.title')">
       <template #actions>
-        <v-btn
-          variant="tonal"
-          prepend-icon="mdi-compare-horizontal"
-          :disabled="selected.length !== 2"
-          :to="compareLink"
-        >
+        <M3Button variant="tonal" icon="mdi-compare-horizontal" :disabled="selected.length !== 2" :to="compareLink">
           {{ $t('models.compare') }}
-        </v-btn>
+        </M3Button>
       </template>
     </PageHeader>
 
-    <v-row dense>
-      <v-col cols="12" sm="6" md="2"><v-text-field v-model="name" :label="$t('models.name')" prepend-inner-icon="mdi-magnify" clearable hide-details /></v-col>
-      <v-col cols="12" sm="6" md="2"><v-text-field v-model="version" :label="$t('models.version')" clearable hide-details /></v-col>
-      <v-col cols="12" sm="6" md="3"><v-text-field v-model="gameContext" :label="$t('models.gameContext')" clearable hide-details /></v-col>
-      <v-col cols="12" sm="6" md="3"><v-text-field v-model="domain" :label="$t('models.domain')" clearable hide-details /></v-col>
-      <v-col cols="12" sm="6" md="2"><v-select v-model="stage" :items="stageItems" :label="$t('models.stageLabel')" hide-details /></v-col>
-    </v-row>
-    <p class="text-body-small text-on-surface-variant mt-1">{{ $t('models.filterHint') }}</p>
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <M3TextField v-model="name" :label="$t('models.name')" leading-icon="mdi-magnify" clearable :clear-label="$t('common.delete')" />
+      <M3TextField v-model="version" :label="$t('models.version')" clearable :clear-label="$t('common.delete')" />
+      <M3TextField v-model="gameContext" :label="$t('models.gameContext')" clearable :clear-label="$t('common.delete')" />
+      <M3TextField v-model="domain" :label="$t('models.domain')" clearable :clear-label="$t('common.delete')" />
+      <M3Select v-model="stage" :items="stageItems" :label="$t('models.stageLabel')" />
+    </div>
+    <p class="mt-2 text-body-small text-on-surface-variant">{{ $t('models.filterHint') }}</p>
 
     <AppProblem :error="list.error.value" />
-    <p class="text-body-medium text-on-surface-variant mt-3">{{ $t('models.compareHint') }}</p>
-    <v-data-table
-      v-model="selected"
-      :headers="headers"
-      :items="list.items.value"
-      :loading="list.loading.value"
-      :no-data-text="$t('common.empty')"
-      item-value="id"
-      show-select
-      return-object
-      hover
-    >
+    <p class="my-3 text-body-medium text-on-surface-variant">{{ $t('models.compareHint') }}</p>
+    <M3DataTable v-model:selected="selected" :columns="headers" :items="list.items.value" :loading="list.loading.value" selectable>
       <template #[`item.name`]="{ item }">
-        <NuxtLink :to="modelLocation(item)" class="text-primary font-weight-medium">{{ item.name }}</NuxtLink>
+        <NuxtLink :to="modelLocation(item)" class="font-medium">{{ item.name }}</NuxtLink>
       </template>
       <template #[`item.stage`]="{ item }"><StatusChip kind="stage" :value="item.stage" /></template>
       <template #[`item.recall`]="{ item }">{{ formatMetric(metricValue(item.metrics, 'recall_at_fpr_0_1pct'), 'ratio') }}</template>
       <template #[`item.p99`]="{ item }">{{ formatMetric(metricValue(item.metrics, 'p99_latency_ms'), 'ms') }}</template>
       <template #[`item.created_at`]="{ item }">{{ formatDateTime(item.created_at, locale) }}</template>
-    </v-data-table>
-    <v-btn v-if="list.hasMore()" class="mt-3" variant="tonal" :loading="list.loading.value" @click="list.loadMore()">{{ $t('common.loadMore') }}</v-btn>
+    </M3DataTable>
+    <LoadMore :visible="list.hasMore()" :loading="list.loading.value" @more="list.loadMore()" />
   </div>
 </template>
 

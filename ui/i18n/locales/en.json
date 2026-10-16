@@ -5,7 +5,13 @@
     "darkTheme": "Switch to dark theme", "navigation": "Main navigation", "refresh": "Refresh", "loading": "Loading",
     "empty": "Nothing here yet", "loadMore": "Load more", "search": "Search", "save": "Save", "cancel": "Cancel",
     "edit": "Edit", "delete": "Delete", "close": "Close", "yes": "Yes", "no": "No", "all": "All",
-    "updated": "Updated", "created": "Created", "createdBy": "Created by", "line": "Line {n}"
+    "updated": "Updated", "created": "Created", "createdBy": "Created by", "line": "Line {n}",
+    "removeItem": "Remove",
+    "saved": "Saved", "deleted": "Deleted", "dismiss": "Dismiss",
+    "table": {
+      "selectRow": "Select row", "sortBy": "Sort by", "rowsPerPage": "Rows per page",
+      "previous": "Previous page", "next": "Next page", "range": "{from}–{to} of {total}"
+    }
   },
   "nav": {
     "dashboard": "Dashboard", "pools": "Pools", "snapshots": "Snapshots", "jobs": "Jobs", "models": "Models",

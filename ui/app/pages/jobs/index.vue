@@ -1,22 +1,16 @@
 <template>
   <div>
-    <PageHeader :title="$t('jobs.title')">
-      <template #actions>
-        <v-select
-          v-model="status"
-          :items="statusItems"
-          :label="$t('jobs.statusLabel')"
-          density="compact"
-          hide-details
-          style="min-width: 200px"
-        />
-        <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="list.loading.value" @click="list.load()">{{ $t('common.refresh') }}</v-btn>
-      </template>
-    </PageHeader>
+    <PageHeader :title="$t('jobs.title')" />
+    <div class="mb-4 flex flex-wrap items-start gap-3">
+      <M3Select v-model="status" :items="statusItems" :label="$t('jobs.statusLabel')" class="w-full sm:w-56" />
+      <M3Button class="mt-2 sm:ml-auto" variant="tonal" icon="mdi-refresh" :loading="list.loading.value" :loading-label="$t('common.loading')" @click="list.load()">
+        {{ $t('common.refresh') }}
+      </M3Button>
+    </div>
     <AppProblem :error="list.error.value" />
-    <v-data-table :headers="headers" :items="list.items.value" :loading="list.loading.value" :no-data-text="$t('common.empty')" item-value="id" hover>
+    <M3DataTable :columns="headers" :items="list.items.value" :loading="list.loading.value">
       <template #[`item.id`]="{ item }">
-        <NuxtLink :to="`/jobs/${item.id}`" class="text-primary font-weight-medium mono">{{ shortId(item.id) }}</NuxtLink>
+        <NuxtLink :to="`/jobs/${item.id}`" class="mono font-medium">{{ shortId(item.id) }}</NuxtLink>
       </template>
       <template #[`item.type`]="{ item }">{{ $t(`jobs.type.${item.type}`) }}</template>
       <template #[`item.status`]="{ item }"><StatusChip kind="job" :value="item.status" /></template>
@@ -24,8 +18,8 @@
         <NuxtLink :to="`/snapshots/${item.snapshot_id}`" class="mono">{{ shortId(item.snapshot_id) }}</NuxtLink>
       </template>
       <template #[`item.created_at`]="{ item }">{{ formatDateTime(item.created_at, locale) }}</template>
-    </v-data-table>
-    <v-btn v-if="list.hasMore()" class="mt-3" variant="tonal" :loading="list.loading.value" @click="list.loadMore()">{{ $t('common.loadMore') }}</v-btn>
+    </M3DataTable>
+    <LoadMore :visible="list.hasMore()" :loading="list.loading.value" @more="list.loadMore()" />
   </div>
 </template>
 

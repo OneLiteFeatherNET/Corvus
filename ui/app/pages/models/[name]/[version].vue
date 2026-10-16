@@ -1,51 +1,41 @@
 <template>
   <div>
     <AppProblem :error="loadError" />
-    <v-progress-linear v-if="!model && !loadError" indeterminate :aria-label="$t('common.loading')" />
+    <M3Progress v-if="!model && !loadError" :label="$t('common.loading')" />
     <template v-if="model">
       <PageHeader :title="`${model.name} ${model.version}`" :subtitle="`${model.game_context} · ${model.domain} · ${model.candidate_type}`">
         <template #actions>
           <StatusChip kind="stage" :value="model.stage" />
-          <v-btn v-if="can('models.transition')" prepend-icon="mdi-swap-horizontal" @click="stageDialog = true">{{ $t('models.transition.open') }}</v-btn>
-          <v-btn variant="tonal" prepend-icon="mdi-compare-horizontal" :to="{ path: '/models/compare', query: { a: modelRef(model) } }">{{ $t('models.compare') }}</v-btn>
+          <M3Button v-if="can('models.transition')" icon="mdi-swap-horizontal" @click="stageDialog = true">{{ $t('models.transition.open') }}</M3Button>
+          <M3Button variant="tonal" icon="mdi-compare-horizontal" :to="{ path: '/models/compare', query: { a: modelRef(model) } }">{{ $t('models.compare') }}</M3Button>
         </template>
       </PageHeader>
 
-      <v-row>
-        <v-col cols="12" md="6">
-          <v-card variant="flat" color="surface-container-low" class="h-100">
-            <v-card-title class="text-title-large">{{ $t('models.metricsTitle') }}</v-card-title>
-            <v-card-text>
-              <dl class="kv">
-                <template v-for="m in METRICS" :key="m.key">
-                  <dt>{{ $t(`models.metrics.${m.label}`) }}</dt>
-                  <dd>{{ formatMetric(metricValue(model.metrics, m.key), m.format) }}</dd>
-                </template>
-              </dl>
-            </v-card-text>
-          </v-card>
-        </v-col>
-        <v-col cols="12" md="6">
-          <v-card variant="flat" color="surface-container-low" class="h-100">
-            <v-card-title class="text-title-large">{{ $t('models.details') }}</v-card-title>
-            <v-card-text>
-              <dl class="kv">
-                <dt>ID</dt><dd class="mono">{{ model.id }}</dd>
-                <dt>{{ $t('jobs.snapshot') }}</dt><dd><NuxtLink :to="`/snapshots/${model.snapshot_id}`" class="mono">{{ model.snapshot_id }}</NuxtLink></dd>
-                <dt>ONNX</dt><dd class="mono">{{ model.onnx_key }}</dd>
-                <dt>{{ $t('common.created') }}</dt><dd>{{ formatDateTime(model.created_at, locale) }} · {{ model.created_by }}</dd>
-              </dl>
-            </v-card-text>
-          </v-card>
-        </v-col>
-      </v-row>
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <M3Card class="h-full" :title="$t('models.metricsTitle')">
+          <dl class="kv">
+            <template v-for="m in METRICS" :key="m.key">
+              <dt>{{ $t(`models.metrics.${m.label}`) }}</dt>
+              <dd>{{ formatMetric(metricValue(model.metrics, m.key), m.format) }}</dd>
+            </template>
+          </dl>
+        </M3Card>
+        <M3Card class="h-full" :title="$t('models.details')">
+          <dl class="kv">
+            <dt>ID</dt><dd class="mono">{{ model.id }}</dd>
+            <dt>{{ $t('jobs.snapshot') }}</dt><dd><NuxtLink :to="`/snapshots/${model.snapshot_id}`" class="mono">{{ model.snapshot_id }}</NuxtLink></dd>
+            <dt>ONNX</dt><dd class="mono">{{ model.onnx_key }}</dd>
+            <dt>{{ $t('common.created') }}</dt><dd>{{ formatDateTime(model.created_at, locale) }} · {{ model.created_by }}</dd>
+          </dl>
+        </M3Card>
+      </div>
 
-      <h2 class="text-headline-small mt-8 mb-3">{{ $t('models.history') }}</h2>
-      <v-data-table :headers="historyHeaders" :items="transitions" :no-data-text="$t('common.empty')" item-value="id">
+      <h2 class="mt-8 mb-3 text-headline-small">{{ $t('models.history') }}</h2>
+      <M3DataTable :columns="historyHeaders" :items="transitions">
         <template #[`item.from_stage`]="{ item }"><StatusChip kind="stage" :value="item.from_stage" /></template>
         <template #[`item.to_stage`]="{ item }"><StatusChip kind="stage" :value="item.to_stage" /></template>
         <template #[`item.at`]="{ item }">{{ formatDateTime(item.at, locale) }}</template>
-      </v-data-table>
+      </M3DataTable>
 
       <StageDialog v-if="can('models.transition')" v-model="stageDialog" :model="model" @changed="onChanged" />
     </template>
@@ -96,14 +86,3 @@ onMounted(async () => {
   }
 })
 </script>
-
-<style scoped>
-.kv {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 8px 24px;
-}
-.kv dt {
-  color: rgb(var(--v-theme-on-surface-variant));
-}
-</style>

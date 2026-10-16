@@ -1,26 +1,27 @@
 <template>
-  <v-dialog :model-value="modelValue" max-width="640" @update:model-value="$emit('update:modelValue', $event)" @after-leave="reset">
-    <v-card :title="$t('labels.create')">
-      <v-card-text>
-        <AppProblem :error="action.error.value" />
-        <v-row dense>
-          <v-col cols="12" sm="4"><v-select v-model="form.subject_type" :items="['pseudonym', 'session']" :label="$t('labels.subjectType')" /></v-col>
-          <v-col cols="12" sm="8"><v-text-field v-model="form.subject" :label="$t('labels.subject')" :error-messages="subjectError" class="mono" /></v-col>
-          <v-col cols="12" sm="4"><v-select v-model="form.label" :items="labelItems" :label="$t('labels.label')" /></v-col>
-          <v-col cols="12" sm="4"><v-select v-model="form.source" :items="sources" :label="$t('labels.source')" /></v-col>
-          <v-col cols="12" sm="4"><v-text-field v-model.number="form.confidence" type="number" min="0" max="1" step="0.05" :label="$t('labels.confidence')" /></v-col>
-          <v-col cols="12" sm="6"><v-text-field v-model="validFrom" type="datetime-local" :label="$t('labels.validFrom')" /></v-col>
-          <v-col cols="12" sm="6"><v-text-field v-model="validTo" type="datetime-local" :label="$t('labels.validTo')" /></v-col>
-          <v-col cols="12"><v-textarea v-model="form.note" :label="$t('labels.note')" :hint="$t('labels.noteHint')" persistent-hint rows="2" counter="2000" /></v-col>
-        </v-row>
-      </v-card-text>
-      <v-card-actions>
-        <v-spacer />
-        <v-btn variant="text" @click="$emit('update:modelValue', false)">{{ $t('common.cancel') }}</v-btn>
-        <v-btn :loading="action.pending.value" @click="submit">{{ $t('common.save') }}</v-btn>
-      </v-card-actions>
-    </v-card>
-  </v-dialog>
+  <M3Dialog :model-value="modelValue" :title="$t('labels.create')" @update:model-value="$emit('update:modelValue', $event)" @after-leave="reset">
+    <div class="flex flex-col gap-4 pt-1">
+      <AppProblem :error="action.error.value" />
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <M3Select v-model="form.subject_type" :items="SUBJECT_TYPES" :label="$t('labels.subjectType')" />
+        <M3TextField v-model="form.subject" :label="$t('labels.subject')" :error="subjectError" input-class="mono" class="sm:col-span-2" />
+      </div>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <M3Select v-model="form.label" :items="labelItems" :label="$t('labels.label')" />
+        <M3Select v-model="form.source" :items="sources" :label="$t('labels.source')" />
+        <M3TextField v-model.number="form.confidence" type="number" min="0" max="1" step="0.05" :label="$t('labels.confidence')" />
+      </div>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <M3TextField v-model="validFrom" type="datetime-local" :label="$t('labels.validFrom')" />
+        <M3TextField v-model="validTo" type="datetime-local" :label="$t('labels.validTo')" />
+      </div>
+      <M3TextField v-model="form.note" multiline :rows="2" :label="$t('labels.note')" :hint="$t('labels.noteHint')" :counter="2000" />
+    </div>
+    <template #actions>
+      <M3Button variant="text" @click="$emit('update:modelValue', false)">{{ $t('common.cancel') }}</M3Button>
+      <M3Button :loading="action.pending.value" :loading-label="$t('common.loading')" @click="submit">{{ $t('common.save') }}</M3Button>
+    </template>
+  </M3Dialog>
 </template>
 
 <script setup lang="ts">
@@ -39,6 +40,7 @@ const validFrom = ref('')
 const validTo = ref('')
 const showErrors = ref(false)
 
+const SUBJECT_TYPES = ['pseudonym', 'session'] as const
 const sources = ['honeypot', 'staff_verdict', 'ban_import', 'weak_rule']
 const labelItems = computed(() => (['legit', 'cheat'] as const).map(v => ({ value: v, title: t(`labels.value.${v}`) })))
 const subjectError = computed(() => (showErrors.value && !isValidSubject(form.subject_type, form.subject) ? t('labels.errors.badSubject') : ''))

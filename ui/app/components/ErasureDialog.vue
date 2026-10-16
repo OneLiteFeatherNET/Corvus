@@ -1,35 +1,38 @@
 <template>
-  <v-dialog :model-value="modelValue" max-width="560" persistent @update:model-value="$emit('update:modelValue', $event)" @after-leave="reset">
-    <v-card :title="$t('players.erasure.title')" role="alertdialog" aria-describedby="erasure-desc">
-      <v-card-text>
-        <v-alert type="warning" variant="tonal" class="mb-4" icon="mdi-alert-outline">
-          <span id="erasure-desc">{{ $t('players.erasure.warning') }}</span>
-        </v-alert>
-        <AppProblem :error="action.error.value" />
-        <p class="mb-2">
-          {{ $t('players.erasure.target') }}:
-          <span class="mono">{{ shortPseudonym(pseudonym) }}…</span>
-        </p>
-        <v-text-field
-          ref="confirmField"
-          v-model="typed"
-          :label="$t('players.erasure.typeToConfirm', { word: ERASE_WORD })"
-          autocomplete="off"
-          autocapitalize="characters"
-          spellcheck="false"
-          :hint="$t('players.erasure.caseHint')"
-          persistent-hint
-        />
-      </v-card-text>
-      <v-card-actions>
-        <v-spacer />
-        <v-btn variant="text" @click="$emit('update:modelValue', false)">{{ $t('common.cancel') }}</v-btn>
-        <v-btn color="error" variant="flat" :disabled="!confirmed" :loading="action.pending.value" prepend-icon="mdi-delete-forever-outline" @click="submit">
-          {{ $t('players.erasure.confirm') }}
-        </v-btn>
-      </v-card-actions>
-    </v-card>
-  </v-dialog>
+  <M3Dialog
+    :model-value="modelValue"
+    :title="$t('players.erasure.title')"
+    persistent
+    alert
+    describedby="erasure-desc"
+    @update:model-value="$emit('update:modelValue', $event)"
+    @after-leave="reset"
+  >
+    <div class="flex flex-col gap-4 pt-1">
+      <M3Alert tone="warning">
+        <span id="erasure-desc">{{ $t('players.erasure.warning') }}</span>
+      </M3Alert>
+      <AppProblem :error="action.error.value" />
+      <p>
+        {{ $t('players.erasure.target') }}:
+        <span class="mono">{{ shortPseudonym(pseudonym) }}…</span>
+      </p>
+      <M3TextField
+        v-model="typed"
+        :label="$t('players.erasure.typeToConfirm', { word: ERASE_WORD })"
+        autocomplete="off"
+        autocapitalize="characters"
+        spellcheck="false"
+        :hint="$t('players.erasure.caseHint')"
+      />
+    </div>
+    <template #actions>
+      <M3Button variant="text" @click="$emit('update:modelValue', false)">{{ $t('common.cancel') }}</M3Button>
+      <M3Button tone="error" :disabled="!confirmed" :loading="action.pending.value" :loading-label="$t('common.loading')" icon="mdi-delete-forever-outline" @click="submit">
+        {{ $t('players.erasure.confirm') }}
+      </M3Button>
+    </template>
+  </M3Dialog>
 </template>
 
 <script setup lang="ts">

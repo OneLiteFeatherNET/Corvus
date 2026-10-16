@@ -1,12 +1,12 @@
 <template>
-  <div class="w-100 text-center">
-    <v-progress-circular v-if="!failure" indeterminate :aria-label="$t('auth.completing')" />
-    <v-alert v-else type="error" variant="tonal" role="alert" :title="$t('auth.failed')">
+  <div class="w-full text-center">
+    <M3Progress v-if="!failure" circular :label="$t('auth.completing')" />
+    <M3Alert v-else tone="error" role="alert" :title="$t('auth.failed')" class="text-start">
       {{ failure }}
       <div class="mt-4">
-        <v-btn @click="retry">{{ $t('auth.login') }}</v-btn>
+        <M3Button @click="retry">{{ $t('auth.login') }}</M3Button>
       </div>
-    </v-alert>
+    </M3Alert>
   </div>
 </template>
 

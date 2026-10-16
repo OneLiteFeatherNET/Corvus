@@ -2,78 +2,74 @@
   <div>
     <PageHeader :title="$t('dashboard.title')" :subtitle="$t('dashboard.subtitle')">
       <template #actions>
-        <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="loading" @click="load">{{ $t('common.refresh') }}</v-btn>
+        <M3Button variant="tonal" icon="mdi-refresh" :loading="loading" :loading-label="$t('common.loading')" @click="load">
+          {{ $t('common.refresh') }}
+        </M3Button>
       </template>
     </PageHeader>
 
     <AppProblem :error="error" />
 
-    <v-row>
-      <v-col v-for="tile in tiles" :key="tile.key" cols="12" sm="6" md="3">
-        <v-card :to="tile.to" variant="flat" color="surface-container-low" class="h-100">
-          <v-card-text>
-            <div class="text-label-large text-on-surface-variant">{{ $t(`dashboard.${tile.key}`) }}</div>
-            <div class="text-headline-large">{{ tile.value }}</div>
-          </v-card-text>
-        </v-card>
-      </v-col>
-    </v-row>
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-4">
+      <M3Card v-for="tile in tiles" :key="tile.key" :to="tile.to" class="h-full">
+        <div class="text-label-large text-on-surface-variant">{{ $t(`dashboard.${tile.key}`) }}</div>
+        <div class="mt-1 text-headline-large">{{ tile.value }}</div>
+      </M3Card>
+    </div>
 
-    <v-row v-if="can('models.read')" class="mt-2">
-      <v-col cols="12">
-        <v-card variant="flat" color="surface-container-low">
-          <v-card-title class="text-title-large">{{ $t('dashboard.modelsPerStage') }}</v-card-title>
-          <v-card-text class="d-flex flex-wrap ga-3">
-            <v-chip
-              v-for="s in STAGES"
-              :key="s"
-              :to="{ path: '/models', query: { stage: s } }"
-              :color="stageColor(s)"
-              :prepend-icon="stageIcon(s)"
-              variant="tonal"
-              label
+    <M3Card v-if="can('models.read')" class="mt-4" :title="$t('dashboard.modelsPerStage')">
+      <div class="flex flex-wrap gap-3">
+        <M3Chip
+          v-for="s in STAGES"
+          :key="s"
+          :to="{ path: '/models', query: { stage: s } }"
+          :tone="chipTone(stageColor(s))"
+          :icon="stageIcon(s)"
+        >
+          {{ $t(`models.stage.${s}`) }}: {{ stageCounts[s] ?? 0 }}
+        </M3Chip>
+      </div>
+    </M3Card>
+
+    <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+      <M3Card v-if="can('jobs.read')" :title="$t('dashboard.recentJobs')">
+        <ul class="-mx-2">
+          <li v-for="j in recentJobs" :key="j.id">
+            <NuxtLink
+              :to="`/jobs/${j.id}`"
+              class="state-layer flex items-center justify-between gap-3 rounded-sm px-2 py-2 text-on-surface no-underline"
             >
-              {{ $t(`models.stage.${s}`) }}: {{ stageCounts[s] ?? 0 }}
-            </v-chip>
-          </v-card-text>
-        </v-card>
-      </v-col>
-    </v-row>
-
-    <v-row class="mt-2">
-      <v-col v-if="can('jobs.read')" cols="12" md="6">
-        <v-card variant="flat" color="surface-container-low">
-          <v-card-title class="text-title-large">{{ $t('dashboard.recentJobs') }}</v-card-title>
-          <v-list bg-color="transparent">
-            <v-list-item v-for="j in recentJobs" :key="j.id" :to="`/jobs/${j.id}`" :title="`${$t(`jobs.type.${j.type}`)} · ${shortId(j.id)}`" :subtitle="formatDateTime(j.created_at, locale)">
-              <template #append><StatusChip kind="job" :value="j.status" /></template>
-            </v-list-item>
-            <v-list-item v-if="!recentJobs.length" :title="$t('common.empty')" />
-          </v-list>
-        </v-card>
-      </v-col>
-      <v-col v-if="can('players.manage')" cols="12" md="6">
-        <v-card variant="flat" color="surface-container-low">
-          <v-card-title class="text-title-large">{{ $t('dashboard.recentErasures') }}</v-card-title>
-          <v-list bg-color="transparent">
-            <v-list-item v-for="e in erasures" :key="e.id" :title="`${e.pseudonym_prefix}…`" :subtitle="formatDateTime(e.requested_at, locale)">
-              <template #append>
-                <v-chip size="small" label variant="tonal" :color="e.compaction_pending ? 'warning' : 'default'">
-                  {{ e.compaction_pending ? $t('dashboard.compactionPending') : $t('dashboard.compacted') }}
-                </v-chip>
-              </template>
-            </v-list-item>
-            <v-list-item v-if="!erasures.length" :title="$t('common.empty')" />
-          </v-list>
-        </v-card>
-      </v-col>
-    </v-row>
+              <span class="min-w-0">
+                <span class="block truncate text-body-large">{{ $t(`jobs.type.${j.type}`) }} · {{ shortId(j.id) }}</span>
+                <span class="block text-body-medium text-on-surface-variant">{{ formatDateTime(j.created_at, locale) }}</span>
+              </span>
+              <StatusChip kind="job" :value="j.status" />
+            </NuxtLink>
+          </li>
+        </ul>
+        <M3EmptyState v-if="!recentJobs.length" :title="$t('common.empty')" />
+      </M3Card>
+      <M3Card v-if="can('players.manage')" :title="$t('dashboard.recentErasures')">
+        <ul>
+          <li v-for="e in erasures" :key="e.id" class="flex items-center justify-between gap-3 py-2">
+            <span class="min-w-0">
+              <span class="mono block truncate text-body-large">{{ e.pseudonym_prefix }}…</span>
+              <span class="block text-body-medium text-on-surface-variant">{{ formatDateTime(e.requested_at, locale) }}</span>
+            </span>
+            <M3Chip small :tone="e.compaction_pending ? 'warning' : 'success'">
+              {{ e.compaction_pending ? $t('dashboard.compactionPending') : $t('dashboard.compacted') }}
+            </M3Chip>
+          </li>
+        </ul>
+        <M3EmptyState v-if="!erasures.length" :title="$t('common.empty')" />
+      </M3Card>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { modelTotal, runningJobs, STAGES, stageCounts as countStages } from '~/lib/dashboard'
-import { formatDateTime, formatNumber, shortId, stageColor, stageIcon } from '~/lib/format'
+import { chipTone, formatDateTime, formatNumber, shortId, stageColor, stageIcon } from '~/lib/format'
 import type { ErasureBrief, JobBrief } from '~/types'
 
 const { can } = useAuth()

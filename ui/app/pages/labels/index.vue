@@ -1,29 +1,37 @@
 <template>
   <div>
-    <PageHeader :title="$t('labels.title')">
-      <template #actions>
-        <v-btn v-if="can('labels.create')" prepend-icon="mdi-plus" @click="createDialog = true">{{ $t('labels.create') }}</v-btn>
-        <v-btn v-if="can('labels.import')" variant="tonal" prepend-icon="mdi-file-upload-outline" @click="importDialog = true">{{ $t('labels.import') }}</v-btn>
-      </template>
-    </PageHeader>
+    <PageHeader :title="$t('labels.title')" />
 
-    <v-row dense>
-      <v-col cols="12" sm="4"><v-select v-model="subjectType" :items="typeItems" :label="$t('labels.subjectType')" hide-details /></v-col>
-      <v-col cols="12" sm="8"><v-text-field v-model="subject" :label="$t('labels.subject')" clearable hide-details class="mono" /></v-col>
-    </v-row>
+    <div class="mb-4 flex flex-wrap items-start gap-3">
+      <M3Select v-model="subjectType" :items="typeItems" :label="$t('labels.subjectType')" class="w-full sm:w-52" />
+      <M3TextField
+        v-model="subject"
+        :label="$t('labels.subject')"
+        clearable
+        :clear-label="$t('common.delete')"
+        input-class="mono"
+        class="w-full sm:w-80"
+      />
+      <div class="mt-2 flex flex-wrap gap-2 sm:ml-auto">
+        <M3Button v-if="can('labels.import')" variant="tonal" icon="mdi-file-upload-outline" @click="importDialog = true">{{ $t('labels.import') }}</M3Button>
+        <M3Button v-if="can('labels.create')" icon="mdi-plus" @click="createDialog = true">{{ $t('labels.create') }}</M3Button>
+      </div>
+    </div>
 
     <AppProblem :error="list.error.value" />
-    <v-data-table class="mt-4" :headers="headers" :items="list.items.value" :loading="list.loading.value" :no-data-text="$t('common.empty')" item-value="id" hover>
+    <M3DataTable :columns="headers" :items="list.items.value" :loading="list.loading.value">
       <template #[`item.subject`]="{ item }"><span class="mono">{{ item.subject.slice(0, 16) }}…</span></template>
       <template #[`item.label`]="{ item }">
-        <v-chip size="small" label variant="tonal" :color="item.label === 'cheat' ? 'error' : 'primary'" :prepend-icon="item.label === 'cheat' ? 'mdi-alert-outline' : 'mdi-check'">{{ $t(`labels.value.${item.label}`) }}</v-chip>
+        <M3Chip small :tone="item.label === 'cheat' ? 'error' : 'primary'" :icon="item.label === 'cheat' ? 'mdi-alert-outline' : 'mdi-check'">
+          {{ $t(`labels.value.${item.label}`) }}
+        </M3Chip>
       </template>
       <template #[`item.confidence`]="{ item }">{{ item.confidence.toFixed(2) }}</template>
       <template #[`item.created_at`]="{ item }">{{ formatDateTime(item.created_at, locale) }}</template>
-    </v-data-table>
-    <v-btn v-if="list.hasMore()" class="mt-3" variant="tonal" :loading="list.loading.value" @click="list.loadMore()">{{ $t('common.loadMore') }}</v-btn>
+    </M3DataTable>
+    <LoadMore :visible="list.hasMore()" :loading="list.loading.value" @more="list.loadMore()" />
 
-    <LabelCreateDialog v-if="can('labels.create')" v-model="createDialog" @created="list.load()" />
+    <LabelCreateDialog v-if="can('labels.create')" v-model="createDialog" @created="onCreated" />
     <LabelImportDialog v-if="can('labels.import')" v-model="importDialog" @imported="list.load()" />
   </div>
 </template>
@@ -34,6 +42,7 @@ import { formatDateTime } from '~/lib/format'
 const { t, locale } = useI18n()
 const { can } = useAuth()
 const labels = useLabels()
+const snack = useSnackbar()
 
 const subjectType = useQueryState('subject_type')
 const subject = useQueryState('subject')
@@ -46,6 +55,11 @@ const list = usePagedList(cursor => labels.list({
   subjectType: subjectType.value || undefined,
   subject: subject.value.trim() || undefined,
 }))
+function onCreated() {
+  snack.show(t('common.saved'))
+  void list.load()
+}
+
 onMounted(list.load)
 watch([subjectType, subject], () => list.load())
 

@@ -1,38 +1,35 @@
 <template>
   <div>
     <AppProblem :error="loadError" />
-    <v-progress-linear v-if="!job && !loadError" indeterminate :aria-label="$t('common.loading')" />
+    <M3Progress v-if="!job && !loadError" :label="$t('common.loading')" />
     <template v-if="job">
       <PageHeader :title="`${$t(`jobs.type.${job.type}`)} ${shortId(job.id)}`">
         <template #actions>
           <StatusChip kind="job" :value="job.status" />
-          <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="refreshing" @click="refresh">{{ $t('common.refresh') }}</v-btn>
+          <M3Button variant="tonal" icon="mdi-refresh" :loading="refreshing" :loading-label="$t('common.loading')" @click="refresh">{{ $t('common.refresh') }}</M3Button>
         </template>
       </PageHeader>
 
       <div aria-live="polite" class="mb-2">
-        <v-alert v-if="polling.poller.running" type="info" variant="tonal" density="compact" icon="mdi-progress-clock">{{ $t('jobs.polling') }}</v-alert>
+        <M3Alert v-if="polling.poller.running" tone="info" class="mb-4">{{ $t('jobs.polling') }}</M3Alert>
         <AppProblem :error="polling.lastError.value" />
       </div>
 
-      <v-card variant="flat" color="surface-container-low" class="mb-4">
-        <v-card-text>
-          <dl class="kv">
-            <dt>ID</dt><dd class="mono">{{ job.id }}</dd>
-            <dt>{{ $t('jobs.snapshot') }}</dt><dd><NuxtLink :to="`/snapshots/${job.snapshot_id}`" class="mono">{{ job.snapshot_id }}</NuxtLink></dd>
-            <dt>{{ $t('jobs.runner') }}</dt><dd>{{ job.runner }}</dd>
-            <dt>{{ $t('common.created') }}</dt><dd>{{ formatDateTime(job.created_at, locale) }} · {{ job.created_by }}</dd>
-            <dt>{{ $t('common.updated') }}</dt><dd>{{ formatDateTime(job.updated_at, locale) }}</dd>
-            <dt>{{ $t('jobs.finished') }}</dt><dd>{{ formatDateTime(job.finished_at, locale) }}</dd>
-            <dt>{{ $t('jobs.message') }}</dt><dd>{{ job.message || '–' }}</dd>
-          </dl>
-        </v-card-text>
-      </v-card>
+      <M3Card class="mb-4">
+        <dl class="kv">
+          <dt>ID</dt><dd class="mono">{{ job.id }}</dd>
+          <dt>{{ $t('jobs.snapshot') }}</dt><dd><NuxtLink :to="`/snapshots/${job.snapshot_id}`" class="mono">{{ job.snapshot_id }}</NuxtLink></dd>
+          <dt>{{ $t('jobs.runner') }}</dt><dd>{{ job.runner }}</dd>
+          <dt>{{ $t('common.created') }}</dt><dd>{{ formatDateTime(job.created_at, locale) }} · {{ job.created_by }}</dd>
+          <dt>{{ $t('common.updated') }}</dt><dd>{{ formatDateTime(job.updated_at, locale) }}</dd>
+          <dt>{{ $t('jobs.finished') }}</dt><dd>{{ formatDateTime(job.finished_at, locale) }}</dd>
+          <dt>{{ $t('jobs.message') }}</dt><dd>{{ job.message || '–' }}</dd>
+        </dl>
+      </M3Card>
 
-      <v-card variant="flat" color="surface-container-low">
-        <v-card-title class="text-title-large">{{ $t('jobs.params') }}</v-card-title>
-        <v-card-text><pre class="mono" style="white-space: pre-wrap">{{ JSON.stringify(job.params, null, 2) }}</pre></v-card-text>
-      </v-card>
+      <M3Card :title="$t('jobs.params')">
+        <pre class="mono whitespace-pre-wrap">{{ JSON.stringify(job.params, null, 2) }}</pre>
+      </M3Card>
     </template>
   </div>
 </template>
@@ -67,14 +64,3 @@ async function refresh() {
 
 onMounted(refresh)
 </script>
-
-<style scoped>
-.kv {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 8px 24px;
-}
-.kv dt {
-  color: rgb(var(--v-theme-on-surface-variant));
-}
-</style>

@@ -1,4 +1,4 @@
-import vuetify, { transformAssetUrls } from 'vite-plugin-vuetify'
+import tailwindcss from '@tailwindcss/vite'
 
 // Static single-page app. Everything that differs between deployments (API origin, OIDC settings, base path)
 // is read from /config.json at startup, never at build time. Asset URLs are relative so that the same build
@@ -12,11 +12,6 @@ export default defineNuxtConfig({
   modules: [
     '@nuxt/eslint',
     '@nuxtjs/i18n',
-    (_options, nuxt) => {
-      nuxt.hooks.hook('vite:extendConfig', (config) => {
-        config.plugins!.push(vuetify({ autoImport: true }))
-      })
-    },
   ],
 
   app: {
@@ -34,18 +29,14 @@ export default defineNuxtConfig({
   },
 
   css: [
-    '@fontsource/roboto/300.css',
     '@fontsource/roboto/400.css',
     '@fontsource/roboto/500.css',
     '@fontsource/roboto/700.css',
-    '@mdi/font/css/materialdesignicons.css',
-    '~/assets/main.css',
+    '~/assets/css/main.css',
   ],
 
-  build: { transpile: ['vuetify'] },
-
   vite: {
-    vue: { template: { transformAssetUrls } },
+    plugins: [tailwindcss()],
   },
 
   i18n: {
