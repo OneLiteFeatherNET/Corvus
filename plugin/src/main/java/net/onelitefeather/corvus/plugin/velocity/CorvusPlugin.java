@@ -158,7 +158,8 @@ public final class CorvusPlugin {
                 natsBlocked && config.sinkType() == CorvusConfig.SinkType.NATS ? null
                         : key.map(Pseudonymizer::new).orElse(null),
                 new PlayerFilter(config.listMode(), config.allowlist(), config.blocklist(), this::syncedBlocked),
-                new GameContextMapper(config.serverContexts(), config.defaultGameContext()),
+                new GameContextMapper(config.serverContexts(), config.defaultGameContext(),
+                        config.stripInstanceSuffix()),
                 queue, nano, InstantSource.system(),
                 () -> {
                     byte[] id = new byte[16];

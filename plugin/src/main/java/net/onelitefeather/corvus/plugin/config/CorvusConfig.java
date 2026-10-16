@@ -27,6 +27,7 @@ public record CorvusConfig(
         long flushIntervalMillis,
         String defaultGameContext,
         Map<String, String> serverContexts,
+        boolean stripInstanceSuffix,
         SinkType sinkType,
         Nats nats,
         Scores scores,
@@ -162,8 +163,13 @@ public record CorvusConfig(
 
             [game_context]
             default = "unknown"
+            # Backends that are CloudNet services are named <Task>-<n> (Lobby-1, Lobby-2, Team-Build-1). Lookup order:
+            # 1. the exact server name, 2. the name without ONE trailing "-<digits>" (Lobby-2 -> lobby,
+            # Team-Build-1 -> team-build), 3. default. Names are matched case-insensitively. Set to false to
+            # match exact server names only.
+            strip_instance_suffix = true
 
-            # backend server name = game context tag
+            # server name (or CloudNet task name) = game context tag
             [game_context.servers]
             lobby = "lobby"
             pvp = "pvp"
@@ -211,6 +217,7 @@ public record CorvusConfig(
                 Math.max(100L, toml.getLong("capture.flush_interval_seconds", 5L) * 1000L),
                 toml.getString("game_context.default", "unknown"),
                 contexts,
+                toml.getBoolean("game_context.strip_instance_suffix", true),
                 sinkType,
                 parseNats(toml, sinkType),
                 parseScores(toml, sinkType),
