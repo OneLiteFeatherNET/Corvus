@@ -5,6 +5,7 @@ import io.nats.client.ConnectionListener;
 import io.nats.client.JetStream;
 import io.nats.client.Nats;
 import io.nats.client.Options;
+import javax.net.ssl.SSLContext;
 import io.nats.client.impl.Headers;
 import io.nats.client.impl.NatsMessage;
 import net.onelitefeather.corvus.plugin.capture.EnvelopePublisher;
@@ -32,16 +33,17 @@ public final class JetStreamEnvelopePublisher implements EnvelopePublisher {
     private volatile Connection connection;
     private volatile boolean closed;
 
-    public JetStreamEnvelopePublisher(CorvusConfig.Nats config, Consumer<String> info, Consumer<String> warn) {
+    public JetStreamEnvelopePublisher(CorvusConfig.Nats config, SSLContext sslContext, Consumer<String> info,
+                                      Consumer<String> warn) {
         this.publishTimeoutMillis = config.publishTimeoutMillis();
         this.info = info;
         this.warn = warn;
-        Thread t = new Thread(() -> connect(config), "corvus-nats-connect");
+        Thread t = new Thread(() -> connect(config, sslContext), "corvus-nats-connect");
         t.setDaemon(true);
         t.start();
     }
 
-    private void connect(CorvusConfig.Nats config) {
+    private void connect(CorvusConfig.Nats config, SSLContext sslContext) {
         try {
             Options.Builder builder = new Options.Builder()
                     .servers(config.urls().toArray(new String[0]))
@@ -60,6 +62,9 @@ public final class JetStreamEnvelopePublisher implements EnvelopePublisher {
                             warn.accept("NATS exception: " + exp);
                         }
                     });
+            if (sslContext != null) {
+                builder.sslContext(sslContext);
+            }
             if (!config.credsFile().isEmpty()) {
                 builder.credentialPath(config.credsFile());
             }

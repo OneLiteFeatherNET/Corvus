@@ -6,6 +6,7 @@ import io.nats.client.Dispatcher;
 import io.nats.client.ErrorListener;
 import io.nats.client.Nats;
 import io.nats.client.Options;
+import javax.net.ssl.SSLContext;
 import net.onelitefeather.corvus.plugin.config.CorvusConfig;
 
 import java.time.Duration;
@@ -25,17 +26,17 @@ public final class ScoreSubscriber {
     private volatile Connection connection;
     private volatile boolean closed;
 
-    public ScoreSubscriber(CorvusConfig.Nats config, String subject, Consumer<byte[]> handler,
+    public ScoreSubscriber(CorvusConfig.Nats config, SSLContext sslContext, String subject, Consumer<byte[]> handler,
                            Consumer<String> info, Consumer<String> warn) {
         this.handler = handler;
         this.info = info;
         this.warn = warn;
-        Thread t = new Thread(() -> connect(config, subject), "corvus-nats-score-connect");
+        Thread t = new Thread(() -> connect(config, sslContext, subject), "corvus-nats-score-connect");
         t.setDaemon(true);
         t.start();
     }
 
-    private void connect(CorvusConfig.Nats config, String subject) {
+    private void connect(CorvusConfig.Nats config, SSLContext sslContext, String subject) {
         try {
             Options.Builder builder = new Options.Builder()
                     .servers(config.urls().toArray(new String[0]))
@@ -53,6 +54,9 @@ public final class ScoreSubscriber {
                             warn.accept("NATS score subscription exception: " + exp);
                         }
                     });
+            if (sslContext != null) {
+                builder.sslContext(sslContext);
+            }
             if (!config.credsFile().isEmpty()) {
                 builder.credentialPath(config.credsFile());
             }

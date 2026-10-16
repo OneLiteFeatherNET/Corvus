@@ -33,6 +33,7 @@ import net.onelitefeather.corvus.plugin.capture.WriterThread;
 import net.onelitefeather.corvus.plugin.config.CorvusConfig;
 import net.onelitefeather.corvus.plugin.nats.JetStreamEnvelopePublisher;
 import net.onelitefeather.corvus.plugin.nats.ScoreSubscriber;
+import net.onelitefeather.corvus.plugin.tls.TlsTrust;
 import net.onelitefeather.corvus.plugin.score.PseudonymDirectory;
 import net.onelitefeather.corvus.plugin.score.RateLimitedLog;
 import net.onelitefeather.corvus.plugin.score.ScoreProcessor;
@@ -46,6 +47,7 @@ import net.onelitefeather.corvus.plugin.privacy.Pseudonymizer;
 import net.onelitefeather.corvus.plugin.time.NanoClock;
 import org.slf4j.Logger;
 
+import javax.net.ssl.SSLContext;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -130,14 +132,31 @@ public final class CorvusPlugin {
                 pseudonyms.add(online.getUniqueId());
             }
         }
-        startBlocklistSync(config, nano);
+        Optional<SSLContext> sslContext = Optional.empty();
+        boolean tlsFailed = false;
+        try {
+            sslContext = TlsTrust.sslContext(config.tls().caFile(), dataDirectory);
+            sslContext.ifPresent(c -> logger.info("Corvus trusts the extra CA bundle {} in addition to the JVM "
+                    + "default CAs", TlsTrust.resolve(config.tls().caFile(), dataDirectory)));
+        } catch (TlsTrust.TlsSetupException e) {
+            tlsFailed = true;
+            logger.error("{}. The NATS sink, scores and blocklist sync are NOT started; fix tls.ca_file and "
+                    + "restart the proxy.", e.getMessage());
+        }
+        SSLContext tls = sslContext.orElse(null);
+        boolean natsBlocked = tlsFailed && (config.sinkType() == CorvusConfig.SinkType.NATS
+                || config.scores().enabled());
+        if (!tlsFailed) {
+            startBlocklistSync(config, nano, tls);
+        }
         Metrics metrics = new Metrics();
         ByteBoundedQueue queue = new ByteBoundedQueue(config.queueMaxBytes());
         SecureRandom random = new SecureRandom();
         engine = new CaptureEngine(
                 new CaptureEngine.Settings(config.payloadMode(), config.maxPayloadBytes(), config.proxyId(),
                         BuildConstants.VERSION),
-                key.map(Pseudonymizer::new).orElse(null),
+                natsBlocked && config.sinkType() == CorvusConfig.SinkType.NATS ? null
+                        : key.map(Pseudonymizer::new).orElse(null),
                 new PlayerFilter(config.listMode(), config.allowlist(), config.blocklist(), this::syncedBlocked),
                 new GameContextMapper(config.serverContexts(), config.defaultGameContext()),
                 queue, nano, InstantSource.system(),
@@ -148,7 +167,9 @@ public final class CorvusPlugin {
                 },
                 metrics, logger::info);
 
-        startScores(config, key, nano);
+        if (!natsBlocked) {
+            startScores(config, key, nano, tls);
+        }
 
         StatsReporter commandStats = new StatsReporter(metrics, queue, engine, nano);
         CommandMeta meta = proxy.getCommandManager().metaBuilder("corvus").plugin(this).build();
@@ -157,7 +178,8 @@ public final class CorvusPlugin {
                         () -> blocklist == null ? "blocklist_sync=off" : blocklist.status()));
 
         if (!engine.isCapturing()) {
-            logger.warn("Corvus is loaded but NOT capturing (no valid pseudonym key). Players are unaffected.");
+            logger.warn("Corvus is loaded but NOT capturing ({}). Players are unaffected.",
+                    natsBlocked ? "tls.ca_file is invalid and the sink is NATS" : "no valid pseudonym key");
             return;
         }
 
@@ -166,7 +188,7 @@ public final class CorvusPlugin {
             CorvusConfig.Nats nats = config.nats();
             logger.info("Corvus sink: NATS JetStream {} -> {}.{}.<partition> (connecting in the background)",
                     nats.urls(), nats.subjectPrefix(), config.proxyId());
-            transport = new NatsTransport(new JetStreamEnvelopePublisher(nats, logger::info, logger::warn),
+            transport = new NatsTransport(new JetStreamEnvelopePublisher(nats, tls, logger::info, logger::warn),
                     nats.subjectPrefix(), config.proxyId(), nats.partitions(), nats.maxInFlightBytes(), nano, metrics,
                     logger::warn);
         } else {
@@ -186,7 +208,7 @@ public final class CorvusPlugin {
     }
 
     /** Score subscription and API; independent of capture, but needs the pseudonym key to map players. */
-    private void startScores(CorvusConfig config, Optional<PseudonymKey> key, NanoClock nano) {
+    private void startScores(CorvusConfig config, Optional<PseudonymKey> key, NanoClock nano, SSLContext tls) {
         CorvusConfig.Scores scores = config.scores();
         AtomicInteger threadNumber = new AtomicInteger();
         scoreExecutor = new ThreadPoolExecutor(scores.listenerThreads(), scores.listenerThreads(), 0L,
@@ -207,7 +229,7 @@ public final class CorvusPlugin {
             return;
         }
         ScoreProcessor processor = new ScoreProcessor(pseudonyms, scoreRegistry, InstantSource.system(), log);
-        scoreSubscriber = new ScoreSubscriber(config.nats(), scores.subject(), processor::onMessage, logger::info,
+        scoreSubscriber = new ScoreSubscriber(config.nats(), tls, scores.subject(), processor::onMessage, logger::info,
                 logger::warn);
         logger.info("Corvus scores: subscribing to {} (connecting in the background)", scores.subject());
     }
@@ -220,7 +242,7 @@ public final class CorvusPlugin {
     }
 
     /** Periodic blocklist fetch on its own daemon thread, never on Netty or Velocity event threads. */
-    private void startBlocklistSync(CorvusConfig config, NanoClock nano) {
+    private void startBlocklistSync(CorvusConfig config, NanoClock nano, SSLContext tls) {
         CorvusConfig.BlocklistSync sync = config.blocklistSync();
         if (!sync.enabled()) {
             return;
@@ -237,7 +259,7 @@ public final class CorvusPlugin {
         Duration timeout = Duration.ofSeconds(sync.timeoutSeconds());
         RateLimitedLog log = new RateLimitedLog(nano, logger::warn, RateLimitedLog.DEFAULT_INTERVAL_NANOS);
         blocklist = new SyncedBlocklist(
-                new HttpBlocklistClient(sync.url(), token.get(), timeout, new JdkHttpTransport(timeout)),
+                new HttpBlocklistClient(sync.url(), token.get(), timeout, new JdkHttpTransport(timeout, tls)),
                 InstantSource.system(), log, () -> {
                     CaptureEngine current = engine;
                     int ended = current == null ? 0 : current.endBlockedSessions();

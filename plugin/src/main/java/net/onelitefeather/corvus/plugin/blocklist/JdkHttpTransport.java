@@ -1,5 +1,6 @@
 package net.onelitefeather.corvus.plugin.blocklist;
 
+import javax.net.ssl.SSLContext;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -14,8 +15,17 @@ public final class JdkHttpTransport implements HttpTransport {
     private final HttpClient client;
 
     public JdkHttpTransport(Duration connectTimeout) {
-        this.client = HttpClient.newBuilder().connectTimeout(connectTimeout)
-                .followRedirects(HttpClient.Redirect.NEVER).build();
+        this(connectTimeout, null);
+    }
+
+    /** {@code sslContext} null = JVM default trust. */
+    public JdkHttpTransport(Duration connectTimeout, SSLContext sslContext) {
+        HttpClient.Builder builder = HttpClient.newBuilder().connectTimeout(connectTimeout)
+                .followRedirects(HttpClient.Redirect.NEVER);
+        if (sslContext != null) {
+            builder.sslContext(sslContext);
+        }
+        this.client = builder.build();
     }
 
     @Override

@@ -63,6 +63,12 @@ token_file = ""
 interval_seconds = 300
 timeout_seconds = 10
 
+[tls]
+# Extra PEM CA bundle (e.g. a private step-ca) trusted in addition to the JVM default CAs for NATS (tls://, wss://)
+# and blocklist_sync (https://); relative to plugins/corvus or absolute. Empty = JVM default only. The pilot does
+# not need it. An unreadable file stops the NATS sink, scores and blocklist sync (ERROR in the log).
+ca_file = ""
+
 [game_context]
 default = "unknown"
 
