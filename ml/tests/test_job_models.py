@@ -321,3 +321,71 @@ def test_an_inconclusive_range_test_is_a_warning_in_the_job_result():
     info = _training_info({"training": {"lr": 0.002, "lr_plan": plan}})
 
     assert info["training"]["warnings"] == [plan["lr_find"]["warning"]]
+
+
+# --- too few players for a val / test split -------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def one_player():
+    return generate(
+        SyntheticConfig(
+            seed=5,
+            n_legit=0,
+            n_cheat=0,
+            n_unlabelled=1,
+            sessions_per_player=3,
+            windows_per_session=6,
+            frames_per_window=SEQ_LEN,
+            contexts=("pvp",),
+        )
+    )
+
+
+ONE_PLAYER = {
+    **QUICK,
+    "candidates": {"isolation_forest": {"n_estimators": 20}},
+    "unlabelled": "assume_legit",
+}
+
+
+ONE_PLAYER_EXCLUDE = {k: v for k, v in ONE_PLAYER.items() if k != "unlabelled"}
+
+
+def test_evaluate_with_a_single_player_reports_the_empty_test_split(tmp_path, one_player):
+    env = with_features(tmp_path, one_player)
+
+    outcome = evaluate(make_context("evaluate", **ONE_PLAYER), env)
+
+    cand = outcome.result["contexts"]["pvp"]["candidates"]["isolation_forest"]
+    assert cand["status"] == "ok"
+    assert "needs at least 2 players" in cand["test_skipped"]
+    assert "recall_at_fpr_0_1pct" not in cand
+
+
+def test_train_with_a_single_player_still_registers_with_a_warning(tmp_path, one_player):
+    env = with_features(tmp_path, one_player)
+
+    outcome = train(make_context("train", **ONE_PLAYER), env)
+
+    assert len(env.api.models) == 1
+    assert any("test split empty" in w for w in outcome.result["warnings"])
+    assert env.api.models[0]["metrics"].get("test_windows") is None
+    assert any("parity checked on train" in w for w in outcome.result["warnings"])
+
+
+def test_train_fails_with_a_reason_when_no_context_has_training_windows(tmp_path, tables):
+    env = with_features(tmp_path, tables)
+
+    with pytest.raises(JobError, match="no legit training windows"):
+        train(make_context("train", label_sources=["no-such-source"], **ONE_PLAYER_EXCLUDE), env)
+
+
+def test_a_sequence_candidate_with_a_single_player_does_not_crash(tmp_path, one_player):
+    env = with_features(tmp_path, one_player)
+    params = {**ONE_PLAYER, "candidates": {"gru_autoencoder": {"epochs": 1, "batch_size": 8}}}
+
+    outcome = train(make_context("train", **params), env)
+
+    assert outcome.result["contexts"]["pvp"]["candidates"]["gru_autoencoder"]["status"] == "ok"
+    assert len(env.api.models) == 1

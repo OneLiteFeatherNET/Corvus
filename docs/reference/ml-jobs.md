@@ -125,6 +125,18 @@ it uploads the reports and registers nothing. **`train`** does the same, then fo
 takes the best usable candidate (highest `select_by` on the test split, ties by lower p99 latency;
 the ONNX parity check must pass), uploads its artefacts and registers the model.
 
+**Few players.** The split is by player and stratified by label, so a stratum needs at least 3
+players to fill train, val and test, and at least 2 to get a test split. With fewer, the val
+and/or test split is empty. The job does not fail for that: nothing is scored on an empty split,
+the candidate's `test` / `val` metrics are absent with `test_skipped` / `val_skipped` (for example
+`test split empty: needs at least 2 players per label stratum`), the ONNX parity check and the
+benchmark run on the windows of the first non-empty split (test, val, train; reported as
+`onnx.parity_on` in the report and `parity_on` in the result), and `train` still registers the
+model, without test metrics (the selection treats a missing metric as worst). The result lists
+what the caller must know under `warnings`. A candidate without usable training windows is
+skipped with its `reason`; the job only fails if no candidate in any context is usable, and the
+message names each reason.
+
 | Param | Default | Meaning |
 |---|---|---|
 | `candidates` | `["isolation_forest", "gradient_boosting"]` | list of names or `{name: {hyperparameters}}`; `raw_hier_classifier` / `raw_hier_anomaly` need the raw build and cannot be mixed with the others; the torch candidates take `lr` / `pretrain_lr` as a number or `"auto"` (range test, see [learning-rate-finder.md](../explanation/learning-rate-finder.md)); the result then lists the found rate, rule, schedule and curve under `training` |

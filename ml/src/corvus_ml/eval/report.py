@@ -96,12 +96,16 @@ def to_markdown(report: dict) -> str:
             if c["status"] != "ok":
                 rows.append([name, *["skipped"] + ["-"] * (len(head) - 2)])
                 continue
-            t, b, o = c["test"], c.get("bench", {}), c.get("onnx", {})
-            row = [name, str(c["n_params"]), _f(t["roc_auc"]), _f(t["pr_auc"])]
+            b, o = c.get("bench", {}), c.get("onnx", {})
+            t = c["test"] or {}  # empty test split: the metric cells stay empty
+            row = [name, str(c["n_params"]), _f(t.get("roc_auc")), _f(t.get("pr_auc"))]
             for f in fprs:
                 tag = _tag(f)
-                low = "" if t[f"resolved@fpr{tag}"] else "*"
-                row += [_f(t[f"recall@fpr{tag}"]) + low, _f(t[f"recall@fpr{tag}_player_max"]) + low]
+                low = "" if t.get(f"resolved@fpr{tag}", True) else "*"
+                row += [
+                    _f(t.get(f"recall@fpr{tag}")) + low,
+                    _f(t.get(f"recall@fpr{tag}_player_max")) + low,
+                ]
             row += [
                 _f(t.get("ece")),
                 _f(b.get("latency_p50_ms"), 3),
@@ -125,6 +129,13 @@ def to_markdown(report: dict) -> str:
         ]
         if skipped:
             lines += ["Skipped:", *skipped, ""]
+        no_test = [
+            f"- `{n}`: {c['test_skipped']}"
+            for n, c in info["candidates"].items()
+            if c["status"] == "ok" and c.get("test_skipped")
+        ]
+        if no_test:
+            lines += ["No test metrics:", *no_test, ""]
         lines += _tune_section(info)
         lines += _lr_section(info)
         lines += _sizes_section(info, budget)
@@ -268,7 +279,7 @@ def _confusion_section(info: dict, fprs: list[float]) -> list[str]:
         if c["status"] != "ok":
             continue
         for f in fprs:
-            k = c["confusion_at_val_threshold"][_tag(f)]
+            k = c["confusion_at_val_threshold"].get(_tag(f), {})
             if "tp" not in k:
                 continue
             rows.append(

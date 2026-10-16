@@ -113,8 +113,21 @@ def _training_sets(
     return pick(idx_train), pick(idx_val)
 
 
-def _eval_metrics(cand: Candidate, data: EvalData, idx: np.ndarray, fprs) -> dict:
+EMPTY_SPLIT_HINT = "needs at least 2 players per label stratum"
+
+
+def _empty_reason(part: str, idx: np.ndarray) -> str:
+    """Why a split cannot be evaluated: it has no windows, or none that carry a label."""
+    if len(idx) == 0:
+        return f"{part} split empty: {EMPTY_SPLIT_HINT}"
+    return f"{part} split has no labelled windows"
+
+
+def _eval_metrics(cand: Candidate, data: EvalData, idx: np.ndarray, fprs) -> dict | None:
+    """Metrics on the labelled windows of ``idx``; None (candidate not called) if there are none."""
     sub = data.take(idx[data.label[idx] != LABEL_UNLABELLED])
+    if len(sub) == 0:
+        return None
     y = (sub.label == LABEL_CHEAT).astype(np.int8)
     s = cand.calibrated_score(sub)
     out = M.window_metrics(y, s, sub.group_codes(), fprs)
@@ -186,11 +199,22 @@ def resolve_spec(cfg: EvalConfig) -> FeatureSpec:
     return FeatureSpec.current(seq_len=cfg.seq_len)
 
 
+def _parity_windows(data: EvalData, split) -> tuple[EvalData, str]:
+    """Real windows for the ONNX parity check and the benchmark: the labelled windows of the
+    first non-empty split in the order test, val, train (then any train window, labelled or
+    not). A tiny dataset may leave the held-out splits empty; the graph is still checked."""
+    for part, idx in (("test", split.test), ("val", split.val), ("train", split.train)):
+        labelled = idx[data.label[idx] != LABEL_UNLABELLED]
+        if len(labelled):
+            return data.take(labelled), part
+    return data.take(split.train), "train"
+
+
 def _export_and_bench(
     cand: Candidate,
     cfg: EvalConfig,
     data: EvalData,
-    test_idx: np.ndarray,
+    split,
     out: Path,
     fprs,
     spec: FeatureSpec,
@@ -200,11 +224,11 @@ def _export_and_bench(
     spec.write(out)  # the exported graphs are only meaningful together with this layout
     if spec.raw_bytes is not None and data.meta.get("tokenizer_json"):
         (out / spec.raw_bytes.tokenizer_file).write_bytes(data.meta["tokenizer_json"])
-    test = data.take(test_idx[data.label[test_idx] != LABEL_UNLABELLED])
+    test, parity_on = _parity_windows(data, split)
     if cand.parity_rows is not None:
         test = test.take(np.arange(min(len(test), cand.parity_rows)))
     if len(test) == 0:
-        return {"error": "no labelled test windows"}
+        return {"error": "no windows to check the ONNX graph on"}
     x = cand.inputs(test)
     shipped = out / f"{cand.name}.onnx"
     native_raw = cand.score(test)
@@ -238,6 +262,7 @@ def _export_and_bench(
         "calibrated": cand.calibration is not None,
         "max_abs_diff": float(np.abs(onnx_scores - native).max()),
         "parity_ok": bool(np.allclose(onnx_scores, native, rtol=PARITY_RTOL, atol=atol)),
+        "parity_on": parity_on,
     }
     if not cfg.bench.enabled:
         return res
@@ -299,6 +324,8 @@ def _learning_curve(name, cfg, data, split, fprs) -> list[dict]:
         if cand is None:
             return {}
         m = _eval_metrics(cand, data, split.test, fprs)
+        if m is None:
+            return {}
         keys = ["roc_auc", "pr_auc", *[f"recall@fpr{_tag(f)}" for f in fprs]]
         return {
             "n_train_players": float(np.unique(groups[sub]).size),
@@ -335,13 +362,18 @@ def run_candidate(
     if cand.calibration is not None:
         c = cand.calibration
         res["calibration"] = {"method": c.method, "n_fit": c.n_fit, "fit_on": c.fit_on}
-    res["test"] = _eval_metrics(cand, data, split.test, fprs)
-    res["val"] = _eval_metrics(cand, data, split.val, fprs)
-    yv, sv, _ = _scores_and_labels(cand, data, split.val)
-    yt, st, _ = _scores_and_labels(cand, data, split.test)
-    res["confusion_at_val_threshold"] = {
-        _tag(f): M.confusion_at_val_threshold(yv, sv, yt, st, f) for f in fprs
-    }
+    for part, idx in (("test", split.test), ("val", split.val)):
+        res[part] = _eval_metrics(cand, data, idx, fprs)
+        if res[part] is None:
+            res[f"{part}_skipped"] = _empty_reason(part, idx)
+            log.warning("%s: %s; no %s metrics", name, res[f"{part}_skipped"], part)
+    res["confusion_at_val_threshold"] = {}
+    if res["test"] is not None and res["val"] is not None:
+        yv, sv, _ = _scores_and_labels(cand, data, split.val)
+        yt, st, _ = _scores_and_labels(cand, data, split.test)
+        res["confusion_at_val_threshold"] = {
+            _tag(f): M.confusion_at_val_threshold(yv, sv, yt, st, f) for f in fprs
+        }
     if hasattr(cand, "history"):
         res["training"] = {
             "best_epoch": cand.history.best_epoch,
@@ -354,8 +386,8 @@ def run_candidate(
         if pre is not None and pre.lr_plan is not None:
             res["training"]["pretrain_lr_plan"] = pre.lr_plan
     spec = spec or FeatureSpec.current(seq_len=cfg.seq_len)
-    res.update(_export_and_bench(cand, cfg, data, split.test, out_dir / "onnx" / ctx, fprs, spec))
-    if cfg.learning_curve:
+    res.update(_export_and_bench(cand, cfg, data, split, out_dir / "onnx" / ctx, fprs, spec))
+    if cfg.learning_curve and res["test"] is not None:
         res["learning_curve"] = _learning_curve(name, cfg, data, split, fprs)
     return res
 

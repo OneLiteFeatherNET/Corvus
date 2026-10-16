@@ -301,13 +301,59 @@ def _summary(info: dict[str, Any], chosen: str | None) -> dict[str, Any]:
         "players": info["players"],
         "candidates": {
             name: (
-                {"status": "ok", **registry_metrics(c), **_training_info(c)}
+                {
+                    "status": "ok",
+                    **registry_metrics(c),
+                    **_training_info(c),
+                    **{k: c[k] for k in ("test_skipped", "val_skipped") if c.get(k)},
+                    **(
+                        {"parity_on": c["onnx"]["parity_on"]}
+                        if "parity_on" in c.get("onnx", {})
+                        else {}
+                    ),
+                }
                 if c["status"] == "ok"
                 else {"status": c["status"], "reason": c.get("reason")}
             )
             for name, c in info["candidates"].items()
         },
     }
+
+
+def _warnings(contexts: dict[str, Any], chosen: dict[str, str | None]) -> list[str]:
+    """Things a caller should know about the result: held-out splits that could not be scored."""
+    out: list[str] = []
+    for context, info in contexts.items():
+        name = chosen.get(context)
+        res = info["candidates"].get(name) if name else None
+        if res is None:
+            continue
+        for part in ("test", "val"):
+            if res.get(f"{part}_skipped"):
+                out.append(
+                    f"{context}/{name}: {res[f'{part}_skipped']}; no {part} metrics, the model "
+                    "is not validated on held-out players"
+                )
+        if (res.get("onnx") or {}).get("parity_on", "test") != "test":
+            out.append(
+                f"{context}/{name}: ONNX parity checked on {res['onnx']['parity_on']} windows"
+            )
+    return out
+
+
+def _no_model_message(contexts: dict[str, Any]) -> str:
+    """Why nothing was usable: the skip reasons and parity failures, per context and candidate."""
+    reasons = []
+    for context, info in contexts.items():
+        for name, c in info["candidates"].items():
+            if c["status"] != "ok":
+                why = c.get("reason") or c["status"]
+            elif not (c.get("onnx") or {}).get("parity_ok"):
+                why = (c.get("onnx") or {}).get("error") or "ONNX parity check failed"
+            else:
+                continue
+            reasons.append(f"{context}/{name}: {why}")
+    return "no candidate produced a usable model in any game context (" + "; ".join(reasons) + ")"
 
 
 def _evaluate_and_maybe_train(ctx: JobContext, env: JobEnv, train: bool) -> JobOutcome:
@@ -367,6 +413,10 @@ def _evaluate_and_maybe_train(ctx: JobContext, env: JobEnv, train: bool) -> JobO
         "select_by": opts["select_by"],
         "contexts": {c: _summary(i, chosen[c]) for c, i in report["contexts"].items()},
     }
+    if warnings := _warnings(report["contexts"], chosen):
+        result["warnings"] = warnings
+        for w in warnings:
+            log.warning("%s", w)
     if not train:
         names = ", ".join(f"{c}: {n or 'none'}" for c, n in chosen.items())
         return JobOutcome(
@@ -384,7 +434,7 @@ def _evaluate_and_maybe_train(ctx: JobContext, env: JobEnv, train: bool) -> JobO
             )
         )
     if not models:
-        raise JobError("no candidate produced a usable model in any game context")
+        raise JobError(_no_model_message(report["contexts"]))
     result["models"] = models
     return JobOutcome(
         "registered " + ", ".join(f"{m['name']} {m['version']}" for m in models), json_safe(result)
