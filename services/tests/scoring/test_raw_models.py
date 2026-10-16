@@ -427,6 +427,7 @@ def test_the_mean_and_p99_estimates_at_2048_packets_agree_and_capacity_is_finite
     mean, p99 = estimate_mean_ms(2048, 1), estimate_p99_ms(2048, 1)
     capacity = estimate_capacity_players(8, 1, 10.0, mean)
 
-    assert math.isfinite(mean) and mean > estimate_mean_ms(1024, 1)
+    assert math.isfinite(mean)
+    assert mean > estimate_mean_ms(1024, 1)
     assert p99 == pytest.approx(mean * 1.15)
     assert 0 < capacity < estimate_capacity_players(8, 1, 10.0, estimate_mean_ms(1024, 1))
