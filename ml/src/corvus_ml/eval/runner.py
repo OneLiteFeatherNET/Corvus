@@ -16,6 +16,7 @@ from corvus_ml.eval import candidates as cand_pkg
 from corvus_ml.eval import metrics as M
 from corvus_ml.eval import onnx_bench
 from corvus_ml.eval.candidates.base import Candidate
+from corvus_ml.eval.capacity import annotate_capacity
 from corvus_ml.eval.config import EvalConfig
 from corvus_ml.eval.data import LABEL_CHEAT, LABEL_LEGIT, LABEL_UNLABELLED, EvalData
 from corvus_ml.eval.dataset import build_eval_data, load_dataset
@@ -245,6 +246,8 @@ def _export_and_bench(
     res["bench"] = bench(path, x, cfg.threads, **kw).to_dict()
     if cand.input_kind == "raw_bytes" and cfg.bench.raw_packets:
         res["bench_sizes"] = _bench_sizes(path, x, cfg, kw)
+    stride = spec.raw_bytes.window.stride_seconds if spec.raw_bytes is not None else None
+    annotate_capacity(res, stride, cfg.threads)
     if cand.quantizable and cfg.bench.quantize:
         res["int8"] = _quantized(cand, cfg, x, test, raw_path, native_raw, fprs, bench, kw)
     return res
