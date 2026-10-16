@@ -25,6 +25,7 @@ from corvus_ml.features.spec import SPEC_FILE, FeatureSpec, FeatureSpecError
 from corvus_ml.raw.spec import TOKENIZER_FILE, RawBytesSpec
 from corvus_ml.raw.tokenizer import RawTokenizer
 
+from .memory import rows_per_run, window_inference_bytes
 from .metrics import ScoreMetrics
 from .ports import ModelEntry, ModelFiles, ModelSession, ScoreCatalog, SessionFactory
 from .raw import budget_warning, estimate_capacity_players, estimate_mean_ms, estimate_p99_ms
@@ -185,6 +186,7 @@ class LoadedModel:
     intra_op_threads: int
     semantics: OutputSemantics = field(default_factory=OutputSemantics)
     tokenizer: RawTokenizer | None = None  # raw-byte models only
+    max_rows: int | None = None  # rows per ONNX run (memory bound); None = unbounded
 
     @property
     def id(self) -> str:
@@ -278,6 +280,7 @@ class ModelManager:
         cpus: int,
         metrics: ScoreMetrics,
         p99_budget_ms: float | None = None,
+        memory_budget_bytes: int | None = None,
     ) -> None:
         self._catalog = catalog
         self._files = files
@@ -286,6 +289,7 @@ class ModelManager:
         self._cpus = max(1, cpus)
         self._m = metrics
         self._budget_ms = p99_budget_ms
+        self._memory_budget = memory_budget_bytes
         self.current = ModelSet()
         self._rejected: set[tuple[str, str]] = set()  # (model id, onnx_key) that can never load
         self.last_sync_ok = False
@@ -381,8 +385,10 @@ class ModelManager:
             check_raw_shape(session.input_shape, spec.raw_bytes)
             input_kind: InputKind = "raw_bytes"
             self._warn_budget(entry, spec.raw_bytes, intra)
+            max_rows = self._plan_memory(entry, spec.raw_bytes)
         else:
             input_kind = input_kind_of(session.input_shape, spec)
+            max_rows = None
             if kind is not None and kind != input_kind:
                 raise ModelRejectedError(
                     f"model card says {kind}, the ONNX input {session.input_shape} is {input_kind}"
@@ -395,6 +401,7 @@ class ModelManager:
             intra,
             output_semantics(entry.candidate_type, card),
             tokenizer,
+            max_rows,
         )
 
     @staticmethod
@@ -443,6 +450,34 @@ class ModelManager:
         )
         if message is not None:
             log.warning(message)
+
+    def _plan_memory(self, entry: ModelEntry, raw: RawBytesSpec) -> int | None:
+        """Rows per ONNX run so that one run fits the memory budget; logs and exports the
+        estimate. A window that alone exceeds the budget is still served (one row per run)."""
+        name = f"{entry.name}:{entry.version}"
+        per_window = window_inference_bytes(
+            raw.window.max_packets, raw.packet.max_tokens_per_packet, raw.window.macro_windows
+        )
+        self._m.model_estimated_window_bytes.labels(name).set(per_window)
+        budget = self._memory_budget
+        if budget is None:
+            return None
+        rows = rows_per_run(per_window, budget)
+        self._m.model_max_rows.labels(name).set(rows)
+        log.info(
+            "raw-byte model %s: about %.0f MiB of activations per window at %d packets, memory "
+            "budget %.0f MiB, at most %d row(s) per ONNX run",
+            name, per_window / 2**20, raw.window.max_packets, budget / 2**20, rows,
+        )  # fmt: skip
+        if per_window > budget:
+            log.error(
+                "raw-byte model %s: one window at max_packets=%d needs an estimated %.0f MiB, more "
+                "than the memory budget of %.0f MiB; it is still served one window per run but may "
+                "get the pod OOM-killed: give the score pods more memory (or raise "
+                "CORVUS_SCORE_MEMORY_BUDGET_MB) or retrain with a smaller max_packets",
+                name, raw.window.max_packets, per_window / 2**20, budget / 2**20,
+            )  # fmt: skip
+        return rows
 
     @staticmethod
     def _read_card(directory: Path) -> dict[str, object] | None:

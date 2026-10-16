@@ -227,9 +227,15 @@ score:
   # (CORVUS_API_GATE_MAX_P99_LATENCY_MS of the api).
   p99BudgetMs: 5000
   env: {}
+  # Memory: raw-byte models need about 0.3 GiB of ONNX activations per window at 2048 packets (the
+  # default max_packets; 0.12 GiB at 1024, 0.06 GiB at 512; quadratic in max_packets). The scorer
+  # runs at most `CORVUS_SCORE_MEMORY_BUDGET_MB` (default: half the memory limit) worth of windows
+  # per ONNX run, so the 2Gi limit holds 3 windows of 2048 packets per run on top of the window
+  # buffers and the runtimes. A model whose single window exceeds the budget is logged as an error
+  # at load (corvus_score_model_estimated_window_bytes); raise the limit or lower max_packets.
   resources:
-    requests: {cpu: "1", memory: 512Mi}
-    limits: {cpu: "4", memory: 1Gi}
+    requests: {cpu: "1", memory: 1Gi}
+    limits: {cpu: "4", memory: 2Gi}
   podDisruptionBudget:
     enabled: true
     maxUnavailable: 1

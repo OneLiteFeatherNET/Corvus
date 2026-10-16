@@ -15,6 +15,7 @@ from ..health import HealthServer
 from ..s3store import S3Store
 from .app import ScoringApp
 from .batching import MicroBatcher
+from .memory import score_memory_budget
 from .metrics import ScoreMetrics
 from .models import ModelManager
 from .nats_io import NatsScoreIO
@@ -55,6 +56,7 @@ async def run(settings: ScoreSettings) -> None:
         cpus,
         metrics,
         settings.score_p99_budget_ms or None,
+        score_memory_budget(settings.score_memory_budget_mb, settings.score_memory_fraction),
     )
     pool = ThreadPoolExecutor(max_workers=manager.pool_workers, thread_name_prefix="ort")
     writer = ScoreWriter(

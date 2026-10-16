@@ -390,6 +390,28 @@ through the 1-thread classifier points above, times 0.6 for two or more threads,
 catches absurd models; the model is still served and the estimate is exported as `corvus_score_model_estimated_p99_ms`.
 Re-measure on the target hardware (`[benchmark] raw_packets = [128, 512, 1024]` adds this table to every report).
 
+**Memory.** The activations of an ONNX run grow with the rows of the run and, per row, with the square of
+`max_packets`: about 0.06 GiB per window at 512 packets, 0.12 GiB at 1024 and 0.26 GiB at 2048 (measured, section 7),
+which is why a micro-batch of 64 windows at 2048 packets would need ~16 GiB. The scorer therefore splits the
+micro-batch of a raw-byte model into ONNX runs of at most `budget / per-window estimate` rows (at least 1) and
+concatenates the scores. The estimate is the inference formula of `corvus_ml.membudget`
+(`3 * max(heads * (P + 1)^2 * 4, local_heads * T^2 * P * 4) + (6 + 2 * ffn_mult) * P * T * local_dim * 4`, times the
+macro windows) evaluated for the default architecture, because `feature_spec.json` carries `max_packets`,
+`max_tokens_per_packet` and the macro windows but not the layer sizes; it errs on the high side (about 0.30 GiB at 2048
+packets), and a larger model needs more. The budget is `CORVUS_SCORE_MEMORY_FRACTION` (default 0.5) of the container
+memory limit (cgroup `memory.max`), or `CORVUS_SCORE_MEMORY_BUDGET_MB` if set. Rows per run for the default model:
+
+| `max_packets` | 1 GiB limit | 2 GiB limit |
+|---|---|---|
+| 512 | 8 | 17 |
+| 1024 | 4 | 8 |
+| 2048 | 1 | 3 |
+
+At load the scorer logs the estimate and the rows per run and exports `corvus_score_model_estimated_window_bytes{model}`
+and `corvus_score_model_max_rows{model}`. If one window alone exceeds the budget it logs an error naming the model
+(give the pods more memory or retrain with a smaller `max_packets`) and still serves it one window per run. Feature
+models are not affected. The chart gives the score pods a 2Gi limit for this reason.
+
 **Capacity.** At load time the scorer also logs and exports `corvus_score_model_estimated_capacity_players{model}`:
 `max(1, cpus // intra_op_threads) * stride_seconds / mean_latency`, with the mean from the same estimate (equal to
 `cpus * stride / mean latency` with one thread per window) and the CPUs from `CORVUS_SCORE_CPUS` or the cgroup limit.

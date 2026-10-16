@@ -16,6 +16,7 @@ from corvus_ml.features.model_input import model_inputs
 
 from ..clock import Clock
 from .batching import Batch, PendingWindow
+from .memory import chunked
 from .metrics import ScoreMetrics
 from .models import LoadedModel, ModelSet, scores_from_outputs
 from .ports import PUBLISHED_STAGES, ScorePublisher, ScoreRecord
@@ -87,14 +88,18 @@ def build_input(model: LoadedModel, windows: list[PendingWindow]) -> np.ndarray:
 def infer(model: LoadedModel, windows: list[PendingWindow]) -> tuple[np.ndarray, float]:
     """Blocking: model input via the shared adapter, then ONNX Runtime. Runs in the thread pool."""
     started = time.perf_counter()
-    x = build_input(model, windows)
-    outputs = model.session.run(x)
-    scores = scores_from_outputs(
-        model.entry.candidate_type,
-        outputs,
-        getattr(model.session, "output_names", None),
-        model.semantics,
-    )
+    # Raw-byte models: at most ``max_rows`` windows per ONNX run, so the activation memory of a
+    # long-window model stays within the budget; the scores are concatenated in window order.
+    parts = [
+        scores_from_outputs(
+            model.entry.candidate_type,
+            model.session.run(build_input(model, list(chunk))),
+            getattr(model.session, "output_names", None),
+            model.semantics,
+        )
+        for chunk in chunked(windows, model.max_rows or len(windows))
+    ]
+    scores = parts[0] if len(parts) == 1 else np.concatenate(parts)
     if len(scores) != len(windows):
         raise ValueError(f"model returned {len(scores)} scores for {len(windows)} windows")
     return scores, time.perf_counter() - started

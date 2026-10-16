@@ -60,6 +60,17 @@ tests:
             name: CORVUS_SCORE_P99_BUDGET_MS
             value: "25"
 
+  - it: gives the score pods memory for a default 2048-packet raw model
+    template: score.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.memory
+          value: 2Gi
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.memory
+          value: 1Gi
+
   - it: defaults the scorer p99 sanity bound to 5000 ms
     template: score.yaml
     documentIndex: 0

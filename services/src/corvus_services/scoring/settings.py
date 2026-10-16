@@ -45,6 +45,12 @@ class ScoreSettings(Settings):
     # (capacity gauge, consumer lag). Mirrors the registry gate CORVUS_API_GATE_MAX_P99_LATENCY_MS;
     # 0 disables the check.
     score_p99_budget_ms: float = Field(default=5000.0, ge=0)
+    # Memory bound of one ONNX run for raw-byte models: activation memory grows with the square of
+    # max_packets (about 0.3 GiB per window at 2048), so a micro-batch is split into runs whose
+    # estimate fits this budget. Default: ``score_memory_fraction`` of the container memory limit
+    # (cgroup); CORVUS_SCORE_MEMORY_BUDGET_MB sets it in MiB. Feature-based models are unaffected.
+    score_memory_budget_mb: float | None = Field(default=None, gt=0)
+    score_memory_fraction: float = Field(default=0.5, gt=0, le=1)
     # Consumer lag watch: poll the capture consumer's pending count every ``score_lag_poll_s`` and
     # warn when it grew over ``score_lag_growth_polls`` consecutive polls (0 disables the watch).
     score_lag_poll_s: float = Field(default=15.0, gt=0)
