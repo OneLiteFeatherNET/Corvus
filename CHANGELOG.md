@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.2.0...v0.3.0) (2026-10-16)
+
+
+### Features
+
+* **plugin:** map cloudnet service names to their task's game context ([#77](https://github.com/OneLiteFeatherNET/Corvus/issues/77)) ([3ae0671](https://github.com/OneLiteFeatherNET/Corvus/commit/3ae067188ed243b1580b12e2b6cc7c634a1aab05))
+* **plugin:** trust an extra ca bundle for nats and the control plane ([#75](https://github.com/OneLiteFeatherNET/Corvus/issues/75)) ([8e0e4ce](https://github.com/OneLiteFeatherNET/Corvus/commit/8e0e4ce29ef1bb5f3ee950eb1cf143a1c4401e0a))
+
 ## [0.2.0](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.1.1...v0.2.0) (2026-10-16)
 
 
