@@ -62,6 +62,10 @@ overwhelmingly legit; it biases recall at low FPR optimistically if cheaters hid
 **Split.** Players (pseudonyms) are split into train / val / test, never windows. The split is
 stratified by player label (cheat, legit, unlabelled), shuffled with `run.seed`, and asserted to
 have no player in two parts. The pipeline runs once per `game_context`, with its own split.
+A label stratum needs at least 2 players to put one in the test split and at least 3 to fill all
+three parts. With fewer players the val / test split is empty: the candidate is not scored on it,
+the report lists it under "No test metrics", and the ONNX parity check and benchmark use the
+windows of the first non-empty split (test, val, train).
 
 ## 2. Config reference (`eval.toml`)
 
