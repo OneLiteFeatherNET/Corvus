@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.1.0...v0.1.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **services:** install nkeys for nats creds authentication ([#69](https://github.com/OneLiteFeatherNET/Corvus/issues/69)) ([7977ce4](https://github.com/OneLiteFeatherNET/Corvus/commit/7977ce4c54299637ff954b1600c94f5c2cb41849))
+* **ui:** make the nginx entrypoint script executable ([#70](https://github.com/OneLiteFeatherNET/Corvus/issues/70)) ([5bda246](https://github.com/OneLiteFeatherNET/Corvus/commit/5bda246b68916c3060103c8f1ae24562bce8fb83))
+
 ## 0.1.0 (2026-10-15)
 
 
