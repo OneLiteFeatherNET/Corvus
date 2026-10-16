@@ -66,6 +66,9 @@ A label stratum needs at least 2 players to put one in the test split and at lea
 three parts. With fewer players the val / test split is empty: the candidate is not scored on it,
 the report lists it under "No test metrics", and the ONNX parity check and benchmark use the
 windows of the first non-empty split (test, val, train).
+For smoke tests with few players, `run.split_by = "session"` splits by session instead. The same
+player can then be in train and test (leakage), so the report carries a warning banner and the
+numbers must not be compared with player-split results. It cannot be combined with `[tune]`.
 
 ## 2. Config reference (`eval.toml`)
 
@@ -80,6 +83,7 @@ unlabelled = "exclude"   # or "assume_legit"
 calibration = "auto"     # auto | isotonic | platt | ecdf | none, see "Calibration" below
 contexts = []            # empty = every game_context in the data
 split = [0.6, 0.2, 0.2]  # train / val / test share of players
+# split_by = "player"    # or "session" (leakage-prone, smoke tests with few players only)
 fpr_targets = [0.01, 0.001]
 min_confidence = 0.0
 learning_curve = [0.1, 0.25, 0.5, 1.0]  # empty list disables it

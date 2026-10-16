@@ -41,15 +41,26 @@ def _table(header: list[str], rows: list[list[str]]) -> list[str]:
     return out
 
 
+SESSION_SPLIT_BANNER = (
+    "> **Split by session, not by player.** The same player can be in train and in test, so these "
+    "numbers are leakage-prone and not comparable with player-split results. Use this for smoke "
+    "tests with few players only."
+)
+
+
 def to_markdown(report: dict) -> str:
     fprs = report["fpr_targets"]
     lines = [f"# Evaluation report: {report['name']}", ""]
     if report["synthetic"]:
         lines += [SYNTHETIC_BANNER, ""]
+    by_session = report.get("split_by", "player") == "session"
+    if by_session:
+        lines += [SESSION_SPLIT_BANNER, ""]
     lines += [
         f"Seed {report['seed']}, threads {report['threads']}, unlabelled windows: "
         f"{report['unlabelled']} ({report['assumed_legit_windows']} assumed legit). "
-        "Metrics are on the test split, which is split by player. `R@x%` is recall at a "
+        "Metrics are on the test split, which is split by "
+        f"{'session' if by_session else 'player'}. `R@x%` is recall at a "
         "false-positive rate of x% on the same score set; `player` aggregates the max score "
         "per player.",
         "",

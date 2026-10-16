@@ -8,6 +8,7 @@ import numpy as np
 
 from corvus_ml.features.spec import DEFAULT_AGG_INPUTS, DEFAULT_SEQ_INPUTS
 
+SPLIT_BY = ("player", "session")
 LABEL_UNLABELLED = -1
 LABEL_LEGIT = 0
 LABEL_CHEAT = 1
@@ -58,11 +59,15 @@ class EvalData:
             None if self.raw_time is None else self.raw_time[idx],
         )
 
-    def group_codes(self) -> np.ndarray:
-        """Integer id per pseudonym, assigned in order of first appearance."""
+    def group_codes(self, by: str = "player") -> np.ndarray:
+        """Integer id per pseudonym (``by="player"``) or per session (``by="session"``),
+        assigned in order of first appearance."""
+        if by not in SPLIT_BY:
+            raise ValueError(f"split_by must be one of {SPLIT_BY}, not {by!r}")
+        keys = self.pseudonym if by == "player" else self.session_id
         codes: dict[bytes, int] = {}
         return np.fromiter(
-            (codes.setdefault(p, len(codes)) for p in self.pseudonym),
+            (codes.setdefault(p, len(codes)) for p in keys),
             dtype=np.int64,
             count=len(self),
         )

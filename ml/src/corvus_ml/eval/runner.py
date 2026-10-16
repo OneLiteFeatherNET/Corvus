@@ -316,7 +316,7 @@ def _quantized(cand, cfg, x, test, path, native, fprs, bench, kw) -> dict:
 
 
 def _learning_curve(name, cfg, data, split, fprs) -> list[dict]:
-    groups = data.group_codes()
+    groups = data.group_codes(cfg.split_by)
 
     def run(frac: float) -> dict[str, float]:
         sub = subsample_groups(data.label, groups, split.train, frac, cfg.seed)
@@ -435,7 +435,7 @@ def pretrain_checkpoints(cfg: EvalConfig, out_dir: Path) -> dict:
         sub = data.take(np.flatnonzero(data.game_context == ctx))
         if len(sub) == 0:
             continue
-        split = group_split(sub.label, sub.group_codes(), cfg.seed, cfg.split)
+        split = group_split(sub.label, sub.group_codes(cfg.split_by), cfg.seed, cfg.split)
         pool = sub.take(split.train)
         cand = cand_pkg.create(name, cfg.seed, cfg.threads, params)
         model_cfg = cand.model_config(sub)  # type: ignore[attr-defined]
@@ -481,7 +481,7 @@ def find_learning_rates(cfg: EvalConfig, out_dir: Path, *, steps: int | None = N
         sub = data.take(np.flatnonzero(data.game_context == ctx))
         if len(sub) == 0:
             continue
-        split = group_split(sub.label, sub.group_codes(), cfg.seed, cfg.split)
+        split = group_split(sub.label, sub.group_codes(cfg.split_by), cfg.seed, cfg.split)
         for name, params in cfg.candidates.items():
             cls = cand_pkg.REGISTRY[name]
             if not cls.tunable:  # torch candidates only: sklearn models have no learning rate
@@ -580,6 +580,8 @@ def run(cfg: EvalConfig, out_dir: Path, tune: bool = False) -> dict:
     from corvus_ml.eval.training import seed_everything
 
     seed_everything(cfg.seed, cfg.threads)
+    if tune and cfg.split_by != "player":
+        raise ValueError("tuning needs the split by player (split_by = 'player')")
     unknown = [n for n in cfg.candidates if n not in cand_pkg.REGISTRY]
     if unknown:
         raise ValueError(f"unknown candidates {unknown}; known: {sorted(cand_pkg.REGISTRY)}")
@@ -602,6 +604,7 @@ def run(cfg: EvalConfig, out_dir: Path, tune: bool = False) -> dict:
         "assumed_legit_windows": assumed,
         "fpr_targets": list(cfg.fpr_targets),
         "split": list(cfg.split),
+        "split_by": cfg.split_by,
         "latency_budget_ms": cfg.bench.latency_budget_ms,
         "contexts": {},
     }
@@ -618,7 +621,7 @@ def run(cfg: EvalConfig, out_dir: Path, tune: bool = False) -> dict:
         if len(sub) == 0:
             continue
         groups = sub.group_codes()
-        split = group_split(sub.label, groups, cfg.seed, cfg.split)
+        split = group_split(sub.label, sub.group_codes(cfg.split_by), cfg.seed, cfg.split)
         info = {
             "windows": len(sub),
             "players": int(np.unique(groups).size),

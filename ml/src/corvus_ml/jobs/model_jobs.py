@@ -158,6 +158,7 @@ def _read_params(
         "threads": p.integer("threads", 1, 1, 8),
         "seq_len": p.integer("seq_len", spec.seq_len, 1, 100_000),
         "split": tuple(p.numbers("split", [0.6, 0.2, 0.2]) or ()),
+        "split_by": p.string("split_by", "player"),
         "fpr_targets": tuple(p.numbers("fpr_targets", [0.01, 0.001]) or ()),
         "learning_curve": tuple(p.numbers("learning_curve", []) or ()),
         "calibration": p.string("calibration", "auto"),
@@ -191,6 +192,10 @@ def _read_params(
     p.done()
     if out["unlabelled"] not in ("exclude", "assume_legit"):
         raise JobError("unlabelled must be 'exclude' or 'assume_legit'")
+    if out["split_by"] not in ("player", "session"):
+        raise JobError("split_by must be 'player' or 'session'")
+    if out["split_by"] == "session" and out["tune"] is not None:
+        raise JobError("split_by 'session' cannot be combined with tune")
     if out["calibration"] == "none":
         raise JobError("jobs always calibrate: calibration 'none' is only for corvus-eval")
     if len(out["split"]) != 3 or abs(sum(out["split"]) - 1.0) > 1e-6:
@@ -241,6 +246,7 @@ def _eval_config(
             calibration=opts["calibration"],
             contexts=opts["contexts"],
             split=opts["split"],
+            split_by=opts["split_by"],
             fpr_targets=opts["fpr_targets"],
             min_confidence=opts["min_confidence"],
             learning_curve=opts["learning_curve"],
@@ -262,6 +268,7 @@ def _eval_config(
         calibration=opts["calibration"],
         contexts=opts["contexts"],
         split=opts["split"],
+        split_by=opts["split_by"],
         fpr_targets=opts["fpr_targets"],
         min_confidence=opts["min_confidence"],
         learning_curve=opts["learning_curve"],
@@ -411,9 +418,17 @@ def _evaluate_and_maybe_train(ctx: JobContext, env: JobEnv, train: bool) -> JobO
         "features_prefix": prefix,
         "calibration": opts["calibration"],
         "select_by": opts["select_by"],
+        "split_by": opts["split_by"],
         "contexts": {c: _summary(i, chosen[c]) for c, i in report["contexts"].items()},
     }
-    if warnings := _warnings(report["contexts"], chosen):
+    warnings = _warnings(report["contexts"], chosen)
+    if opts["split_by"] == "session":
+        warnings.insert(
+            0,
+            "split_by is 'session': the same player can be in train and test, the metrics are "
+            "leakage-prone and not comparable with player-split results",
+        )
+    if warnings:
         result["warnings"] = warnings
         for w in warnings:
             log.warning("%s", w)

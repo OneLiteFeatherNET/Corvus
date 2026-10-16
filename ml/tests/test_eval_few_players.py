@@ -54,3 +54,29 @@ def test_the_learning_curve_is_left_out_without_a_test_split(tmp_path):
     report = run(one_player_cfg(learning_curve=(0.5, 1.0)), tmp_path)
 
     assert "learning_curve" not in report["contexts"]["pvp"]["candidates"]["isolation_forest"]
+
+
+def test_a_session_split_gives_a_single_player_a_test_split(tmp_path):
+    report = run(one_player_cfg(split_by="session"), tmp_path)
+
+    info = report["contexts"]["pvp"]
+    assert report["split_by"] == "session"
+    assert info["split"]["test"]["windows"] > 0
+    assert info["candidates"]["isolation_forest"]["test"] is not None
+
+
+def test_the_report_of_a_session_split_warns_about_leakage(tmp_path):
+    report = run(one_player_cfg(split_by="session"), tmp_path)
+
+    _, md = write_report(report, tmp_path)
+
+    assert "Split by session, not by player" in md.read_text()
+
+
+def test_split_by_defaults_to_player_and_rejects_other_values():
+    import pytest
+
+    base = {"synthetic": {}, "candidates": {"isolation_forest": {}}}
+    assert EvalConfig.from_dict(base).split_by == "player"
+    with pytest.raises(ValueError, match="split_by"):
+        EvalConfig.from_dict({**base, "run": {"split_by": "window"}})
