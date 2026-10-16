@@ -1,5 +1,5 @@
 # Rendered by the nginx entrypoint (envsubst) into /etc/nginx/conf.d/default.conf.
-# Variables: CORVUS_UI_BASE_PATH, CORVUS_UI_CONNECT_SRC, CORVUS_UI_SCRIPT_HASHES (set by 15-corvus-ui.sh).
+# Variables: CORVUS_UI_BASE_PATH, CORVUS_UI_CONNECT_SRC, CORVUS_UI_SCRIPT_HASHES (set by 15-corvus-ui.envsh).
 server {
     listen 8080;
     server_name _;
