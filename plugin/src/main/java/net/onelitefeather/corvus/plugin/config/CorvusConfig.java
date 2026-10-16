@@ -83,6 +83,17 @@ public record CorvusConfig(
     public static final String DEFAULT_TOML = """
             # Corvus capture plugin. The HMAC pseudonym key is read from the environment variable
             # CORVUS_PSEUDONYM_KEY (base64) or from key_file. Without a key nothing is captured.
+            #
+            # proxy_id names this proxy in the NATS subject corvus.capture.v1.<proxy_id>.<partition>, so it must be one
+            # subject token: not empty, no ".", "*", ">" or whitespace. It may contain placeholders, resolved once
+            # at startup:
+            #   ${cloudnet.service}  CloudNet service name, <task><splitter><number> (Proxy-1), read from
+            #                        .wrapper/wrapper.json in the service working directory
+            #   ${cloudnet.task}     CloudNet task name (Proxy)
+            #   ${env:NAME}          value of the environment variable NAME
+            # Placeholders may be mixed with text, e.g. "olf-${cloudnet.service}". All proxies of a CloudNet task share
+            # one template, so use ${cloudnet.service} there. If a placeholder cannot be resolved or the result is
+            # invalid, the plugin logs an ERROR and does not capture.
             proxy_id = "proxy-1"
 
             [pseudonym]
@@ -181,7 +192,16 @@ public record CorvusConfig(
         serverContexts = Map.copyOf(serverContexts);
     }
 
+    /** Parses with the real environment and {@code .wrapper/wrapper.json} for {@code proxy_id} placeholders. */
     public static CorvusConfig parse(String tomlText) {
+        return parse(tomlText, ProxyIdResolver.system());
+    }
+
+    /**
+     * @throws ProxyIdException when {@code proxy_id} has a placeholder that cannot be resolved or the result is not
+     *                          a valid NATS subject token
+     */
+    public static CorvusConfig parse(String tomlText, ProxyIdResolver proxyIds) {
         Toml toml = new Toml().read(tomlText);
         String mode = toml.getString("players.mode", "all").toLowerCase(Locale.ROOT);
         ListMode listMode = switch (mode) {
@@ -204,7 +224,7 @@ public record CorvusConfig(
         };
         int maxPayload = (int) Math.min(Integer.MAX_VALUE, toml.getLong("capture.max_payload_bytes", 2048L));
         return new CorvusConfig(
-                toml.getString("proxy_id", "proxy-1"),
+                proxyIds.resolve(toml.getString("proxy_id", "proxy-1")),
                 toml.getString("pseudonym.key_file", ""),
                 toml.getString("pseudonym.key_id", "k1"),
                 listMode,
