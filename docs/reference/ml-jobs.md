@@ -125,7 +125,7 @@ the ONNX parity check must pass), uploads its artefacts and registers the model.
 
 | Param | Default | Meaning |
 |---|---|---|
-| `candidates` | `["isolation_forest", "gradient_boosting"]` | list of names or `{name: {hyperparameters}}`; `raw_hier_classifier` / `raw_hier_anomaly` need the raw build and cannot be mixed with the others |
+| `candidates` | `["isolation_forest", "gradient_boosting"]` | list of names or `{name: {hyperparameters}}`; `raw_hier_classifier` / `raw_hier_anomaly` need the raw build and cannot be mixed with the others; the torch candidates take `lr` / `pretrain_lr` as a number or `"auto"` (range test, see [learning-rate-finder.md](../explanation/learning-rate-finder.md)); the result then lists the found rate, rule, schedule and curve under `training` |
 | `game_context` / `game_contexts` | all | contexts to evaluate |
 | `unlabelled` | `exclude` | or `assume_legit` |
 | `label_sources`, `min_confidence` | all, 0 | which labels count (for example `["honeypot", "staff_verdict"]`) |

@@ -17,7 +17,8 @@ from torch import nn
 
 from corvus_ml.eval.candidates.base import Candidate, register
 from corvus_ml.eval.data import LABEL_CHEAT, EvalData
-from corvus_ml.eval.training import fit, lr_range_test, seed_everything
+from corvus_ml.eval.lr import lr_kwargs
+from corvus_ml.eval.training import fit, seed_everything
 
 _OPSET = 17
 
@@ -106,15 +107,8 @@ class TorchCandidate(Candidate):
         tr = self.tensors(train)
         va = self.tensors(val) if val is not None and len(val) else None
         self.model = self.build(*frame_stats(tr[0].numpy()))
-        lr = self.params.get("lr", 2e-3)
         batch = int(self.params.get("batch_size", 64))
-        self.lr_range = None
-        if lr == "auto":
-            self.lr_range = lr_range_test(
-                self.model, self.loss_fn, tr, batch_size=batch, seed=self.seed
-            )
-            lr = self.lr_range.suggested_lr
-        self.lr_used = float(lr)
+        wd = float(self.params.get("weight_decay", 0.01))
         self.history = fit(
             self.model,
             self.loss_fn,
@@ -122,12 +116,16 @@ class TorchCandidate(Candidate):
             va,
             epochs=int(self.params.get("epochs", 30)),
             batch_size=batch,
-            lr=self.lr_used,
-            weight_decay=float(self.params.get("weight_decay", 0.01)),
+            weight_decay=wd,
             patience=int(self.params.get("patience", 5)),
             seed=self.seed,
             on_epoch=self.on_epoch,
+            **lr_kwargs(
+                self.params, default_lr=2e-3, batch_size=batch, seed=self.seed, weight_decay=wd
+            ),
         )
+        self.lr_used = float(self.history.lr_used)  # type: ignore[arg-type]
+        self.lr_range = self.history.lr_find
 
     def score(self, data: EvalData) -> np.ndarray:
         x = torch.from_numpy(self.inputs(data))

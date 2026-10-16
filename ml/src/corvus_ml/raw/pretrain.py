@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from corvus_ml.eval.lr import LrFindConfig, LrFindResult
 from corvus_ml.eval.training import FitHistory, fit
 from corvus_ml.raw.model import ModelConfig, RawAnomalyNet
 
@@ -75,14 +76,21 @@ def pretrain(
     *,
     epochs: int,
     batch_size: int,
-    lr: float,
+    lr: float | str,
     weight_decay: float = 0.01,
     patience: int = 5,
     seed: int = 0,
     val_fraction: float = 0.1,
     on_epoch: Callable[[int, float], None] | None = None,
+    lr_find: LrFindConfig | None = None,
+    lr_mult: float = 1.0,
+    schedule_kind: str = "cosine",
+    lr_precomputed: LrFindResult | None = None,
 ) -> FitHistory:
     """AdamW + warmup + cosine + early stopping on the masked-prediction loss.
+
+    ``lr="auto"`` finds the peak lr with the range test on the masked loss (see
+    :func:`corvus_ml.eval.training.fit`); the result is in ``FitHistory.lr_find``.
 
     ``ids`` / ``time_s`` are flat windows (:func:`flatten_windows`). A fixed share of them is held
     out for early stopping; the split depends only on ``seed``.
@@ -102,4 +110,6 @@ def pretrain(
     return fit(
         model, loss_fn, train, val, epochs=epochs, batch_size=batch_size, lr=lr,
         weight_decay=weight_decay, patience=patience, seed=seed, on_epoch=on_epoch,
+        lr_find=lr_find, lr_mult=lr_mult, schedule_kind=schedule_kind,
+        lr_precomputed=lr_precomputed,
     )  # fmt: skip

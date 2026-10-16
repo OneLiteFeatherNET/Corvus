@@ -18,7 +18,8 @@ from torch import nn
 
 from corvus_ml.eval.candidates.base import Candidate, register
 from corvus_ml.eval.data import LABEL_CHEAT, EvalData
-from corvus_ml.eval.training import fit, lr_range_test, seed_everything
+from corvus_ml.eval.lr import LR_PARAM_KEYS, PRETRAIN_LR_PARAM_KEYS, lr_kwargs
+from corvus_ml.eval.training import fit, seed_everything
 from corvus_ml.raw.model import ModelConfig, RawAnomalyNet, RawHierNet
 from corvus_ml.raw.pretrain import flatten_windows, load_encoder, pretrain, save_checkpoint
 from corvus_ml.raw.spec import RawBytesSpec
@@ -31,8 +32,8 @@ _MODEL_KEYS = (
     "max_masked", "score_period", "score_passes", "time_freqs", "time_min_s", "time_max_s",
 )  # fmt: skip
 _TRAIN_KEYS = (
-    "epochs", "batch_size", "lr", "weight_decay", "patience", "pretrain_epochs", "pretrain_lr",
-    "init_from", "checkpoint_out", "score_batch",
+    "epochs", "batch_size", "weight_decay", "patience", "pretrain_epochs",
+    "init_from", "checkpoint_out", "score_batch", *LR_PARAM_KEYS, *PRETRAIN_LR_PARAM_KEYS,
 )  # fmt: skip
 
 
@@ -91,23 +92,39 @@ class RawCandidate(Candidate):
     @abstractmethod
     def build(self, cfg: ModelConfig) -> nn.Module: ...
 
-    def _pretrain(self, cfg: ModelConfig, pool: EvalData) -> RawAnomalyNet:
-        """Masked pretraining on every window of ``pool`` (labels are not used)."""
+    def _pretrain(
+        self, cfg: ModelConfig, pool: EvalData, epochs: int | None = None
+    ) -> RawAnomalyNet:
+        """Masked pretraining on every window of ``pool`` (labels are not used).
+
+        ``epochs=0`` only resolves the learning rate (``corvus-eval lr-find``): nothing is trained
+        or saved."""
         micro_cfg = ModelConfig(**{**cfg.to_dict(), "macro_windows": 1, "macro_layers": 1})
         net = RawAnomalyNet(micro_cfg)
         ids, t = flatten_windows(pool.raw_ids, pool.raw_time)  # type: ignore[arg-type]
         if len(ids) == 0:
             return net
-        epochs = int(self.params.get("pretrain_epochs", 0))
-        lr = float(self.params.get("pretrain_lr", 1e-3))
+        probe = epochs is not None
+        epochs = int(self.params.get("pretrain_epochs", 0)) if epochs is None else epochs
+        batch = int(self.params.get("batch_size", 16))
+        wd = float(self.params.get("weight_decay", 0.01))
         self.pretrain_history = pretrain(
-            net, ids, t, epochs=epochs, batch_size=int(self.params.get("batch_size", 16)),
-            lr=lr, weight_decay=float(self.params.get("weight_decay", 0.01)),
+            net, ids, t, epochs=epochs, batch_size=batch, weight_decay=wd,
             patience=int(self.params.get("patience", 3)), seed=self.seed,
+            **lr_kwargs(self.params, prefix="pretrain_", default_lr=1e-3, batch_size=batch,
+                        seed=self.seed, weight_decay=wd),
         )  # fmt: skip
-        if "checkpoint_out" in self.params:
+        if "checkpoint_out" in self.params and not probe:
             save_checkpoint(Path(self.params["checkpoint_out"]), net)
         return net
+
+    def probe_pretrain_lr(self, data: EvalData, pool: EvalData | None = None) -> dict | None:
+        """Learning-rate plan of the pretraining without training (None if not configured)."""
+        if int(self.params.get("pretrain_epochs", 0)) <= 0 or "init_from" in self.params:
+            return None
+        self._pretrain(self.model_config(data), pool if pool is not None else data, epochs=0)
+        hist = getattr(self, "pretrain_history", None)
+        return hist.lr_plan if hist is not None else None
 
     def _init_encoder(self, model: nn.Module, cfg: ModelConfig, pool: EvalData | None) -> None:
         if "init_from" in self.params:
@@ -117,22 +134,17 @@ class RawCandidate(Candidate):
             model.micro.load_state_dict(net.micro.state_dict())  # type: ignore[union-attr]
 
     def _run_fit(self, tr, va, loss_fn) -> None:
-        lr = self.params.get("lr", 2e-3)
         batch = int(self.params.get("batch_size", 16))
         wd = float(self.params.get("weight_decay", 0.01))
-        self.lr_range = None
-        if lr == "auto":
-            self.lr_range = lr_range_test(
-                self.model, loss_fn, tr, batch_size=batch, seed=self.seed, weight_decay=wd,
-                steps=int(self.params.get("lr_steps", 60)),
-            )  # fmt: skip
-            lr = self.lr_range.suggested_lr
-        self.lr_used = float(lr)
         self.history = fit(
             self.model, loss_fn, tr, va, epochs=int(self.params.get("epochs", 10)),
-            batch_size=batch, lr=self.lr_used, weight_decay=wd,
+            batch_size=batch, weight_decay=wd,
             patience=int(self.params.get("patience", 3)), seed=self.seed, on_epoch=self.on_epoch,
+            **lr_kwargs(self.params, default_lr=2e-3, batch_size=batch, seed=self.seed,
+                        weight_decay=wd),
         )  # fmt: skip
+        self.lr_used = float(self.history.lr_used)  # type: ignore[arg-type]
+        self.lr_range = self.history.lr_find
 
     # --- scoring and export ----------------------------------------------------------------------
 

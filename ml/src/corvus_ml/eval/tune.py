@@ -21,6 +21,7 @@ import numpy as np
 from corvus_ml.eval import candidates as cand_pkg
 from corvus_ml.eval.config import EvalConfig, TuneConfig
 from corvus_ml.eval.data import LABEL_UNLABELLED, EvalData
+from corvus_ml.eval.lr import is_auto
 from corvus_ml.eval.split import Split
 from corvus_ml.eval.training import seed_everything
 from corvus_ml.raw.spec import WindowConfig
@@ -54,9 +55,22 @@ WINDOW_SPACE: dict[str, Range] = {
 }
 
 
-def space_for(name: str, tune: TuneConfig, windows: bool) -> dict[str, Range]:
-    """Default space of the candidate, with ``[tune.space]`` overrides applied."""
+# With ``lr = "auto"`` the learning rate is not searched blindly: Optuna tunes a multiplier around
+# the value the range test found (log-uniform, a factor of ~3 either way).
+LR_MULT_RANGE: Range = ("log", 0.3, 3.0)
+
+
+def space_for(
+    name: str, tune: TuneConfig, windows: bool, auto_lr: bool = False
+) -> dict[str, Range]:
+    """Default space of the candidate, with ``[tune.space]`` overrides applied.
+
+    ``auto_lr``: the candidate's ``lr`` is ``"auto"``; ``lr`` is then replaced by ``lr_mult``.
+    """
     space = dict(DEFAULT_SPACES.get(name, _COMMON))
+    if auto_lr and "lr" in space:
+        del space["lr"]
+        space["lr_mult"] = LR_MULT_RANGE
     if windows:
         space.update(WINDOW_SPACE)
     for key, value in tune.space.items():
@@ -140,7 +154,7 @@ def tune_candidate(
     source = data.meta.get("raw_source")
     base_window: WindowConfig | None = data.meta["raw_spec"].window if source is not None else None
     windows = bool(tune.tune_windows and source is not None)
-    space = space_for(name, tune, windows)
+    space = space_for(name, tune, windows, auto_lr=is_auto(cfg.candidates[name].get("lr")))
     parts = player_parts(data, split)
     base_params = dict(cfg.candidates[name])
     cache: dict[WindowConfig, EvalData] = {}
@@ -161,22 +175,43 @@ def tune_candidate(
             cache[window] = built
         return cache[window]
 
+    def sets_for(d: EvalData, s: Split) -> tuple[EvalData, EvalData]:
+        lab = d.label
+        if cls.supervised:
+            keep_t = lab[s.train] != LABEL_UNLABELLED
+            keep_v = lab[s.val] != LABEL_UNLABELLED
+        else:
+            keep_t, keep_v = lab[s.train] == 0, lab[s.val] == 0
+        return d.take(s.train[keep_t]), d.take(s.val[keep_v])
+
+    def find_lr_once() -> dict[str, Any] | None:
+        """Range test with the base parameters on the base data: one run for the whole study."""
+        train, val = sets_for(data, split)
+        if len(train) == 0 or (cls.supervised and len(np.unique(train.label)) < 2):
+            return None
+        probe = {**base_params, "lr": "auto", "epochs": 0, "pretrain_epochs": 0}
+        probe.pop("init_from", None)
+        seed_everything(cfg.seed, cfg.threads)
+        c = cand_pkg.create(name, cfg.seed, cfg.threads, probe)
+        c.fit(train, val if len(val) else None)
+        return {"result": c.lr_range, "plan": c.history.lr_plan}
+
+    found: dict[str, Any] | None = None
+
     def objective(trial: optuna.Trial) -> float:
         suggested = {k: _suggest(trial, k, r) for k, r in space.items()}
         window = window_for(base_window, suggested) if base_window is not None else None
         d = data_for(window)
         s = split_like(d, parts)
-        train_idx, val_idx = s.train, s.val
-        lab = d.label
-        if cls.supervised:
-            keep_t, keep_v = lab[train_idx] != LABEL_UNLABELLED, lab[val_idx] != LABEL_UNLABELLED
-        else:
-            keep_t, keep_v = lab[train_idx] == 0, lab[val_idx] == 0
-        train, val = d.take(train_idx[keep_t]), d.take(val_idx[keep_v])
+        train_idx = s.train
+        train, val = sets_for(d, s)
         if len(train) == 0:
             raise optuna.TrialPruned("no training windows with this configuration")
         model_params = {k: v for k, v in suggested.items() if k not in WINDOW_SPACE}
-        cand = cand_pkg.create(name, cfg.seed, cfg.threads, {**base_params, **model_params})
+        trial_params = {**base_params, **model_params}
+        if found is not None and found["result"] is not None:
+            trial_params["lr_find_result"] = found["result"]
+        cand = cand_pkg.create(name, cfg.seed, cfg.threads, trial_params)
 
         def on_epoch(epoch: int, value: float) -> None:
             trial.report(value, epoch)
@@ -207,6 +242,8 @@ def tune_candidate(
     )
     finished = sum(t.state.is_finished() for t in study.trials)
     remaining = max(0, tune.trials - finished)
+    if remaining and is_auto(base_params.get("lr")):
+        found = find_lr_once()
     if remaining:
         study.optimize(objective, n_trials=remaining, timeout=tune.timeout_s, catch=())
     complete = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
@@ -225,6 +262,7 @@ def tune_candidate(
         "best_value": best.value if best else None,
         "best_trial": best.number if best else None,
         "best_params": best_params,
+        "lr_find": found["plan"] if found else None,
         "trials": [
             {"number": t.number, "state": t.state.name, "value": t.value, "params": dict(t.params)}
             for t in study.trials
