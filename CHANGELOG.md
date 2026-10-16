@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.3.0...v0.3.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **services:** start ml jobs with the corvus-job entry point ([#78](https://github.com/OneLiteFeatherNET/Corvus/issues/78)) ([7b97289](https://github.com/OneLiteFeatherNET/Corvus/commit/7b972894719b6ba51dd37f55ac1df42b5fb6cd8c))
+
 ## [0.3.0](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.2.0...v0.3.0) (2026-10-16)
 
 
