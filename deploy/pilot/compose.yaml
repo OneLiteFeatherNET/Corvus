@@ -65,7 +65,7 @@ services:
         echo "staged corvus plugin jar"
 
   proxy:
-    image: itzg/mc-proxy:2026.10.0-java25
+    image: itzg/mc-proxy:2026.10.1-java25
     restart: "no"
     cpus: 1.0
     mem_limit: 1g
