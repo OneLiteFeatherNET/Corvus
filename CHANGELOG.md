@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.6.0](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.5.0...v0.6.0) (2026-10-17)
+
+
+### Features
+
+* **ml:** add split_by option to group the split by session ([1792eec](https://github.com/OneLiteFeatherNET/Corvus/commit/1792eec4b51ce5b6af2c44a954091f5ebb71765d))
+
+
+### Bug Fixes
+
+* **ml:** bound raw-model training memory for long windows ([#92](https://github.com/OneLiteFeatherNET/Corvus/issues/92)) ([f2fdfa4](https://github.com/OneLiteFeatherNET/Corvus/commit/f2fdfa43239e7d00c8a2e47d5f0a1cb5c96a2be1))
+* **ml:** train on few players without crashing on empty splits ([0b9d166](https://github.com/OneLiteFeatherNET/Corvus/commit/0b9d166e4bf8122d69f5dc019d8a935496137eaa))
+* **services:** bound scorer memory for long raw windows ([#93](https://github.com/OneLiteFeatherNET/Corvus/issues/93)) ([82226ea](https://github.com/OneLiteFeatherNET/Corvus/commit/82226ea545cc2f68af980417382211e35b0bbfff))
+* **services:** reconcile job status in the background and report pod failure reasons ([#95](https://github.com/OneLiteFeatherNET/Corvus/issues/95)) ([d5bbb07](https://github.com/OneLiteFeatherNET/Corvus/commit/d5bbb07112c2e1b916deb8739213861c2a99206c))
+
+
+### Performance Improvements
+
+* **ml:** use all container cpus in training jobs ([#94](https://github.com/OneLiteFeatherNET/Corvus/issues/94)) ([d4756db](https://github.com/OneLiteFeatherNET/Corvus/commit/d4756db84f07d822893f23f81ce0100b1d0f467a))
+
 ## [0.5.0](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.4.0...v0.5.0) (2026-10-16)
 
 
