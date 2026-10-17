@@ -5,7 +5,7 @@
 #   docker run --rm -e CORVUS_JOB_ID=... corvus-ml train
 FROM ghcr.io/astral-sh/uv:0.12.24 AS uv
 
-FROM python:3.13-slim AS build
+FROM python:3.14-slim AS build
 COPY --from=uv /uv /usr/local/bin/uv
 # The venv is created where it runs: console scripts carry the interpreter path of the build.
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_PROJECT_ENVIRONMENT=/opt/venv
@@ -22,7 +22,7 @@ COPY ml/src src
 RUN PYTHON=/opt/venv/bin/python scripts/gen_proto.sh \
  && uv sync --frozen --no-dev --extra eval --no-editable
 
-FROM python:3.13-slim
+FROM python:3.14-slim
 RUN groupadd --system --gid 10001 corvus \
  && useradd --system --uid 10001 --gid corvus --no-create-home corvus
 COPY --from=build /opt/venv /opt/venv
