@@ -7,7 +7,7 @@ java {
     toolchain { languageVersion = JavaLanguageVersion.of(25) }
 }
 
-val velocityVersion = "4.2.0"
+val velocityVersion = "4.3.0"
 val packetEventsVersion = "2.14.0"
 val nettyVersion = "4.2.19.Final"
 
