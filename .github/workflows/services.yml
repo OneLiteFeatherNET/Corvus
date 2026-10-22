@@ -38,7 +38,7 @@ jobs:
 
       - name: Set up uv
         if: steps.detect.outputs.present == 'true'
-        uses: astral-sh/setup-uv@v10.3.1
+        uses: astral-sh/setup-uv@v10.3.2
         with:
           python-version: "3.13"
           enable-cache: true
