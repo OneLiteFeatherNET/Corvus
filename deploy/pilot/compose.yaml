@@ -7,7 +7,7 @@
 name: corvus-pilot
 
 x-paper: &paper
-  image: itzg/minecraft-server:2026.10.0-java25
+  image: itzg/minecraft-server:2026.10.1-java25
   restart: "no"
   # Keep the stack from hogging the developer machine.
   cpus: 1.5
