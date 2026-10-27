@@ -32,7 +32,7 @@ services:
 
   # S3-compatible object store. MinIO no longer publishes container images, so the dev stack uses RustFS.
   s3:
-    image: rustfs/rustfs:1.0.3
+    image: rustfs/rustfs:1.0.4
     env_file: .env
     environment:
       RUSTFS_VOLUMES: /data
