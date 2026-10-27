@@ -12,7 +12,7 @@ jobs:
     # Reuse the OneLiteFeather org build workflow. The task runs the full build
     # (including :plugin:test) and the shadowJar. Corvus is a Velocity plugin
     # without OS-specific code, so one Linux runner is enough.
-    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-build-pr.yml@v2.9.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-build-pr.yml@v2.9.1
     with:
       java-version: "25"
       java-distribution: "temurin"

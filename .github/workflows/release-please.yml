@@ -100,7 +100,7 @@ jobs:
     permissions:
       contents: read
       id-token: write # keyless cosign signing
-    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.9.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.9.1
     with:
       image-name: "onelitefeather/corvus-services"
       version: ${{ needs.release-please.outputs.version }}
@@ -116,7 +116,7 @@ jobs:
     permissions:
       contents: read
       id-token: write # keyless cosign signing
-    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.9.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.9.1
     with:
       image-name: "onelitefeather/corvus-ml"
       version: ${{ needs.release-please.outputs.version }}
@@ -132,7 +132,7 @@ jobs:
     permissions:
       contents: read
       id-token: write # keyless cosign signing
-    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.9.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.9.1
     with:
       image-name: "onelitefeather/corvus-ui"
       version: ${{ needs.release-please.outputs.version }}
@@ -147,7 +147,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    uses: OneLiteFeatherNET/workflows/.github/workflows/security-scan.yml@v2.9.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/security-scan.yml@v2.9.1
     with:
       scan-type: rootfs
       artifact-name: plugin-jar
@@ -179,7 +179,7 @@ jobs:
   sbom:
     name: Publish SBOM
     needs: [release-please, publish]
-    uses: OneLiteFeatherNET/workflows/.github/workflows/sbom-publish.yml@v2.9.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/sbom-publish.yml@v2.9.1
     with:
       project-name: "Corvus"
       project-version: ${{ needs.release-please.outputs.version }}
