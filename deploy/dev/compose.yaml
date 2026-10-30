@@ -52,7 +52,7 @@ services:
 
   # Creates the bucket; retries until the object store accepts requests.
   s3-init:
-    image: amazon/aws-cli:2.27.63
+    image: amazon/aws-cli:2.39.0
     env_file: .env
     depends_on:
       - s3
