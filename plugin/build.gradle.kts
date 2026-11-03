@@ -9,7 +9,7 @@ java {
 
 val velocityVersion = "4.3.1"
 val packetEventsVersion = "2.14.0"
-val nettyVersion = "4.2.19.Final"
+val nettyVersion = "4.2.20.Final"
 
 val generateTemplates = tasks.register<Copy>("generateTemplates") {
     val version = project.version.toString()
