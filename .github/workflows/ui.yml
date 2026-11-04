@@ -39,7 +39,7 @@ jobs:
       # The pnpm version comes from the packageManager field of ui/package.json.
       - name: Set up pnpm
         if: steps.detect.outputs.present == 'true'
-        uses: pnpm/action-setup@v6.1.0
+        uses: pnpm/action-setup@v6.1.1
         with:
           package_json_file: ui/package.json
 
