@@ -4,8 +4,8 @@ description: Corvus ML anticheat backend -- ingest, control-plane API, online sc
 type: application
 # Both markers are rewritten by release-please (generic updater), so the chart version and the
 # image tag it deploys by default always come from the same release.
-version: "0.5.0" # x-release-please-version
-appVersion: "0.5.0" # x-release-please-version
+version: "0.6.0" # x-release-please-version
+appVersion: "0.6.0" # x-release-please-version
 home: https://github.com/OneLiteFeatherNET/Corvus
 sources:
   - https://github.com/OneLiteFeatherNET/Corvus
