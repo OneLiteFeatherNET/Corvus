@@ -27,7 +27,7 @@ dependencies {
     implementation(project(":proto-java"))
     // Public API for other plugins: shaded into the plugin jar unrelocated (see shadowJar below).
     implementation(project(":api"))
-    implementation("io.nats:jnats:2.26.4")
+    implementation("io.nats:jnats:2.27.0")
     implementation("com.moandjiezana.toml:toml4j:0.7.2") {
         exclude(group = "com.google.code.gson")
     }
