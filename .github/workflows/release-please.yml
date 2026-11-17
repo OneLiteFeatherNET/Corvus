@@ -195,5 +195,7 @@ jobs:
     with:
       project-name: "Corvus"
       project-version: ${{ needs.release-please.outputs.version }}
+      parent-uuid: "75d84fdc-4047-4f14-97c5-24e160794537"
+      is-latest: true
       project-tags: "velocity,plugin,ml"
     secrets: inherit
