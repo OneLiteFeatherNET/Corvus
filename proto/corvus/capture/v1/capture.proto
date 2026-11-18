@@ -51,6 +51,17 @@ message SegmentStart {
   // Client brand as reported by the client (e.g. "vanilla", "fabric"); may be empty.
   string client_brand = 5;
   int64 started_at_unix_millis = 6;
+  // CloudNet task of the backend service (e.g. "Lobby"); empty when CloudNet does not know the server.
+  string cloudnet_task = 7;
+  // CloudNet groups of the backend service; empty when unknown.
+  repeated string cloudnet_groups = 8;
+  // CloudNet node that runs the backend service; empty when unknown.
+  string cloudnet_node = 9;
+  // CloudNet ServiceEnvironmentType name of the backend service (e.g. "MINECRAFT_SERVER"); empty when unknown.
+  string cloudnet_environment = 10;
+  // "production" or "staging" (staging when the CloudNet task ends with "-Staging" or a group is "Staging");
+  // empty when CloudNet does not know the server.
+  string stage = 11;
 }
 
 message SessionEnd {

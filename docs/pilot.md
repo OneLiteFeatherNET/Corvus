@@ -60,7 +60,12 @@ ones the plugin reads (`PilotConfigTest` fails if it contains a key the plugin i
 mapping `lobby -> lobby`, `pvp -> pvp` (a backend named `<Task>-<n>`, as CloudNet services are, falls back to
 its task name: `Lobby-2` maps via `lobby`; exact names win, only one trailing `-<digits>` is removed, and
 `game_context.strip_instance_suffix = false` turns this off), pseudonym key id `pilot-1`, and the payload policy below. The
-HMAC key itself is read from the environment variable `CORVUS_PSEUDONYM_KEY` (base64, at least 16
+pilot runs without CloudNet on the plugin's class path, so only this list applies and `stage` stays empty. On a proxy
+that runs as a CloudNet v4 service, a server missing from the list falls back to its CloudNet task: the list may
+name the task (`[game_context.servers]`), otherwise the task in lower case without a `-Staging` suffix is the context
+(`Slender-Staging-1` -> `slender`). The segment then records `stage` = `staging` when the task ends with `-Staging` or
+a CloudNet group is named `Staging`, and `production` otherwise. The CloudNet task, groups, node and environment are
+recorded per segment as well. The HMAC key itself is read from the environment variable `CORVUS_PSEUDONYM_KEY` (base64, at least 16
 bytes). The plugin writes `plugins/corvus/captures/<yyyy-MM-dd>/<session-id>.cvc`, which is bind
 mounted from `deploy/pilot/data/captures`; the one-shot `stage-corvus` service makes that directory
 writable for the proxy user (uid 1000).

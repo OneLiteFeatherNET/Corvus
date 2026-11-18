@@ -183,9 +183,13 @@ public record CorvusConfig(
             [game_context]
             default = "unknown"
             # Backends that are CloudNet services are named <Task>-<n> (Lobby-1, Lobby-2, Team-Build-1). Lookup order:
-            # 1. the exact server name, 2. the name without ONE trailing "-<digits>" (Lobby-2 -> lobby,
-            # Team-Build-1 -> team-build), 3. default. Names are matched case-insensitively. Set to false to
-            # match exact server names only.
+            # 1. the server name: exact, then without ONE trailing "-<digits>" (Lobby-2 -> lobby, Team-Build-1 ->
+            #    team-build; false = exact names only, see strip_instance_suffix),
+            # 2. the CloudNet task of the server, when the proxy runs as a CloudNet v4 service (Slender-Staging-1 ->
+            #    task Slender-Staging) and [game_context.servers] has an entry for that task,
+            # 3. the CloudNet task in lower case without a "-Staging" suffix (Slender-Staging -> slender),
+            # 4. default. Names are matched case-insensitively. Without CloudNet only steps 1 and 4 apply.
+            # The segment also records "stage" (production or staging) from CloudNet; see docs/pilot.md.
             strip_instance_suffix = true
 
             # server name (or CloudNet task name) = game context tag

@@ -18,6 +18,7 @@ import net.onelitefeather.corvus.proto.capture.v1.SessionStart;
 
 import java.time.InstantSource;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -42,6 +43,7 @@ public final class CaptureEngine {
     private final Pseudonymizer pseudonymizer; // null: fail closed, nothing is captured
     private final PlayerFilter playerFilter;
     private final GameContextMapper contexts;
+    private final ServiceMetadataSource serviceMetadata;
     private final CaptureSink sink;
     private final NanoClock nanoClock;
     private final InstantSource wallClock;
@@ -52,13 +54,15 @@ public final class CaptureEngine {
     private volatile boolean shutdown;
 
     public CaptureEngine(Settings settings, Pseudonymizer pseudonymizer, PlayerFilter playerFilter,
-                         GameContextMapper contexts, CaptureSink sink, NanoClock nanoClock, InstantSource wallClock,
-                         Supplier<byte[]> sessionIds, Metrics metrics, Consumer<String> info) {
+                         GameContextMapper contexts, ServiceMetadataSource serviceMetadata, CaptureSink sink,
+                         NanoClock nanoClock, InstantSource wallClock, Supplier<byte[]> sessionIds, Metrics metrics,
+                         Consumer<String> info) {
         this.settings = settings;
         this.payloadPolicy = new PayloadPolicy(settings.payloadMode(), settings.privacy());
         this.pseudonymizer = pseudonymizer;
         this.playerFilter = playerFilter;
         this.contexts = contexts;
+        this.serviceMetadata = serviceMetadata;
         this.sink = sink;
         this.nanoClock = nanoClock;
         this.wallClock = wallClock;
@@ -194,17 +198,34 @@ public final class CaptureEngine {
             if (session == null || !isCapturing()) {
                 return;
             }
-            SegmentStart segment = SegmentStart.newBuilder()
+            Optional<ServiceMetadata> meta = lookupServiceMetadata(serverName);
+            BackendContext backend = contexts.resolve(serverName, meta);
+            SegmentStart.Builder segmentBuilder = SegmentStart.newBuilder()
                     .setSessionId(session.idBytes())
                     .setSegment(session.nextSegment())
                     .setBackendServer(serverName == null ? "" : serverName)
-                    .setGameContext(contexts.contextFor(serverName))
+                    .setGameContext(backend.gameContext())
                     .setClientBrand(clientBrand == null ? "" : clientBrand)
                     .setStartedAtUnixMillis(wallClock.millis())
-                    .build();
+                    .setStage(backend.stage());
+            meta.ifPresent(m -> segmentBuilder.setCloudnetTask(m.task())
+                    .addAllCloudnetGroups(m.groups())
+                    .setCloudnetNode(m.node())
+                    .setCloudnetEnvironment(m.environment()));
+            SegmentStart segment = segmentBuilder.build();
             sink.offerControl(new WriteItem.Segment(session, Envelope.newBuilder().setSegmentStart(segment).build()));
         } catch (Throwable t) {
             recordListenerError(player);
+        }
+    }
+
+    /** Empty when the source is unknown or fails; the connect path must not depend on the orchestrator. */
+    private Optional<ServiceMetadata> lookupServiceMetadata(String serverName) {
+        try {
+            Optional<ServiceMetadata> found = serviceMetadata.lookup(serverName);
+            return found == null ? Optional.empty() : found;
+        } catch (Throwable t) {
+            return Optional.empty();
         }
     }
 
