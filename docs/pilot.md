@@ -260,14 +260,22 @@ player-second; `per_player_frames_per_s` gives min/median/p95/max over player-se
 
 ### Privacy check
 
-The analyzer loads `proto/corvus/capture/v1/vocabulary.json` (exported from the plugin, kept in sync
-by `VocabularyJsonTest`) and fails when
+The analyzer loads `proto/corvus/capture/v1/vocabulary.json` (exported from the plugin with the analysis policy,
+kept in sync by `VocabularyJsonTest`) and fails when
 
-- a frame has a privacy-dropped packet type (chat, commands, signing, player lists),
-- a frame of a payload-stripped type (sign, book, ...) carries a payload,
+- a frame has a privacy-dropped packet type (chat, commands, signing, player lists) and its session does not declare
+  that it captured them,
+- a frame of a payload-stripped type (cookie response, or sign, book and similar when names are not kept) carries a
+  payload and its session does not declare that names were kept,
 - under the default policy a frame carries a payload outside the policy: any clientbound payload
   other than the motion allowlist, or a serverbound payload of a type that is not in the vocabulary,
 - any string field looks like a UUID or an IP address (the finding reports only the field).
+
+Each capture declares its capture policy in every session (`SessionStart.text_packets_captured` and
+`names_kept`, set by the plugin from `capture.text_packets` and `capture.redact_names`). A text or name packet of a
+session that declares it is reported under `expected` in the JSON report (informational, not a failure). Such
+frames are still excluded from the models: the analysis policy does not change. Captures without a declaration
+(recorded before the fields existed) are checked strictly, as before.
 
 `--payload-policy none|serverbound|all` states which `capture.raw_payloads` the captures were
 recorded with (default `serverbound`); only the `stripped` rule applies to `all`. `--vocabulary FILE`
@@ -287,7 +295,7 @@ Payload bytes are not scanned for identifiers; the payload policy is what keeps 
 | Corvus-caused kicks and errors | 0 |
 | Chat signing | signed chat and commands work on both servers, all clients, across server switches |
 | Drop rate (`queue_full / (captured + queue_full)`) | < 0.1 % under normal load, per context and overall |
-| Privacy check | analyzer exits 0 (vocabulary denylist and payload policy are always active) |
+| Privacy check | analyzer exits 0; text and name packets of sessions that declare them count as expected, not as violations |
 | Native protocol | `via_before_pe` and the version table understood; any translated frames reported as a finding |
 
 Also report: observed rates per player and context (these size the real pipeline), sequence gaps
