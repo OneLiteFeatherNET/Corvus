@@ -101,6 +101,13 @@ lake:
   catalogUri: ""
   warehouse: corvus
   namespace: capture
+  # Iceberg snapshots older than this are expired by corvus-housekeeping (not while a branch or tag
+  # holds them). Expiry removes no rows. Read by housekeeping only.
+  snapshotRetentionDays: 7
+  # Routine Iceberg maintenance by housekeeping (snapshot expiry, orphan removal). Off: the platform's
+  # Airflow DAG iceberg_maintenance owns it. Only read with format iceberg.
+  maintenance:
+    enabled: false
   oauth:
     tokenUrl: ""
     scope: ""

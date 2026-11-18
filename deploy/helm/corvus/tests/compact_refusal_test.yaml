@@ -1,0 +1,13 @@
+suite: compaction refuses iceberg without its settings
+templates:
+  - compact.yaml
+tests:
+  - it: compaction refuses to render iceberg without a catalog uri
+    template: compact.yaml
+    set:
+      compact.enabled: true
+      lake.format: iceberg
+    asserts:
+      - failedTemplate:
+          errorMessage: lake.catalogUri is required when lake.format is iceberg
+
