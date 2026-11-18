@@ -85,3 +85,33 @@ def raw_row(session_id: bytes, segment: int, frame: Any, dek: bytes) -> Row | No
         "nonce": nonce,
         "ciphertext": ciphertext,
     }
+
+
+def plain_raw_row(
+    session_id: bytes,
+    segment: int,
+    frame: Any,
+    player_key: bytes | None,
+    protocol_version: int | None,
+) -> Row | None:
+    """One plaintext ``raw`` row of the Iceberg layout (section 2a), or None without a payload.
+
+    The payload is stored as received. ``player_key`` and ``protocol_version`` come from the session
+    and are None for orphan sessions.
+    """
+    if not frame.payload:
+        return None
+    return {
+        "session_id": session_id,
+        "segment": segment,
+        "seq": frame.seq,
+        "offset_nanos": frame.offset_nanos,
+        "direction": frame.direction,
+        "state": frame.state,
+        "packet_type": frame.packet_type,
+        "wire_packet_id": frame.wire_packet_id,
+        "protocol_version": protocol_version,
+        "player_key": player_key,
+        "payload_original_size": frame.payload_original_size,
+        "payload": bytes(frame.payload),
+    }

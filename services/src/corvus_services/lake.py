@@ -16,11 +16,13 @@ from .clock import Clock, new_ulid
 from .config import Settings
 from .iceberg_sink import IcebergSink
 from .ports import Catalog, Committed, FileRecord, LakeSink, ObjectStore
-from .schema import SCHEMA_VERSION
+from .schema import PARQUET_LAYOUT, SCHEMA_VERSION, Layout
 
 
 class ParquetSink:
     """staging -> final copy -> ``lake_files`` / ``lake_file_sessions`` in one transaction."""
+
+    layout: Layout = PARQUET_LAYOUT
 
     def __init__(
         self, store: ObjectStore, catalog: Catalog, executor: Executor, clock: Clock

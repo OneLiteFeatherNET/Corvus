@@ -173,7 +173,7 @@ the key, UUID endpoints answer `503`; erasure by pseudonym still works. The API 
 logs only the first 12 hex characters of the pseudonym.
 
 **Erasure semantics.** In one transaction: (1) delete the `player_keys` row, which crypto-shreds the player's `raw`
-payloads; (2) set `players.erased_at` (ingest stops storing data for that pseudonym); (3) put the pseudonym on the
+payloads in the Parquet layout (Iceberg `raw` is plaintext and not covered yet, see [data-lake.md](data-lake.md) 2a); (2) set `players.erased_at` (ingest stops storing data for that pseudonym); (3) put the pseudonym on the
 blocklist with `source = erasure`; (4) delete the player's rows in `scores_latest` and `score_history`; (5) insert an `erasure_requests` row (who, when,
 pseudonym, `status = completed`, `player_known`, `key_deleted`, `compaction_pending = true`). If any step fails nothing is changed. A pseudonym that was
 never captured is still blocklisted and audited. Erasure can be repeated. `events` files are not rewritten here:

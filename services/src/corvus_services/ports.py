@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from .buffer import TableBuffer
+    from .schema import Layout
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,8 @@ class SessionInfo:
     pseudonym: bytes | None
     started_at: datetime
     erased: bool
+    # Protocol version the client spoke (SessionStart); None for orphan sessions.
+    client_protocol: int | None = None
 
     @property
     def orphan(self) -> bool:
@@ -161,7 +164,10 @@ class LakeSink(Protocol):
 
     ``commit`` returns only once the data is visible to readers; the pipeline acks the messages
     of the buffer afterwards and naks them when ``commit`` raises. Nothing is acked before.
+    ``layout`` is the row layout the sink stores (the pipeline builds its buffers from it).
     """
+
+    layout: Layout
 
     async def commit(self, buf: TableBuffer) -> Committed: ...
 

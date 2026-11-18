@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from corvus_services.codec import event_row, raw_row
+from corvus_services.codec import event_row, plain_raw_row, raw_row
 from corvus_services.proto import pb
 from helpers import SESSION
 
@@ -158,3 +158,30 @@ def test_every_event_row_only_uses_schema_columns(kind):
     }
     row = event_row(SESSION, 0, frame(**{kind: events[kind]}))
     assert set(row) <= set(EVENTS_SCHEMA.names)
+
+
+def test_plain_raw_row_keeps_the_payload_bytes_as_received():
+    f = frame(payload=b"/msg hi", payload_original_size=7)
+    row = plain_raw_row(SESSION, 4, f, b"p" * 32, 769)
+    assert row == {
+        "session_id": SESSION,
+        "segment": 4,
+        "seq": 3,
+        "offset_nanos": 99,
+        "direction": pb.DIRECTION_SERVERBOUND,
+        "state": pb.CONNECTION_STATE_PLAY,
+        "packet_type": 4,
+        "wire_packet_id": 12,
+        "protocol_version": 769,
+        "player_key": b"p" * 32,
+        "payload_original_size": 7,
+        "payload": b"/msg hi",
+    }
+
+
+def test_plain_raw_row_only_for_frames_with_payload_and_allows_orphans():
+    assert plain_raw_row(SESSION, 0, frame(), None, None) is None
+    row = plain_raw_row(SESSION, 0, frame(payload=b"x", payload_original_size=1), None, None)
+    assert row is not None
+    assert row["player_key"] is None
+    assert row["protocol_version"] is None

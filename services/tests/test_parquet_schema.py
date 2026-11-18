@@ -6,10 +6,12 @@ from datetime import date
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 from corvus_services.buffer import TableBuffer, encode_parquet
 from corvus_services.codec import event_row, raw_row
 from corvus_services.proto import pb
+from corvus_services.schema import ICEBERG_LAYOUT
 from helpers import SESSION, T0
 
 EVENTS_CONTRACT = {
@@ -114,3 +116,27 @@ def test_frame_without_event_has_null_event_columns(tmp_path):
     assert row["event_kind"] == 0
     assert row["x"] is None
     assert row["slot"] is None
+
+
+def test_parquet_encoder_refuses_the_plaintext_iceberg_layout():
+    buf = TableBuffer("raw", date(2026, 10, 15), T0, ICEBERG_LAYOUT.schemas["raw"])
+    buf.add_row(
+        {
+            "session_id": SESSION,
+            "segment": 0,
+            "seq": 0,
+            "offset_nanos": 0,
+            "direction": 1,
+            "state": 5,
+            "packet_type": 1,
+            "wire_packet_id": 1,
+            "protocol_version": 769,
+            "player_key": b"p" * 32,
+            "payload_original_size": 2,
+            "payload": b"hi",
+        },
+        1,
+    )
+
+    with pytest.raises(ValueError, match="Iceberg layout"):
+        encode_parquet(buf)

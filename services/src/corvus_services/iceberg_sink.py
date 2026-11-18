@@ -2,8 +2,9 @@
 
 Target layout (docs/reference/data-lake.md section 2a):
 
-* columns = the Arrow schemas of ``schema.py``, unsigned integers widened to the signed Iceberg
-  types (Iceberg has none), plus ``date`` (UTC date of the session start);
+* columns = the Iceberg layout of ``schema.py`` (plaintext ``raw`` payloads, ``player_key`` on both
+  tables), unsigned integers widened to the signed Iceberg types (Iceberg has none), plus ``date``
+  (UTC date of the session start);
 * identity partition on ``date``; sort order (``session_id``, ``seq``); format version 2;
   ``write.parquet.compression-codec=zstd``;
 * table property ``corvus.lake-schema-version`` = ``ICEBERG_LAKE_VERSION``. Bump it (and add a
@@ -55,18 +56,19 @@ from pyiceberg.types import (
 from .buffer import TableBuffer
 from .config import Settings
 from .ports import Committed
-from .schema import SCHEMAS
+from .schema import ICEBERG_LAYOUT, Layout
 
 log = logging.getLogger("corvus.ingest.iceberg")
 
-ICEBERG_LAKE_VERSION = 1
+ICEBERG_LAKE_VERSION = 2
+LAKE_VERSION_PROPERTY = "corvus.lake-schema-version"
 DATE_COLUMN = "date"
 PARTITION_FIELD_ID = 1000
 MAX_COMMIT_ATTEMPTS = 5
 TABLE_PROPERTIES = {
     "format-version": "2",
     "write.parquet.compression-codec": "zstd",
-    "corvus.lake-schema-version": str(ICEBERG_LAKE_VERSION),
+    LAKE_VERSION_PROPERTY: str(ICEBERG_LAKE_VERSION),
 }
 
 _SCALARS: dict[pa.DataType, IcebergType] = {
@@ -90,16 +92,18 @@ def _iceberg_type(t: pa.DataType) -> IcebergType:
         raise TypeError(f"no Iceberg type for Arrow type {t}") from e
 
 
-def iceberg_schema(table: str) -> Schema:
+def iceberg_schema(arrow: pa.Schema) -> Schema:
     """Iceberg schema of a lake table: the Arrow columns in order, then ``date``."""
     fields: list[NestedField] = []
-    for field_id, f in enumerate(SCHEMAS[table], start=1):
+    for field_id, f in enumerate(arrow, start=1):
         fields.append(NestedField(field_id, f.name, _iceberg_type(f.type), required=not f.nullable))
     fields.append(NestedField(len(fields) + 1, DATE_COLUMN, DateType(), required=True))
     return Schema(*fields)
 
 
-ICEBERG_SCHEMAS: dict[str, Schema] = {name: iceberg_schema(name) for name in SCHEMAS}
+ICEBERG_SCHEMAS: dict[str, Schema] = {
+    name: iceberg_schema(arrow) for name, arrow in ICEBERG_LAYOUT.schemas.items()
+}
 
 
 def partition_spec(schema: Schema) -> PartitionSpec:
@@ -156,6 +160,8 @@ def open_catalog(s: Settings) -> Catalog:
 
 
 class IcebergSink:
+    layout: Layout = ICEBERG_LAYOUT
+
     def __init__(
         self,
         catalog: Catalog,
@@ -185,7 +191,7 @@ class IcebergSink:
     def bootstrap(self) -> None:
         """Make sure both tables exist with the expected layout. Idempotent, race-safe: a table
         created by another replica in the meantime is loaded instead. The namespace must exist."""
-        for name in SCHEMAS:
+        for name in ICEBERG_SCHEMAS:
             self._ensure_table(name)
 
     def _ensure_table(self, name: str) -> Table:
@@ -242,6 +248,13 @@ class IcebergSink:
 
 
 def _check_layout(table: Table, ident: str, name: str) -> None:
+    version = table.properties.get(LAKE_VERSION_PROPERTY)
+    if version != str(ICEBERG_LAKE_VERSION):
+        raise RuntimeError(
+            f"{ident} has lake schema version {version or 'unset'}, this writer needs "
+            f"{ICEBERG_LAKE_VERSION}; version 1 tables (encrypted raw payloads) are not migrated: "
+            "drop the table and let ingest recreate it"
+        )
     expected = ICEBERG_SCHEMAS[name]
     actual = [f.name for f in table.schema().fields]
     if actual != [f.name for f in expected.fields]:

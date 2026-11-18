@@ -1,6 +1,10 @@
-"""Arrow schemas of the lake tables, exactly as in docs/reference/data-lake.md section 2."""
+"""Arrow schemas of the lake tables, exactly as in docs/reference/data-lake.md section 2 (Parquet)
+and section 2a (Iceberg). The two layouts differ in how raw payloads are stored."""
 
 from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 import pyarrow as pa
 
@@ -51,6 +55,43 @@ RAW_SCHEMA = pa.schema(
 )
 
 SCHEMAS: dict[str, pa.Schema] = {"events": EVENTS_SCHEMA, "raw": RAW_SCHEMA}
+
+# Iceberg layout (section 2a). Raw payloads are plaintext and carry the pseudonymous player key and
+# the client protocol version of their session (the payload bytes are only readable with it).
+# ``player_key`` and ``protocol_version`` are null for orphan sessions (no SessionStart seen).
+PLAYER_KEY_BYTES = 32
+ICEBERG_EVENTS_SCHEMA = EVENTS_SCHEMA.append(pa.field("player_key", pa.binary(PLAYER_KEY_BYTES)))
+ICEBERG_RAW_SCHEMA = pa.schema(
+    [
+        pa.field("session_id", pa.binary(16), nullable=False),
+        pa.field("segment", pa.uint32(), nullable=False),
+        pa.field("seq", pa.uint64(), nullable=False),
+        pa.field("offset_nanos", pa.uint64(), nullable=False),
+        pa.field("direction", pa.uint8(), nullable=False),
+        pa.field("state", pa.uint8(), nullable=False),
+        pa.field("packet_type", pa.uint32(), nullable=False),
+        pa.field("wire_packet_id", pa.int32(), nullable=False),
+        pa.field("protocol_version", pa.int32()),
+        pa.field("player_key", pa.binary(PLAYER_KEY_BYTES)),
+        pa.field("payload_original_size", pa.uint32(), nullable=False),
+        pa.field("payload", pa.binary(), nullable=False),
+    ]
+)
+
+
+@dataclass(frozen=True)
+class Layout:
+    """What a lake format stores: the table schemas, and whether raw payloads are encrypted."""
+
+    name: str
+    schemas: Mapping[str, pa.Schema]
+    encrypts_raw: bool
+
+
+PARQUET_LAYOUT = Layout("parquet", SCHEMAS, encrypts_raw=True)
+ICEBERG_LAYOUT = Layout(
+    "iceberg", {"events": ICEBERG_EVENTS_SCHEMA, "raw": ICEBERG_RAW_SCHEMA}, encrypts_raw=False
+)
 
 # Rough in-memory cost per buffered row (fixed columns / overhead), used for the byte limits.
 EVENT_ROW_BYTES = 96

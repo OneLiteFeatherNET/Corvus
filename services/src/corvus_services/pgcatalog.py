@@ -129,7 +129,8 @@ class PgCatalog:
             )
             srow = await cur.fetchone()
             assert srow is not None
-        return SessionInfo(data.session_id, data.pseudonym, srow[0], erased), stored
+        info = SessionInfo(data.session_id, data.pseudonym, srow[0], erased, data.client_protocol)
+        return info, stored
 
     async def create_orphan_session(self, session_id: bytes, started_at: datetime) -> SessionInfo:
         async with self._pool.connection() as conn:
@@ -162,7 +163,8 @@ class PgCatalog:
     async def get_session(self, session_id: bytes) -> SessionInfo | None:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT s.pseudonym, s.started_at, COALESCE(p.erased_at IS NOT NULL, false)"
+                "SELECT s.pseudonym, s.started_at, COALESCE(p.erased_at IS NOT NULL, false),"
+                " s.client_protocol"
                 " FROM corvus.sessions s LEFT JOIN corvus.players p USING (pseudonym)"
                 " WHERE s.session_id = %s",
                 (session_id,),
@@ -170,8 +172,13 @@ class PgCatalog:
             row = await cur.fetchone()
         if row is None:
             return None
+        pseudonym = None if row[0] is None else bytes(row[0])
         return SessionInfo(
-            session_id, None if row[0] is None else bytes(row[0]), row[1], bool(row[2])
+            session_id,
+            pseudonym,
+            row[1],
+            bool(row[2]),
+            None if pseudonym is None else int(row[3]),
         )
 
     async def get_dek(self, pseudonym: bytes) -> WrappedDek | None:

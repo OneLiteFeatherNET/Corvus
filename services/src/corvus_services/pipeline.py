@@ -25,7 +25,7 @@ from google.protobuf.message import DecodeError
 
 from .buffer import BufferKey, BufferSet, TableBuffer, Ticket
 from .clock import Clock
-from .codec import event_row, raw_row
+from .codec import Row, event_row, plain_raw_row, raw_row
 from .config import Settings
 from .crypto import Keyring, LruCache, UnwrapError
 from .lake import ParquetSink
@@ -42,7 +42,7 @@ from .ports import (
     WrappedDek,
 )
 from .proto import pb
-from .schema import EVENT_ROW_BYTES, RAW_ROW_OVERHEAD
+from .schema import EVENT_ROW_BYTES, RAW_ROW_OVERHEAD, Layout
 
 log = logging.getLogger("corvus.ingest")
 
@@ -74,10 +74,13 @@ class IngestPipeline:
         self._m = metrics or Metrics()
         # Where flushed buffers become durable; the default is the Parquet layout.
         self._sink: LakeSink = sink or ParquetSink(store, catalog, executor, clock)
+        # Row layout of the sink: Parquet encrypts raw payloads, Iceberg stores them in plaintext.
+        self._layout: Layout = self._sink.layout
         self._buffers = BufferSet(
             settings.flush_max_rows,
             settings.flush_max_bytes,
             timedelta(seconds=settings.flush_max_age_s),
+            self._layout.schemas,
         )
         self._deks: LruCache[bytes, bytes] = LruCache(settings.dek_cache_size)
         self._sessions: LruCache[bytes, tuple[SessionInfo, datetime]] = LruCache(
@@ -196,6 +199,9 @@ class IngestPipeline:
             data, WrappedDek(wrapped, self._keyring.kek_id)
         )
         self._sessions.put(info.session_id, (info, self._clock() + self._session_ttl))
+        # Iceberg stores raw payloads in plaintext: the stored DEK is never needed there.
+        if not self._layout.encrypts_raw:
+            return
         if stored is not None and not info.erased and self._deks.get(data.pseudonym) is None:
             if stored.wrapped == wrapped:
                 self._deks.put(data.pseudonym, candidate_dek)
@@ -242,13 +248,14 @@ class IngestPipeline:
             if not counters.is_zero():
                 await self._catalog.apply_counters(session_id, msg.msg_id, counters, None)
             dek = None
-            if b.frames and session.pseudonym is not None:
-                dek = await self._dek(session.pseudonym)
-            if b.frames and dek is None and not session.orphan:
-                # key shredded: the player was erased after our session cache entry was made
-                self._m.messages.labels("erased").inc()
-                await msg.ack()
-                return
+            if self._layout.encrypts_raw:
+                if b.frames and session.pseudonym is not None:
+                    dek = await self._dek(session.pseudonym)
+                if b.frames and dek is None and not session.orphan:
+                    # key shredded: the player was erased after our session cache entry was made
+                    self._m.messages.labels("erased").inc()
+                    await msg.ack()
+                    return
         except Exception:
             log.exception("failed to handle batch %s", msg.msg_id)
             self._m.messages.labels("error").inc()
@@ -264,14 +271,16 @@ class IngestPipeline:
             if events_buf is None:
                 events_buf = self._buffers.get("events", day, now)
                 events_buf.attach(ticket)
-            events_buf.add_row(event_row(session_id, b.segment, frame), EVENT_ROW_BYTES)
+            event = event_row(session_id, b.segment, frame)
+            if not self._layout.encrypts_raw:
+                event["player_key"] = session.pseudonym
+            events_buf.add_row(event, EVENT_ROW_BYTES)
             n_events += 1
-            raw = raw_row(session_id, b.segment, frame, dek) if dek is not None else None
+            raw, size = self._raw_row(session, b.segment, frame, dek)
             if raw is not None:
                 if raw_buf is None:
                     raw_buf = self._buffers.get("raw", day, now)
                     raw_buf.attach(ticket)
-                size = len(raw["ciphertext"]) + RAW_ROW_OVERHEAD
                 raw_buf.add_row(raw, size)
                 self._buffers.note_bytes(size)
                 n_raw += 1
@@ -282,6 +291,24 @@ class IngestPipeline:
         self._update_gauge()
         if ticket.pending == 0:
             await msg.ack()
+
+    def _raw_row(
+        self, session: SessionInfo, segment: int, frame: Any, dek: bytes | None
+    ) -> tuple[Row | None, int]:
+        """The ``raw`` row of a frame and its size for the byte limits (None if no payload)."""
+        if self._layout.encrypts_raw:
+            if dek is None:
+                return None, 0
+            row = raw_row(session.session_id, segment, frame, dek)
+            if row is None:
+                return None, 0
+            return row, len(row["ciphertext"]) + RAW_ROW_OVERHEAD
+        row = plain_raw_row(
+            session.session_id, segment, frame, session.pseudonym, session.client_protocol
+        )
+        if row is None:
+            return None, 0
+        return row, len(row["payload"]) + RAW_ROW_OVERHEAD
 
     # ----- flushing ---------------------------------------------------------------------------
 
