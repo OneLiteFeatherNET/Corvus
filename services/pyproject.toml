@@ -8,7 +8,7 @@ dependencies = [
     "nats-py[nkeys]>=2.16",
     "pyarrow>=26.0",
     # Iceberg REST catalog client for the lake writer (CORVUS_LAKE_FORMAT=iceberg).
-    "pyiceberg[pyarrow]==0.10.0",
+    "pyiceberg[pyarrow]==0.12.0",
     "boto3>=1.43",
     "psycopg[binary,pool]>=3.3",
     "cryptography>=50.0",
@@ -44,7 +44,7 @@ dev = [
     "mypy>=1.15",
     "boto3-stubs[s3]>=1.43",
     # Local SqlCatalog (sqlite) for the Iceberg sink tests.
-    "pyiceberg[sql-sqlite]==0.10.0",
+    "pyiceberg[sql-sqlite]==0.12.0",
 ]
 # protoc for scripts/gen_proto.sh (build time only, not shipped in the image)
 proto = [
