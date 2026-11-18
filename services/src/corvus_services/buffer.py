@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -30,11 +31,15 @@ BufferKey = tuple[str, date]
 
 
 class TableBuffer:
-    def __init__(self, table: str, day: date, now: datetime) -> None:
+    def __init__(
+        self, table: str, day: date, now: datetime, schema: pa.Schema | None = None
+    ) -> None:
+        """``schema`` is the layout of the rows (default: the Parquet layout of ``table``)."""
         self.table = table
         self.day = day
         self.first_added = now
-        self.columns: dict[str, list[Any]] = {f.name: [] for f in SCHEMAS[table]}
+        self.schema = schema if schema is not None else SCHEMAS[table]
+        self.columns: dict[str, list[Any]] = {f.name: [] for f in self.schema}
         self.rows = 0
         self.bytes = 0
         self.session_ids: set[bytes] = set()
@@ -57,10 +62,17 @@ class TableBuffer:
 
 
 class BufferSet:
-    def __init__(self, max_rows: int, max_bytes: int, max_age: timedelta) -> None:
+    def __init__(
+        self,
+        max_rows: int,
+        max_bytes: int,
+        max_age: timedelta,
+        schemas: Mapping[str, pa.Schema] = SCHEMAS,
+    ) -> None:
         self._max_rows = max_rows
         self._max_bytes = max_bytes
         self._max_age = max_age
+        self._schemas = schemas
         self._buffers: dict[BufferKey, TableBuffer] = {}
         self.total_bytes = 0
 
@@ -68,7 +80,7 @@ class BufferSet:
         key = (table, day)
         buf = self._buffers.get(key)
         if buf is None:
-            buf = self._buffers[key] = TableBuffer(table, day, now)
+            buf = self._buffers[key] = TableBuffer(table, day, now, self._schemas[table])
         return buf
 
     def note_bytes(self, n: int) -> None:
@@ -97,7 +109,13 @@ class BufferSet:
 
 
 def encode_parquet(buf: TableBuffer) -> bytes:
-    """Sort by (session_id, seq) and encode as zstd Parquet. Runs in the worker pool."""
+    """Sort by (session_id, seq) and encode as zstd Parquet. Runs in the worker pool.
+
+    Only the Parquet layout is accepted: the Iceberg layout holds plaintext raw payloads and must
+    never reach a Parquet file (docs/reference/data-lake.md section 2a).
+    """
+    if buf.schema is not SCHEMAS[buf.table]:
+        raise ValueError(f"{buf.table} rows in the Iceberg layout must not be written as Parquet")
     table = pa.Table.from_pydict(buf.columns, schema=SCHEMAS[buf.table])
     table = table.sort_by([("session_id", "ascending"), ("seq", "ascending")])
     sink = io.BytesIO()

@@ -12,15 +12,16 @@ import pytest
 from pyiceberg.catalog.sql import SqlCatalog
 from pyiceberg.exceptions import CommitFailedException, NoSuchTableError
 from pyiceberg.schema import Schema
-from pyiceberg.types import LongType, NestedField
+from pyiceberg.types import BinaryType, DateType, FixedType, LongType, NestedField
 
 from corvus_services.buffer import TableBuffer
 from corvus_services.crypto import Keyring
 from corvus_services.iceberg_sink import ICEBERG_SCHEMAS, MAX_COMMIT_ATTEMPTS, IcebergSink
 from corvus_services.pipeline import IngestPipeline
-from corvus_services.schema import EVENT_ROW_BYTES, RAW_ROW_OVERHEAD
+from corvus_services.schema import EVENT_ROW_BYTES, ICEBERG_LAYOUT, RAW_ROW_OVERHEAD
 from helpers import (
     KEK,
+    PSEUDONYM,
     SESSION,
     T0,
     FakeCatalog,
@@ -99,7 +100,7 @@ class _Table:
 
 
 def events_buffer(seqs: list[int], day: date = DAY) -> TableBuffer:
-    buf = TableBuffer("events", day, T0)
+    buf = TableBuffer("events", day, T0, ICEBERG_LAYOUT.schemas["events"])
     for seq in seqs:
         buf.add_row(
             {
@@ -113,6 +114,7 @@ def events_buffer(seqs: list[int], day: date = DAY) -> TableBuffer:
                 "wire_packet_id": 5,
                 "payload_original_size": 0,
                 "event_kind": 0,
+                "player_key": PSEUDONYM,
             },
             EVENT_ROW_BYTES,
         )
@@ -120,20 +122,56 @@ def events_buffer(seqs: list[int], day: date = DAY) -> TableBuffer:
 
 
 def raw_buffer(seqs: list[int], day: date = DAY) -> TableBuffer:
-    buf = TableBuffer("raw", day, T0)
+    buf = TableBuffer("raw", day, T0, ICEBERG_LAYOUT.schemas["raw"])
     for seq in seqs:
         buf.add_row(
             {
                 "session_id": SESSION,
                 "segment": 0,
                 "seq": seq,
+                "offset_nanos": seq * 1000,
+                "direction": 1,
+                "state": 4,
+                "packet_type": 7,
+                "wire_packet_id": 5,
+                "protocol_version": 769,
+                "player_key": PSEUDONYM,
                 "payload_original_size": 2,
-                "nonce": b"\x00" * 12,
-                "ciphertext": b"ct",
+                "payload": b"ab",
             },
             RAW_ROW_OVERHEAD,
         )
     return buf
+
+
+RAW_COLUMNS = [
+    "session_id",
+    "segment",
+    "seq",
+    "offset_nanos",
+    "direction",
+    "state",
+    "packet_type",
+    "wire_packet_id",
+    "protocol_version",
+    "player_key",
+    "payload_original_size",
+    "payload",
+    "date",
+]
+
+
+def v1_raw_schema() -> Schema:
+    """The layout-version-1 raw table (encrypted payload), as created before this change."""
+    return Schema(
+        NestedField(1, "session_id", FixedType(16), required=True),
+        NestedField(2, "segment", LongType(), required=True),
+        NestedField(3, "seq", LongType(), required=True),
+        NestedField(4, "payload_original_size", LongType(), required=True),
+        NestedField(5, "nonce", FixedType(12), required=True),
+        NestedField(6, "ciphertext", BinaryType(), required=True),
+        NestedField(7, "date", DateType(), required=True),
+    )
 
 
 def make_sink(catalog: Any, sleeps: list[float] | None = None) -> IcebergSink:
@@ -160,7 +198,39 @@ def test_bootstrap_creates_both_tables_partitioned_by_date_and_sorted(catalog):
     assert sort_names == ["session_id", "seq"]
     assert events.metadata.format_version == 2
     assert events.properties["write.parquet.compression-codec"] == "zstd"
-    assert events.properties["corvus.lake-schema-version"] == "1"
+    assert events.properties["corvus.lake-schema-version"] == "2"
+
+
+def test_bootstrap_creates_raw_in_plaintext_with_player_key_and_protocol_version(catalog):
+    make_sink(catalog).bootstrap()
+
+    raw = catalog.load_table("capture.raw")
+    assert raw.schema().column_names == RAW_COLUMNS
+    fields = {f.name: f for f in raw.schema().fields}
+    assert isinstance(fields["payload"].field_type, BinaryType)
+    assert fields["player_key"].field_type == FixedType(32)
+    assert not fields["player_key"].required
+    assert not fields["protocol_version"].required
+    assert "ciphertext" not in raw.schema().column_names
+    assert "nonce" not in raw.schema().column_names
+
+
+def test_bootstrap_adds_player_key_to_events(catalog):
+    make_sink(catalog).bootstrap()
+
+    events = catalog.load_table("capture.events")
+    assert "player_key" in events.schema().column_names
+
+
+def test_bootstrap_refuses_a_v1_table_with_a_clear_message(catalog):
+    catalog.create_table(
+        "capture.raw",
+        v1_raw_schema(),
+        properties={"format-version": "2", "corvus.lake-schema-version": "1"},
+    )
+
+    with pytest.raises(RuntimeError, match="lake schema version 1, this writer needs 2"):
+        make_sink(catalog).bootstrap()
 
 
 def test_bootstrap_twice_changes_nothing(catalog):
@@ -183,7 +253,11 @@ def test_bootstrap_loads_a_table_another_replica_created_meanwhile(catalog):
 
 def test_bootstrap_refuses_a_table_with_another_layout(catalog):
     other = Schema(NestedField(1, "something_else", LongType(), required=False))
-    catalog.create_table("capture.events", other)
+    catalog.create_table(
+        "capture.events",
+        other,
+        properties={"format-version": "2", "corvus.lake-schema-version": "2"},
+    )
 
     with pytest.raises(RuntimeError, match="capture.events has columns"):
         make_sink(catalog).bootstrap()
@@ -219,7 +293,7 @@ async def test_commit_writes_each_buffer_sorted_by_session_and_seq(catalog):
     assert [r["seq"] for r in rows] == [1, 2, 3]
 
 
-async def test_commit_keeps_the_raw_rows_unchanged(catalog):
+async def test_commit_appends_raw_rows_as_plaintext_payloads(catalog):
     sink = make_sink(catalog)
     sink.bootstrap()
 
@@ -228,9 +302,9 @@ async def test_commit_keeps_the_raw_rows_unchanged(catalog):
     assert committed.bytes_written is None, "no Parquet size is known for Iceberg commits"
     assert committed.cleanup is None
     rows = catalog.load_table("capture.raw").scan().to_arrow().to_pylist()
-    assert [(r["seq"], r["ciphertext"], r["date"]) for r in rows] == [
-        (0, b"ct", DAY),
-        (1, b"ct", DAY),
+    assert [(r["seq"], r["payload"], r["player_key"], r["date"]) for r in rows] == [
+        (0, b"ab", PSEUDONYM, DAY),
+        (1, b"ab", PSEUDONYM, DAY),
     ]
 
 
@@ -300,9 +374,9 @@ class IcebergRig:
         )
         self._n = 0
 
-    async def send(self, env: Any) -> FakeMessage:
+    async def send(self, env: Any, delivery: int = 1) -> FakeMessage:
         self._n += 1
-        m = FakeMessage(env.SerializeToString(), f"m-{self._n}", self.log)
+        m = FakeMessage(env.SerializeToString(), f"m-{self._n}", self.log, delivery)
         await self.pipeline.handle(m)
         return m
 
@@ -314,6 +388,7 @@ class _Logging:
     def __init__(self, inner: IcebergSink, log: list[str]) -> None:
         self.inner = inner
         self.log = log
+        self.layout = inner.layout
 
     async def commit(self, buf: TableBuffer) -> Any:
         committed = await self.inner.commit(buf)
@@ -370,5 +445,87 @@ async def test_failed_iceberg_commit_naks_the_message_and_acks_nothing(catalog):
         assert m.acked == 0
         assert m.naked == 1
         assert rig.rows("events") == []
+    finally:
+        rig.executor.shutdown()
+
+
+# ----- plaintext raw rows, player key and protocol version ----------------------------------------
+
+
+async def test_raw_payloads_are_stored_in_plaintext_with_the_expected_columns(catalog):
+    rig = IcebergRig(catalog)
+    try:
+        await rig.send(session_start_env())
+        await rig.send(batch_env([0], payload=b"/msg hello"))
+        await rig.pipeline.flush_all()
+
+        raw = rig.rows("raw")
+        assert [r["payload"] for r in raw] == [b"/msg hello"]
+        assert set(raw[0]) == set(RAW_COLUMNS)
+        assert raw[0]["payload_original_size"] == len(b"/msg hello")
+    finally:
+        rig.executor.shutdown()
+
+
+async def test_events_and_raw_rows_carry_the_player_key_and_protocol_version(catalog):
+    rig = IcebergRig(catalog)
+    try:
+        await rig.send(session_start_env())
+        await rig.send(batch_env([0, 1], payload=b"abc"))
+        await rig.pipeline.flush_all()
+
+        events = rig.rows("events")
+        raw = rig.rows("raw")
+        assert {r["player_key"] for r in events} == {PSEUDONYM}
+        assert {r["player_key"] for r in raw} == {PSEUDONYM}
+        assert {r["protocol_version"] for r in raw} == {769}
+        assert all(r["date"] == DAY for r in raw)
+    finally:
+        rig.executor.shutdown()
+
+
+async def test_orphan_frames_are_written_with_null_player_key_and_protocol_version(catalog):
+    rig = IcebergRig(catalog)
+    try:
+        await rig.send(batch_env([0], payload=b"abc"), delivery=5)
+        await rig.pipeline.flush_all()
+
+        assert [r["player_key"] for r in rig.rows("events")] == [None]
+        raw = rig.rows("raw")
+        assert [(r["payload"], r["player_key"], r["protocol_version"]) for r in raw] == [
+            (b"abc", None, None)
+        ]
+    finally:
+        rig.executor.shutdown()
+
+
+async def test_iceberg_mode_neither_looks_up_nor_unwraps_a_dek(catalog):
+    rig = IcebergRig(catalog)
+    try:
+
+        async def forbidden(pseudonym: bytes) -> None:
+            raise AssertionError("iceberg mode must not read player DEKs")
+
+        rig.pg.get_dek = forbidden  # type: ignore[method-assign]
+        await rig.send(session_start_env())
+        await rig.send(batch_env([0], payload=b"abc"))
+        await rig.pipeline.flush_all()
+
+        assert len(rig.rows("raw")) == 1
+    finally:
+        rig.executor.shutdown()
+
+
+async def test_frames_of_an_erased_player_are_acked_and_not_written(catalog):
+    rig = IcebergRig(catalog)
+    try:
+        rig.pg.erased.add(PSEUDONYM)
+        await rig.send(session_start_env())
+        m = await rig.send(batch_env([0, 1], payload=b"abc"))
+        await rig.pipeline.flush_all()
+
+        assert m.acked == 1
+        assert rig.rows("events") == []
+        assert rig.rows("raw") == []
     finally:
         rig.executor.shutdown()

@@ -27,8 +27,8 @@ lake events + raw ──decrypt──> frames of a session ──BPE──> pack
 
 ## 2. Reading raw bytes
 
-Payloads are AES-256-GCM encrypted with the player's DEK; the AAD is `session_id || seq` (8 bytes
-big-endian); see [data-lake.md](data-lake.md). `corvus_ml.raw.crypto` repeats the services' algorithm
+Payloads of the Parquet `raw` table are AES-256-GCM encrypted with the player's DEK; the AAD is `session_id || seq`
+(8 bytes big-endian); see [data-lake.md](data-lake.md). The Iceberg `raw` table stores plaintext and is not read by these jobs yet (section 2a). `corvus_ml.raw.crypto` repeats the services' algorithm
 (the ML package must not depend on `corvus_services`); `tests/test_raw_crypto.py` checks it against
 vectors computed with `corvus_services.crypto`.
 

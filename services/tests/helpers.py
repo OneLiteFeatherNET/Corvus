@@ -114,7 +114,9 @@ class FakeCatalog:
         self, data: SessionData, candidate_dek: WrappedDek
     ) -> tuple[SessionInfo, WrappedDek | None]:
         erased = data.pseudonym in self.erased
-        info = SessionInfo(data.session_id, data.pseudonym, data.started_at, erased)
+        info = SessionInfo(
+            data.session_id, data.pseudonym, data.started_at, erased, data.client_protocol
+        )
         self.sessions[data.session_id] = info
         self.counters.setdefault(data.session_id, [0, 0, 0, 0])
         if erased:
@@ -140,6 +142,7 @@ class FakeCatalog:
             info.pseudonym,
             info.started_at,
             info.pseudonym is not None and info.pseudonym in self.erased,
+            info.client_protocol,
         )
 
     async def get_dek(self, pseudonym: bytes) -> WrappedDek | None:

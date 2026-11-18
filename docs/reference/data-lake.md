@@ -64,7 +64,7 @@ _staging/<table>/<ulid>.parquet                   upload target before promotion
 
 Rows are sorted by (`session_id`, `seq`) within a file.
 
-### Table `raw` (short retention, crypto-shredded)
+### Table `raw` (Parquet: short retention, crypto-shredded; Iceberg: section 2a)
 
 | Column | Arrow type | Notes |
 |---|---|---|
@@ -86,8 +86,10 @@ shorten the life of data nobody else uses, and keep a file longer than the defau
 ## 2a. Iceberg tables (target format, opt-in)
 
 Status: the target format of the lake. `CORVUS_LAKE_FORMAT=parquet` stays the default and keeps everything above;
-`iceberg` is chosen per deployment (Helm `lake.format`). Layout version 1 (`ICEBERG_LAKE_VERSION` in
-`services/src/corvus_services/iceberg_sink.py`).
+`iceberg` is chosen per deployment (Helm `lake.format`). Layout version 2 (`ICEBERG_LAKE_VERSION` in
+`services/src/corvus_services/iceberg_sink.py`). Decision of 2026-11-18: in this layout raw packets are stored in
+plaintext and kept permanently. Crypto-shredding does not apply to it; sections 2 (`raw`) and 3 describe the Parquet
+layout only.
 
 | Item | Value |
 |---|---|
@@ -100,20 +102,58 @@ Settings: `CORVUS_LAKE_FORMAT` (`parquet` | `iceberg`); with `iceberg`, these ar
 `CORVUS_LAKE_CATALOG_URI`, `CORVUS_LAKE_OAUTH_TOKEN_URL`, `CORVUS_LAKE_OAUTH_SCOPE`, `CORVUS_LAKE_CLIENT_ID`,
 `CORVUS_LAKE_CLIENT_SECRET` (secret), `CORVUS_LAKE_S3_ENDPOINT_URL`, `CORVUS_LAKE_S3_ACCESS_KEY`,
 `CORVUS_LAKE_S3_SECRET_KEY` (secret). Optional: `CORVUS_LAKE_WAREHOUSE` (`corvus`), `CORVUS_LAKE_NAMESPACE` (`capture`),
-`CORVUS_LAKE_S3_REGION` (`us-east-1`).
+`CORVUS_LAKE_S3_REGION` (`us-east-1`). No further setting exists for the raw layout: it is the layout of this format.
+
+### Privacy and retention
+
+* **`capture.raw` is personal data in plaintext.** Each row holds the packet payload exactly as the plugin sent it,
+  without any further filtering by ingest. Payloads can contain names, chat and command text, depending on what the
+  capture plugin records. The plugin still decides what it sends: `PrivacyFilter` drops chat, commands, signing and
+  player-list frames and `PayloadPolicy` strips the payload of text-bearing types (see `docs/pilot.md`, payload policy).
+  Ingest does not re-admit anything the plugin dropped.
+* **Access** is only through the Polaris grants on the `capture` namespace. Data files live in the `polaris-corvus`
+  bucket and are reached through the catalog only; nothing copies `raw` out of the catalog.
+* **Retention is permanent.** No housekeeping job expires Iceberg rows. The contents are reviewed once a year.
+* **Erasure** of a player is planned as Iceberg row deletes (`player_key` below) in both tables, with immediate snapshot
+  expiry. That is a separate change. Until it lands, a completed erasure request (section 3) does not remove any Iceberg
+  row, because the Iceberg rows are not encrypted with the player's DEK.
+* **Player attribution** is the pseudonym (section 3's HMAC, 32 bytes, `player_key`), never the Mojang UUID or name.
+  Frames of orphan sessions (no `SessionStart` seen) have a null `player_key` and a null `protocol_version`. They cannot
+  be attributed to a player, so they cannot be erased by player either.
 
 ### Schema
 
-The columns of the two tables in sections 2 and 2a are the same, with these changes:
+Iceberg has no unsigned integers: `uint8`, `uint32` and `uint64` become `int` or `long` (`int` for `uint8`, `long`
+for `uint32` and `uint64`). Values are unchanged. Every table has a `date` column (`date`, not null): the UTC date of
+the session start (`SessionInfo.partition_date`), the partition source.
 
-* Iceberg has no unsigned integers: `uint8` becomes `int`, `uint32` and `uint64` become `long`. Values are unchanged.
-* New column `date` (`date`, not null): the UTC date of the session start (`SessionInfo.partition_date`), the partition source.
+`events`: the columns of section 2, plus `player_key` (`fixed(32)`, nullable, the pseudonym of the session's player).
 
-Table properties: `format-version` 2, `write.parquet.compression-codec` zstd, `corvus.lake-schema-version` 1.
+`raw`: the columns below. Only frames that carry a payload get a row.
+
+| Column | Iceberg type | Notes |
+|---|---|---|
+| `session_id` | `fixed(16)` | |
+| `segment` | `long` | |
+| `seq` | `long` | dedup key together with `session_id` |
+| `offset_nanos` | `long` | since session start, as in `events` |
+| `direction` | `int` | proto `Direction` value |
+| `state` | `int` | proto `ConnectionState` value |
+| `packet_type` | `long` | Corvus vocabulary id |
+| `wire_packet_id` | `int` | |
+| `protocol_version` | `int` (nullable) | the client's protocol version from the session's `SessionStart`, repeated in every row; null for orphan sessions |
+| `player_key` | `fixed(32)` (nullable) | the pseudonym of the session's player; null for orphan sessions |
+| `payload_original_size` | `long` | size before truncation; larger than the payload length means it was truncated |
+| `payload` | `binary` | the payload bytes as received, plaintext |
+| `date` | `date` | partition column |
+
+Table properties: `format-version` 2, `write.parquet.compression-codec` zstd, `corvus.lake-schema-version` 2.
 Partition spec: identity(`date`). Sort order: `session_id`, `seq` ascending, nulls first.
 
 Changes to the columns: add an Iceberg schema evolution (append-only), bump `corvus.lake-schema-version` and
-`ICEBERG_LAKE_VERSION` together. The writer refuses at start-up a table whose columns or partition differ from this layout.
+`ICEBERG_LAKE_VERSION` together. The writer refuses at start-up a table whose lake schema version is not 2, and a table
+whose columns or partition differ from this layout. Version 1 tables (encrypted `raw`, no `player_key`) were never in
+production and are not migrated: drop the table and let ingest recreate it.
 
 ### Writes
 
@@ -129,21 +169,28 @@ Changes to the columns: add an Iceberg schema evolution (append-only), bump `cor
 * No `lake_files` or `lake_file_sessions` rows in Iceberg mode. Session membership is read from the tables (filter on
   `session_id`, prune by `date`). Everything else in the catalog (players, keys, sessions, segments, counters, batch
   log) is unchanged.
-* Raw rows stay AES-256-GCM encrypted with the player's DEK, as in section 3.
+* Raw payloads are written as plaintext. In Iceberg mode ingest does not read or unwrap a player's DEK. Session start
+  still stores a `player_keys` row, which nothing reads in this mode (see the open points of the change that introduced
+  it).
+* Erased players: frames of a session whose player is erased are acknowledged and not written (as in Parquet mode).
+  The check uses the session cache (`CORVUS_SESSION_CACHE_TTL_S`, 60 s), so frames of a player erased less than that
+  time ago can still be written.
 
 ### Not covered yet
 
-Each is a separate step: backfill of the existing Parquet files, erasure of Iceberg rows (Iceberg deletes plus immediate
-snapshot expiry), snapshot pins by Iceberg snapshot id, and retention of `raw` in Iceberg. Until those land,
-`corvus-compact` and `corvus-housekeeping` do not see Iceberg data: erasure requests complete for the Parquet files only
-and `raw` in Iceberg is not expired.
+Each is a separate step: backfill of the existing Parquet files, erasure of Iceberg rows (row deletes by `player_key`,
+then immediate snapshot expiry), snapshot pins by Iceberg snapshot id, and reading Iceberg `raw` in the ML jobs
+(`corvus-ml` reads the Parquet `raw` layout only). Until those land, `corvus-compact` and `corvus-housekeeping` do not
+see Iceberg data: erasure requests complete for the Parquet files only, and Iceberg `raw` is neither expired nor
+rewritten.
 
 ## 3. Keys and erasure
 
 - Every pseudonymised player gets a random 256-bit data encryption key (DEK) on first sight.
 - The DEK is stored wrapped (AES-256-GCM) with a key encryption key (KEK) from `CORVUS_KEK` (base64, 32 bytes),
   identified by `CORVUS_KEK_ID`. The KEK never touches the database or the lake.
-- Erasure of a player: delete the `player_keys` row (crypto-shredding of `raw`), mark `players.erased_at`, add the
+- Erasure of a player: delete the `player_keys` row (crypto-shredding of `raw`, Parquet layout only; Iceberg rows are
+  plaintext and not covered, see 2a), mark `players.erased_at`, add the
   pseudonym to the blocklist; `corvus-compact` later rewrites `events` and still-existing `raw` files without the player's sessions (section 7).
 
 ## 4. Catalog (PostgreSQL, schema `corvus`)
