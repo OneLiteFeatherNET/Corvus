@@ -103,6 +103,8 @@ Settings: `CORVUS_LAKE_FORMAT` (`parquet` | `iceberg`); with `iceberg`, these ar
 `CORVUS_LAKE_CLIENT_SECRET` (secret), `CORVUS_LAKE_S3_ENDPOINT_URL`, `CORVUS_LAKE_S3_ACCESS_KEY`,
 `CORVUS_LAKE_S3_SECRET_KEY` (secret). Optional: `CORVUS_LAKE_WAREHOUSE` (`corvus`), `CORVUS_LAKE_NAMESPACE` (`capture`),
 `CORVUS_LAKE_S3_REGION` (`us-east-1`). No further setting exists for the raw layout: it is the layout of this format.
+`CORVUS_LAKE_SNAPSHOT_RETENTION_DAYS` (`7`, Helm `lake.snapshotRetentionDays`) is read by housekeeping only, and
+`corvus-compact` and `corvus-housekeeping` read the same settings with `iceberg`.
 
 ### Privacy and retention
 
@@ -113,10 +115,12 @@ Settings: `CORVUS_LAKE_FORMAT` (`parquet` | `iceberg`); with `iceberg`, these ar
   Ingest does not re-admit anything the plugin dropped.
 * **Access** is only through the Polaris grants on the `capture` namespace. Data files live in the `polaris-corvus`
   bucket and are reached through the catalog only; nothing copies `raw` out of the catalog.
-* **Retention is permanent.** No housekeeping job expires Iceberg rows. The contents are reviewed once a year.
-* **Erasure** of a player is planned as Iceberg row deletes (`player_key` below) in both tables, with immediate snapshot
-  expiry. That is a separate change. Until it lands, a completed erasure request (section 3) does not remove any Iceberg
-  row, because the Iceberg rows are not encrypted with the player's DEK.
+* **Retention is permanent.** No housekeeping job deletes Iceberg rows (housekeeping expires snapshots only). The
+  contents are reviewed once a year.
+* **Erasure** of a player removes the Iceberg rows by `player_key` (and by session for null-key orphans) in both
+  tables, then expires the older snapshots and removes their files; see *Erasure in Iceberg* in section 2a. A completed
+  erasure request in Iceberg mode means exactly that: the completion waits for the Iceberg step. The DEK deletion alone
+  does not count.
 * **Player attribution** is the pseudonym (section 3's HMAC, 32 bytes, `player_key`), never the Mojang UUID or name.
   Frames of orphan sessions (no `SessionStart` seen) have a null `player_key` and a null `protocol_version`. They cannot
   be attributed to a player, so they cannot be erased by player either.
@@ -176,13 +180,55 @@ production and are not migrated: drop the table and let ingest recreate it.
   The check uses the session cache (`CORVUS_SESSION_CACHE_TTL_S`, 60 s), so frames of a player erased less than that
   time ago can still be written.
 
+### Erasure in Iceberg
+
+`corvus-compact` (section 7) handles the Iceberg tables when `CORVUS_LAKE_FORMAT=iceberg`, in the same run as the Parquet
+files. Per erasure request, after the grace period:
+
+1. delete the player's rows from `events` and from `raw`: first every row whose `player_key` is the pseudonym (one commit
+   per table), then the rows with a null `player_key` of the player's sessions (`corvus.sessions`, orphan frames), with
+   `IN` lists of 1000 session ids. pyiceberg 0.10 deletes copy-on-write (`Table.delete`): files with only erased rows are
+   dropped, mixed files are rewritten without them. Every delete commit is tagged in its snapshot summary with the
+   request id (`corvus.erasure-request`);
+2. expire, per table, every snapshot older than the newest tagged snapshot (the cut). The cut and everything newer stay.
+   Expiry runs right after the delete, in the same run;
+3. if a branch or tag points at one of the snapshots to expire, nothing is expired for that table. The request stays
+   pending with `lake_blocked_reason` set (the field of the erasure request in the API, `GET /api/v1/players/erasure/{id}`
+   and the list). The rows are gone from the current view already. The next run tries again, so the request
+   completes when the hold is released;
+4. unless blocked, the files that only the expired snapshots named are deleted: manifest lists, manifests, data and
+   delete files of the expired snapshots (live and deleted entries) that no retained snapshot names. Nothing else is
+   touched. A file that no snapshot names (an in-flight write of another job, an orphan of a failed commit) is never
+   deleted by erasure, so this step needs no age margin. If this deletion fails, the request stays pending and the files
+   are left to the opt-in maintenance below.
+
+Commit conflicts (an ingest append in between) retry the step with a fresh table load, at most 5 attempts with jittered
+backoff, as in the sink. Other errors leave the request pending; the next run starts again (deletes are idempotent).
+
+A request completes only when its Iceberg step finished without error and was not blocked. Dataset snapshots whose
+manifest lists one of the sessions are marked `needs_rebuild` (`corvus.snapshot_state`, reason `erasure`), like the
+snapshots with erased raw artefacts.
+
+### Retention in Iceberg
+
+* `raw` in Iceberg is kept, there is no time-based deletion of its rows: `CORVUS_RAW_RETENTION_DAYS` and pool retention
+  do not apply to it. Only an erasure removes Iceberg rows.
+* **Routine maintenance is owned by the platform.** The Airflow DAG `iceberg_maintenance` (Spark: `rewrite_data_files`,
+  `expire_snapshots`, `remove_orphan_files`) runs nightly on `capture.events` and `capture.raw`. Corvus does not run a
+  second orphan remover by default. Helm `lake.maintenance.enabled` (`CORVUS_LAKE_MAINTENANCE_ENABLED`, default `false`)
+  switches on an opt-in variant in `corvus-housekeeping`: it expires snapshots older than
+  `CORVUS_LAKE_SNAPSHOT_RETENTION_DAYS` (7) and removes orphan files older than 24 h, so that a long rewrite of the DAG
+  is never cut. A snapshot is expired only when it is older than every branch and tag head. Expiry removes no rows.
+  Enable it only where the DAG does not run.
+* Physical removal of erased files: erasure deletes them in the same run. If that step failed, the files stay until the
+  opt-in maintenance (24 h margin) or the DAG's orphan removal removes them.
+* The Parquet `raw` files that exist from before the switch (`lake_files`) keep their retention until they are expired.
+
 ### Not covered yet
 
-Each is a separate step: backfill of the existing Parquet files, erasure of Iceberg rows (row deletes by `player_key`,
-then immediate snapshot expiry), snapshot pins by Iceberg snapshot id, and reading Iceberg `raw` in the ML jobs
-(`corvus-ml` reads the Parquet `raw` layout only). Until those land, `corvus-compact` and `corvus-housekeeping` do not
-see Iceberg data: erasure requests complete for the Parquet files only, and Iceberg `raw` is neither expired nor
-rewritten.
+Each is a separate step: backfill of the existing Parquet files into Iceberg, snapshot pins by Iceberg snapshot id,
+reading Iceberg `raw` in the ML jobs (`corvus-ml` reads the Parquet `raw` layout only), and a re-check of an erasure
+after its request completed (rows that land after the grace period are not seen again).
 
 ## 3. Keys and erasure
 
@@ -261,9 +307,16 @@ A file that lists an erased session without holding rows of it (typical for `raw
 `lake_file_sessions` entry is removed. When every file of the requests is done, the requests get
 `compaction_pending = false` and `compacted_at`. The job exits non-zero if any file failed.
 
+Iceberg: with `CORVUS_LAKE_FORMAT=iceberg` the same run also erases the Iceberg rows and expires their snapshots; a
+request completes only when that succeeded and is not blocked, see [Erasure in Iceberg](#erasure-in-iceberg).
+
 Crash safety: until step 3 commits the old file stays the live one (an object copied but never registered is an orphan
 that housekeeping removes after one hour); after it only `purge_pending` work remains, which every run retries first.
 Repeating a run, or a repeated erasure of the same pseudonym, changes nothing.
+
+Open points of the Iceberg step: the column statistics of the erased files stay in the manifest of the delete snapshot
+(the cut) until the table's next commit (the rows do not). A new erasure request after the grace period is not verified
+again once its request completed. Blocked requests are reported in the log and in the API only, there is no metric.
 
 Snapshots are immutable and keep naming erased sessions and the file ids that compaction replaced. Jobs read a snapshot
 through `GET /api/v1/snapshots/{id}/sessions?exclude_erased=true` (paged) and `GET /api/v1/snapshots/{id}/files`

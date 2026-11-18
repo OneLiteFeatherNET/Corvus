@@ -84,3 +84,13 @@ def test_lake_secrets_are_not_shown_in_the_representation():
     s = settings(**ICEBERG_VALUES)
     assert "hunter2-not-logged" not in repr(s)
     assert "not-a-real-secret" not in repr(s)
+
+
+def test_iceberg_maintenance_by_housekeeping_is_off_by_default():
+    assert Settings().lake_maintenance_enabled is False
+
+
+def test_lake_snapshot_retention_defaults_to_seven_days_and_is_positive():
+    assert Settings().lake_snapshot_retention_days == 7
+    with pytest.raises(ValidationError, match="lake_snapshot_retention_days"):
+        Settings(lake_snapshot_retention_days=0)

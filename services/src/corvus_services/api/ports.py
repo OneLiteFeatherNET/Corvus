@@ -109,6 +109,9 @@ class ErasureRequest:
     key_deleted: bool
     compaction_pending: bool
     compacted_at: datetime | None = None
+    lake_blocked_reason: str | None = None
+    """Set while the Iceberg rows of the request cannot be removed yet (a branch or tag holds a
+    snapshot that still contains them); the request stays pending until the hold is released."""
 
 
 @dataclass(frozen=True)

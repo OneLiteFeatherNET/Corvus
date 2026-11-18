@@ -40,6 +40,11 @@ spec:
               env:
                 {{- include "corvus.pgEnv" . | nindent 16 }}
                 {{- include "corvus.s3Env" . | nindent 16 }}
+                - name: CORVUS_LAKE_FORMAT
+                  value: {{ .Values.lake.format | quote }}
+                {{- if eq .Values.lake.format "iceberg" }}
+                {{- include "corvus.lakeIcebergEnv" . | nindent 16 }}
+                {{- end }}
                 - name: CORVUS_COMPACT_BATCH_ROWS
                   value: {{ .Values.compact.batchRows | quote }}
                 - name: CORVUS_COMPACT_GRACE_S

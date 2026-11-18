@@ -9,6 +9,7 @@ from corvus_services.housekeeping import (
     select_orphans,
     select_stale,
 )
+from corvus_services.iceberg_erasure import TableOutcome
 from corvus_services.ports import ObjectInfo
 from corvus_services.retention import LiveArtifact
 from helpers import T0, FakeClock, make_settings
@@ -206,3 +207,52 @@ async def test_a_registered_prefix_outside_the_derived_roots_is_never_deleted():
     assert store.deleted == []
     assert catalog.artifacts_marked == []
     assert len(report.errors) == 1
+
+
+class FakeLake:
+    def __init__(self, outcomes: list[TableOutcome], error: Exception | None = None) -> None:
+        self.outcomes = outcomes
+        self.error = error
+        self.retention: timedelta | None = None
+
+    def maintain(self, retention: timedelta) -> list[TableOutcome]:
+        self.retention = retention
+        if self.error is not None:
+            raise self.error
+        return self.outcomes
+
+
+async def test_iceberg_maintenance_uses_the_snapshot_retention_and_counts_its_work():
+    lake = FakeLake(
+        [TableOutcome("events", expired=3, orphans=2), TableOutcome("raw", expired=1, orphans=0)]
+    )
+
+    report = await run_housekeeping(
+        make_settings(lake_snapshot_retention_days=5),
+        FakeHkCatalog(known=set(), raw=[]),
+        Store([]),
+        FakeClock(),
+        lake=lake,
+    )
+
+    assert lake.retention == timedelta(days=5)
+    assert (report.iceberg_expired, report.iceberg_orphans) == (4, 2)
+    assert report.errors == []
+
+
+async def test_a_failing_iceberg_step_is_reported_and_the_rest_still_runs():
+    catalog = FakeHkCatalog(known=set(), raw=[])
+    lake = FakeLake([], error=RuntimeError("catalog down"))
+
+    report = await run_housekeeping(make_settings(), catalog, Store([]), FakeClock(), lake=lake)
+
+    assert report.errors == ["iceberg: catalog down"]
+    assert catalog.scores_pruned_before is not None
+
+
+async def test_without_an_iceberg_lake_no_iceberg_work_is_done():
+    report = await run_housekeeping(
+        make_settings(), FakeHkCatalog(known=set(), raw=[]), Store([]), FakeClock()
+    )
+
+    assert (report.iceberg_expired, report.iceberg_orphans) == (0, 0)
