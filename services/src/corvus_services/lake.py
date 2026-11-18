@@ -1,6 +1,8 @@
-"""Lake sink behind the ``LakeSink`` port: Parquet files, catalogued in PostgreSQL.
+"""Lake sinks behind the ``LakeSink`` port: Parquet files (default) or Iceberg tables.
 
-Layout and catalog rows: docs/reference/data-lake.md sections 2 and 5.
+``open_lake_sink`` picks the implementation from ``CORVUS_LAKE_FORMAT``. The Parquet sink is the
+layout of docs/reference/data-lake.md section 2 and keeps its catalog rows (``lake_files``); the
+Iceberg sink (``iceberg_sink``) keeps no such rows, session membership comes from Iceberg filters.
 """
 
 from __future__ import annotations
@@ -11,7 +13,9 @@ from concurrent.futures import Executor
 
 from .buffer import TableBuffer, encode_parquet
 from .clock import Clock, new_ulid
-from .ports import Catalog, Committed, FileRecord, ObjectStore
+from .config import Settings
+from .iceberg_sink import IcebergSink
+from .ports import Catalog, Committed, FileRecord, LakeSink, ObjectStore
 from .schema import SCHEMA_VERSION
 
 
@@ -42,3 +46,18 @@ class ParquetSink:
 
     async def ping(self) -> None:
         await self._store.ping()
+
+
+async def open_lake_sink(
+    settings: Settings,
+    store: ObjectStore,
+    catalog: Catalog,
+    executor: Executor,
+    clock: Clock,
+) -> LakeSink:
+    """The sink of ``CORVUS_LAKE_FORMAT``. Iceberg: connects and creates the tables if missing."""
+    if settings.lake_format == "parquet":
+        return ParquetSink(store, catalog, executor, clock)
+    sink = IcebergSink.from_settings(settings)
+    await asyncio.to_thread(sink.bootstrap)
+    return sink

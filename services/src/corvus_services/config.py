@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -41,6 +42,23 @@ class Settings(BaseSettings):
     s3_region: str = "us-east-1"
     s3_access_key: str | None = None
     s3_secret_key: SecretStr | None = None
+
+    # Lake format written by ingest (docs/reference/data-lake.md section 2a). ``parquet`` is the
+    # current behaviour; ``iceberg`` writes the tables of an Iceberg REST catalog instead and needs
+    # every CORVUS_LAKE_* value below (checked at start-up).
+    lake_format: Literal["parquet", "iceberg"] = "parquet"
+    lake_catalog_uri: str | None = None
+    lake_warehouse: str = "corvus"
+    lake_namespace: str = "capture"
+    lake_oauth_token_url: str | None = None
+    lake_oauth_scope: str | None = None
+    lake_client_id: str | None = None
+    lake_client_secret: SecretStr | None = None
+    # Object store of the catalog's warehouse (no STS: static keys, path-style addressing).
+    lake_s3_endpoint_url: str | None = None
+    lake_s3_region: str = "us-east-1"
+    lake_s3_access_key: str | None = None
+    lake_s3_secret_key: SecretStr | None = None
 
     # PostgreSQL
     pg_dsn: str = "postgresql://corvus@localhost:5432/corvus"
@@ -85,6 +103,25 @@ class Settings(BaseSettings):
             raise ValueError(
                 "CORVUS_RAW_RETENTION_DAYS must not exceed CORVUS_RAW_RETENTION_MAX_DAYS"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _iceberg_lake_is_configured(self) -> Settings:
+        if self.lake_format != "iceberg":
+            return self
+        required: dict[str, object] = {
+            "CORVUS_LAKE_CATALOG_URI": self.lake_catalog_uri,
+            "CORVUS_LAKE_OAUTH_TOKEN_URL": self.lake_oauth_token_url,
+            "CORVUS_LAKE_OAUTH_SCOPE": self.lake_oauth_scope,
+            "CORVUS_LAKE_CLIENT_ID": self.lake_client_id,
+            "CORVUS_LAKE_CLIENT_SECRET": self.lake_client_secret,
+            "CORVUS_LAKE_S3_ENDPOINT_URL": self.lake_s3_endpoint_url,
+            "CORVUS_LAKE_S3_ACCESS_KEY": self.lake_s3_access_key,
+            "CORVUS_LAKE_S3_SECRET_KEY": self.lake_s3_secret_key,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            raise ValueError("CORVUS_LAKE_FORMAT=iceberg requires " + ", ".join(sorted(missing)))
         return self
 
     @field_validator("kek")
