@@ -1,6 +1,7 @@
 package net.onelitefeather.corvus.plugin.capture;
 
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
+import net.onelitefeather.corvus.plugin.privacy.PrivacyOptions;
 import net.onelitefeather.corvus.plugin.support.EngineFixture;
 import net.onelitefeather.corvus.plugin.support.FakePacketView;
 import net.onelitefeather.corvus.proto.capture.v1.Envelope;
@@ -25,8 +26,12 @@ class CaptureWriterTest {
     }
 
     private Setup setup(Path dir, int batchSize) {
+        return setup(dir, batchSize, PrivacyOptions.DEFAULT);
+    }
+
+    private Setup setup(Path dir, int batchSize, PrivacyOptions privacy) {
         ByteBoundedQueue queue = new ByteBoundedQueue(1 << 20);
-        EngineFixture f = EngineFixture.withSink(queue);
+        EngineFixture f = EngineFixture.withSink(queue, privacy);
         Path captures = dir.resolve("captures");
         CaptureWriter writer = new CaptureWriter(captures, queue, batchSize, 5_000, f.nanos::get, f.metrics, f.logs::add);
         return new Setup(f, writer, captures);
@@ -88,7 +93,7 @@ class CaptureWriterTest {
 
     @Test
     void batchesAreCutAtConfiguredSizeAndCarryCounters(@TempDir Path dir) throws IOException {
-        Setup s = setup(dir, 2);
+        Setup s = setup(dir, 2, new PrivacyOptions(PrivacyOptions.TextPackets.DROP, false));
         for (int i = 0; i < 5; i++) {
             s.fixture.engine.onPacket(new FakePacketView());
         }

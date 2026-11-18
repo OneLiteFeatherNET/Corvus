@@ -4,6 +4,7 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.UnsafeByteOperations;
 import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
 import net.onelitefeather.corvus.plugin.privacy.PayloadPolicy;
+import net.onelitefeather.corvus.plugin.privacy.PrivacyOptions;
 import net.onelitefeather.corvus.plugin.privacy.PlayerFilter;
 import net.onelitefeather.corvus.plugin.privacy.PrivacyFilter;
 import net.onelitefeather.corvus.plugin.privacy.Pseudonymizer;
@@ -28,7 +29,12 @@ import java.util.function.Supplier;
  */
 public final class CaptureEngine {
 
-    public record Settings(PayloadMode payloadMode, int maxPayloadBytes, String proxyId, String pluginVersion) {
+    public record Settings(PayloadMode payloadMode, int maxPayloadBytes, String proxyId, String pluginVersion,
+                           PrivacyOptions privacy) {
+
+        public Settings(PayloadMode payloadMode, int maxPayloadBytes, String proxyId, String pluginVersion) {
+            this(payloadMode, maxPayloadBytes, proxyId, pluginVersion, PrivacyOptions.DEFAULT);
+        }
     }
 
     private final Settings settings;
@@ -49,7 +55,7 @@ public final class CaptureEngine {
                          GameContextMapper contexts, CaptureSink sink, NanoClock nanoClock, InstantSource wallClock,
                          Supplier<byte[]> sessionIds, Metrics metrics, Consumer<String> info) {
         this.settings = settings;
-        this.payloadPolicy = new PayloadPolicy(settings.payloadMode());
+        this.payloadPolicy = new PayloadPolicy(settings.payloadMode(), settings.privacy());
         this.pseudonymizer = pseudonymizer;
         this.playerFilter = playerFilter;
         this.contexts = contexts;
@@ -116,7 +122,7 @@ public final class CaptureEngine {
         }
 
         ConnectionState state = view.state();
-        if (PrivacyFilter.isPrivate(view.packetType(), state)) {
+        if (PrivacyFilter.isPrivate(view.packetType(), state, settings.privacy().textPackets())) {
             session.addDroppedPrivacy();
             metrics.droppedPrivacy.increment();
             return;

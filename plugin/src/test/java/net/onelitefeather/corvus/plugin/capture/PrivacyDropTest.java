@@ -2,6 +2,7 @@ package net.onelitefeather.corvus.plugin.capture;
 
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.packettype.PacketTypeCommon;
+import net.onelitefeather.corvus.plugin.privacy.PrivacyOptions;
 import net.onelitefeather.corvus.plugin.support.EngineFixture;
 import net.onelitefeather.corvus.plugin.support.FakePacketView;
 import net.onelitefeather.corvus.plugin.support.RecordingSink;
@@ -10,11 +11,14 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+/** Text bearing packets under {@code capture.text_packets = "drop"}; the default keeps them (TextPacketCaptureTest). */
 class PrivacyDropTest {
+
+    private static final PrivacyOptions DROP = new PrivacyOptions(PrivacyOptions.TextPackets.DROP, false);
 
     private void assertDroppedAndCounted(FakePacketView view, String what) {
         RecordingSink sink = new RecordingSink();
-        EngineFixture f = EngineFixture.withSink(sink);
+        EngineFixture f = EngineFixture.withSink(sink, DROP);
 
         f.engine.onPacket(view);
 
