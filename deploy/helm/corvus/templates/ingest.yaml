@@ -37,6 +37,11 @@ spec:
             {{- include "corvus.natsEnv" (dict "root" . "credsKey" .Values.nats.creds.ingestKey) | nindent 12 }}
             {{- include "corvus.pgEnv" . | nindent 12 }}
             {{- include "corvus.s3Env" . | nindent 12 }}
+            - name: CORVUS_LAKE_FORMAT
+              value: {{ .Values.lake.format | quote }}
+            {{- if eq .Values.lake.format "iceberg" }}
+            {{- include "corvus.lakeIcebergEnv" . | nindent 12 }}
+            {{- end }}
             {{- include "corvus.secretEnv" (dict "name" "CORVUS_KEK" "secret" .Values.kek.existingSecret "key" .Values.kek.key) | nindent 12 }}
             - name: CORVUS_KEK_ID
               value: {{ .Values.kek.id | quote }}

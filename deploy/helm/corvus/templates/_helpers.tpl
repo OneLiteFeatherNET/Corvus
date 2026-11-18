@@ -192,6 +192,30 @@ topologySpreadConstraints:
 {{ include "corvus.secretEnv" (dict "name" "CORVUS_S3_SECRET_KEY" "secret" .Values.s3.existingSecret "key" .Values.s3.secretKeyKey) }}
 {{- end }}
 
+{{/* Iceberg lake settings of ingest (CORVUS_LAKE_*). Every value without a default is required. */}}
+{{- define "corvus.lakeIcebergEnv" -}}
+{{- $lake := .Values.lake }}
+- name: CORVUS_LAKE_CATALOG_URI
+  value: {{ required "lake.catalogUri is required when lake.format is iceberg" $lake.catalogUri | quote }}
+- name: CORVUS_LAKE_WAREHOUSE
+  value: {{ $lake.warehouse | quote }}
+- name: CORVUS_LAKE_NAMESPACE
+  value: {{ $lake.namespace | quote }}
+- name: CORVUS_LAKE_OAUTH_TOKEN_URL
+  value: {{ required "lake.oauth.tokenUrl is required when lake.format is iceberg" $lake.oauth.tokenUrl | quote }}
+- name: CORVUS_LAKE_OAUTH_SCOPE
+  value: {{ required "lake.oauth.scope is required when lake.format is iceberg" $lake.oauth.scope | quote }}
+- name: CORVUS_LAKE_CLIENT_ID
+  value: {{ required "lake.oauth.clientId is required when lake.format is iceberg" $lake.oauth.clientId | quote }}
+{{ include "corvus.secretEnv" (dict "name" "CORVUS_LAKE_CLIENT_SECRET" "secret" (required "lake.oauth.existingSecret is required when lake.format is iceberg" $lake.oauth.existingSecret) "key" $lake.oauth.clientSecretKey) }}
+- name: CORVUS_LAKE_S3_ENDPOINT_URL
+  value: {{ required "lake.s3.endpointUrl is required when lake.format is iceberg" $lake.s3.endpointUrl | quote }}
+- name: CORVUS_LAKE_S3_REGION
+  value: {{ $lake.s3.region | quote }}
+{{ include "corvus.secretEnv" (dict "name" "CORVUS_LAKE_S3_ACCESS_KEY" "secret" (required "lake.s3.existingSecret is required when lake.format is iceberg" $lake.s3.existingSecret) "key" $lake.s3.accessKeyKey) }}
+{{ include "corvus.secretEnv" (dict "name" "CORVUS_LAKE_S3_SECRET_KEY" "secret" (required "lake.s3.existingSecret is required when lake.format is iceberg" $lake.s3.existingSecret) "key" $lake.s3.secretKeyKey) }}
+{{- end }}
+
 {{/* Call with (dict "root" $ "credsKey" <key in nats.creds.existingSecret>). */}}
 {{- define "corvus.natsEnv" -}}
 - name: CORVUS_NATS_URL

@@ -1,0 +1,86 @@
+suite: lake format
+templates:
+  - ingest.yaml
+tests:
+  - it: writes parquet by default
+    template: ingest.yaml
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_FORMAT
+            value: parquet
+
+  - it: ignores iceberg settings while the format is parquet
+    template: ingest.yaml
+    documentIndex: 0
+    set:
+      lake.catalogUri: https://polaris.example.invalid/api/catalog
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_CATALOG_URI
+            value: https://polaris.example.invalid/api/catalog
+
+  - it: passes the iceberg catalog, the oauth and s3 settings as env, secrets by reference
+    template: ingest.yaml
+    documentIndex: 0
+    set:
+      lake.format: iceberg
+      lake.catalogUri: https://polaris.example.invalid/api/catalog
+      lake.oauth.tokenUrl: https://login.example.invalid/token
+      lake.oauth.scope: api://example/.default
+      lake.oauth.clientId: ingest-client
+      lake.oauth.existingSecret: corvus-lake-oauth
+      lake.s3.endpointUrl: http://rook-ceph-rgw.example.invalid
+      lake.s3.existingSecret: corvus-lake-s3
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_FORMAT
+            value: iceberg
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_CATALOG_URI
+            value: https://polaris.example.invalid/api/catalog
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_WAREHOUSE
+            value: corvus
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: corvus-lake-oauth
+                key: client-secret
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_S3_SECRET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: corvus-lake-s3
+                key: secret-key
+
+  - it: refuses to render iceberg without a catalog uri
+    template: ingest.yaml
+    documentIndex: 0
+    set:
+      lake.format: iceberg
+    asserts:
+      - failedTemplate:
+          errorMessage: lake.catalogUri is required when lake.format is iceberg
+
+  - it: rejects an unknown lake format in the schema
+    template: ingest.yaml
+    set:
+      lake.format: delta
+    asserts:
+      - failedTemplate: {}
