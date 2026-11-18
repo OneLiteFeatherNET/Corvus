@@ -123,10 +123,12 @@ class IcebergCleanup:
         snapshots are expired). Raises when a step fails for another reason than a commit
         conflict; the request then stays pending and the next run starts again (deletes are
         idempotent)."""
+        # pyiceberg 0.12 types these expressions as pydantic models whose fields do not match
+        # their documented constructors; the positional calls are correct at runtime.
         for name in SCHEMAS:
             self._retry(
                 f"erasure delete {name}",
-                partial(self._delete_op, name, EqualTo("player_key", pseudonym), request_id),
+                partial(self._delete_op, name, EqualTo("player_key", pseudonym), request_id),  # type: ignore[call-arg,arg-type]
             )
             for start in range(0, len(session_ids), self._delete_chunk):
                 chunk = session_ids[start : start + self._delete_chunk]
@@ -135,7 +137,7 @@ class IcebergCleanup:
                     partial(
                         self._delete_op,
                         name,
-                        And(IsNull("player_key"), In("session_id", chunk)),
+                        And(IsNull("player_key"), In("session_id", chunk)),  # type: ignore[call-arg,arg-type]
                         request_id,
                     ),
                 )
