@@ -3,7 +3,7 @@
 # Runtime settings come from a mounted /usr/share/nginx/html/config.json and CORVUS_UI_* variables, see
 # docs/how-to/run-the-ui.md.
 
-FROM node:24-alpine3.24 AS build
+FROM node:26-alpine3.24 AS build
 WORKDIR /app
 RUN corepack enable
 COPY ui/package.json ui/pnpm-lock.yaml ui/pnpm-workspace.yaml ./
