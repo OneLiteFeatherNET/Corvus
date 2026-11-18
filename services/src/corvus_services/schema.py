@@ -107,6 +107,12 @@ ICEBERG_SEGMENTS_SCHEMA = pa.schema(
         pa.field("game_context", pa.string(), nullable=False),
         pa.field("client_brand", pa.string(), nullable=False),
         pa.field("started_at", TIMESTAMP_TYPE, nullable=False),
+        # CloudNet service the backend connection went to; empty when CloudNet does not know it.
+        pa.field("cloudnet_task", pa.string(), nullable=False),
+        pa.field("cloudnet_groups", pa.list_(pa.string()), nullable=False),
+        pa.field("cloudnet_node", pa.string(), nullable=False),
+        pa.field("cloudnet_environment", pa.string(), nullable=False),
+        pa.field("stage", pa.string(), nullable=False),
     ]
 )
 # The counters are those of the SessionEnd message. ``player_key`` is null for orphan sessions.

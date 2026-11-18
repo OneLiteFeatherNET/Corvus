@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from corvus_services.codec import event_row, plain_raw_row, raw_row
+from corvus_services.codec import event_row, plain_raw_row, raw_row, segment_row
 from corvus_services.proto import pb
-from helpers import SESSION
+from helpers import SESSION, T0, segment_env
 
 
 def frame(**kw):
@@ -185,3 +185,27 @@ def test_plain_raw_row_only_for_frames_with_payload_and_allows_orphans():
     assert row is not None
     assert row["player_key"] is None
     assert row["protocol_version"] is None
+
+
+def test_segment_row_carries_the_cloudnet_fields():
+    env = segment_env(
+        cloudnet={
+            "cloudnet_task": "Lobby-Staging",
+            "cloudnet_groups": ["Lobby", "Staging"],
+            "cloudnet_node": "node-1",
+            "cloudnet_environment": "MINECRAFT_SERVER",
+            "stage": "staging",
+        }
+    )
+    row = segment_row(env.segment_start, T0)
+    assert row["cloudnet_task"] == "Lobby-Staging"
+    assert row["cloudnet_groups"] == ["Lobby", "Staging"]
+    assert row["cloudnet_node"] == "node-1"
+    assert row["cloudnet_environment"] == "MINECRAFT_SERVER"
+    assert row["stage"] == "staging"
+
+
+def test_segment_row_of_an_old_plugin_has_empty_cloudnet_values():
+    row = segment_row(segment_env().segment_start, T0)
+    assert (row["cloudnet_task"], row["cloudnet_groups"], row["cloudnet_node"]) == ("", [], "")
+    assert (row["cloudnet_environment"], row["stage"]) == ("", "")

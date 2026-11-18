@@ -123,6 +123,8 @@ def lake_rows(name: str, session: bytes, seqs: list[int], player_key: bytes | No
             values = [False] * n
         elif pa.types.is_floating(field.type):
             values = [0.0] * n
+        elif pa.types.is_list(field.type) or pa.types.is_large_list(field.type):
+            values = [[] for _ in range(n)]
         else:
             values = [0] * n
         columns[field.name] = pa.array(values, type=field.type)

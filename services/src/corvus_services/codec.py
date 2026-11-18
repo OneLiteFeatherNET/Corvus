@@ -114,6 +114,11 @@ def segment_row(s: Any, started_at: datetime) -> Row:
         "game_context": s.game_context,
         "client_brand": s.client_brand,
         "started_at": started_at,
+        "cloudnet_task": s.cloudnet_task,
+        "cloudnet_groups": list(s.cloudnet_groups),
+        "cloudnet_node": s.cloudnet_node,
+        "cloudnet_environment": s.cloudnet_environment,
+        "stage": s.stage,
     }
 
 
