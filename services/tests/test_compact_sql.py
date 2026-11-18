@@ -80,3 +80,17 @@ def test_current_raw_files_and_artifact_statements_bind_every_value():
         "id", "snapshot_id", "job_id", "kind", "s3_prefix", "contains_raw", "created_at",
     }  # fmt: skip
     assert "ON CONFLICT (snapshot_id, s3_prefix)" in UPSERT_ARTIFACT_SQL
+
+
+def test_rebuild_marks_the_snapshots_that_list_the_requests_sessions():
+    from corvus_services.compact_pg import REBUILD_FOR_REQUEST_SQL
+
+    assert REBUILD_FOR_REQUEST_SQL.count("%s") == 2
+    for fragment in (
+        "INSERT INTO corvus.snapshot_state",
+        "d.manifest -> 'sessions' ? encode(s.session_id, 'hex')",
+        "WHERE r.id = %s",
+        "ON CONFLICT (snapshot_id) DO UPDATE SET needs_rebuild = true",
+        "reason = 'erasure'",
+    ):
+        assert fragment in REBUILD_FOR_REQUEST_SQL

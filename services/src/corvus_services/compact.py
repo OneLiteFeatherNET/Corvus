@@ -19,6 +19,12 @@ started after the erasure request are kept: those jobs already excluded the eras
 step runs before the file rewrite and is repeated until it succeeds; the requests complete only
 afterwards.
 
+Iceberg (``CORVUS_LAKE_FORMAT=iceberg``, docs/reference/data-lake.md section 7): the same run also
+erases the rows of the requests' sessions from the Iceberg ``events`` and ``raw`` tables and expires
+the older snapshots (``iceberg_erasure``). A request whose snapshots are held by a branch or tag
+stays pending with ``lake_blocked_reason`` set; it is completed only when the Iceberg step finished.
+Snapshots that list the erased sessions are marked ``needs_rebuild``.
+
 Crash safety: before step 3 the old file is still the live one (a leftover new object is an orphan
 that housekeeping removes); after step 3 only ``purge_pending`` work remains, which every run
 retries first. Once all files of the pending requests are done, the requests are marked
@@ -124,6 +130,31 @@ class CompactCatalog(Protocol):
     async def mark_purged(self, file_id: int) -> None: ...
     async def complete_requests(self, request_ids: list[object], now: datetime) -> None: ...
 
+    async def request_pseudonym(self, request_id: object) -> bytes:
+        """The pseudonym the request erases."""
+        ...
+
+    async def request_sessions(self, request_id: object) -> list[bytes]:
+        """Session ids of the request's pseudonym (all of them, erased or not)."""
+        ...
+
+    async def mark_snapshots_needing_rebuild(self, request_id: object, now: datetime) -> None:
+        """Dataset snapshots that list a session of the request's pseudonym: ``needs_rebuild``."""
+        ...
+
+    async def set_lake_block(self, request_id: object, reason: str | None) -> None:
+        """``lake_blocked_reason`` of the request (None: not blocked)."""
+        ...
+
+
+class LakeErasure(Protocol):
+    """Iceberg step of an erasure request (``iceberg_erasure.IcebergCleanup``, blocking)."""
+
+    def erase(self, request_id: str, pseudonym: bytes, session_ids: list[bytes]) -> list[str]:
+        """Empty when the rows are gone and the old snapshots are expired; else the reasons
+        the erasure is held back. Raises on any other failure."""
+        ...
+
 
 class FileStore(Protocol):
     async def download(self, key: str, path: Path) -> None: ...
@@ -180,6 +211,7 @@ class CompactReport:
     rows_removed: int = 0
     purged: int = 0
     artifacts_deleted: int = 0
+    lake_blocked: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -279,6 +311,35 @@ async def _compact_file(
     await _purge(catalog, store, report)
 
 
+async def _erase_lake(
+    request_ids: list[object],
+    catalog: CompactCatalog,
+    lake: LakeErasure,
+    clock: Clock,
+    report: CompactReport,
+) -> set[object]:
+    """Iceberg rows of each request. Returns the requests that are not finished: blocked by a
+    branch or tag, or failed (the error is in the report)."""
+    unfinished: set[object] = set()
+    for rid in request_ids:
+        try:
+            pseudonym = await catalog.request_pseudonym(rid)
+            sessions = await catalog.request_sessions(rid)
+            await catalog.mark_snapshots_needing_rebuild(rid, clock())
+            held = await asyncio.to_thread(lake.erase, str(rid), pseudonym, sessions)
+            await catalog.set_lake_block(rid, "; ".join(held) or None)
+        except Exception as e:
+            report.errors.append(f"iceberg erasure {rid}: {e}")
+            log.warning("could not erase request %s in the lake: %s", rid, e)
+            unfinished.add(rid)
+            continue
+        if held:
+            report.lake_blocked += 1
+            unfinished.add(rid)
+            log.warning("erasure request %s is blocked in the lake: %s", rid, "; ".join(held))
+    return unfinished
+
+
 async def run_compaction(
     settings: Settings,
     catalog: CompactCatalog,
@@ -287,6 +348,7 @@ async def run_compaction(
     *,
     workdir: Path | None = None,
     on_batch: Callable[[int], None] | None = None,
+    lake: LakeErasure | None = None,
 ) -> CompactReport:
     report = CompactReport()
     await _purge(catalog, store, report)
@@ -306,11 +368,16 @@ async def run_compaction(
             except Exception as e:
                 report.errors.append(f"file {f.id} {f.s3_key}: {e}")
                 log.warning("could not compact file %d: %s", f.id, e)
+    unfinished: set[object] = set()
+    if lake is not None:
+        unfinished = await _erase_lake(request_ids, catalog, lake, clock, report)
     if not report.errors and not report.files_skipped_locked:
-        await catalog.complete_requests(request_ids, clock())
+        done = [rid for rid in request_ids if rid not in unfinished]
+        if done:
+            await catalog.complete_requests(done, clock())
     log.info(
         "compact: %d requests, %d files rewritten, %d dropped, %d untouched, %d locked, "
-        "%d rows removed, %d purged, %d artefacts deleted, %d errors",
+        "%d rows removed, %d purged, %d artefacts deleted, %d lake-blocked, %d errors",
         report.requests,
         report.files_rewritten,
         report.files_dropped,
@@ -319,6 +386,7 @@ async def run_compaction(
         report.rows_removed,
         report.purged,
         report.artifacts_deleted,
+        report.lake_blocked,
         len(report.errors),
     )
     return report
@@ -326,11 +394,17 @@ async def run_compaction(
 
 async def _main(settings: Settings) -> int:
     from .compact_pg import PgCompactCatalog
+    from .iceberg_erasure import IcebergCleanup
     from .s3store import S3Store
 
     catalog = await PgCompactCatalog.open(settings.pg_dsn, 4)
+    lake = (
+        IcebergCleanup.from_settings(settings, system_clock)
+        if settings.lake_format == "iceberg"
+        else None
+    )
     try:
-        report = await run_compaction(settings, catalog, S3Store.from_settings(settings))
+        report = await run_compaction(settings, catalog, S3Store.from_settings(settings), lake=lake)
     finally:
         await catalog.close()
     return 1 if report.errors else 0

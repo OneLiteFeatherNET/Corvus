@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     lake_s3_access_key: str | None = None
     lake_s3_secret_key: SecretStr | None = None
 
+    # Iceberg snapshots older than this are expired by corvus-housekeeping (unless a branch or tag
+    # holds them). Expiry removes no rows; only the time travel to older snapshots ends.
+    lake_snapshot_retention_days: int = Field(default=7, ge=1)
+    # Routine Iceberg maintenance by corvus-housekeeping (snapshot expiry by age, orphan removal).
+    # Off by default: the platform's Airflow DAG iceberg_maintenance owns it. Erasure is unaffected.
+    lake_maintenance_enabled: bool = False
+
     # PostgreSQL
     pg_dsn: str = "postgresql://corvus@localhost:5432/corvus"
     pg_pool_max: int = Field(default=4, ge=1)

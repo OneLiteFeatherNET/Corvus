@@ -70,7 +70,8 @@ class SnapshotOut(BaseModel):
     created_at: datetime
     needs_rebuild: bool = Field(
         default=False,
-        description="Erasure deleted the snapshot's raw-derived artefacts; rebuild the features",
+        description="Erasure removed rows of the snapshot's sessions or deleted its raw-derived "
+        "artefacts; rebuild the features",
     )
     manifest: dict[str, Any] | None = Field(
         default=None, description="Present on the detail view only"
@@ -138,6 +139,11 @@ class ErasureOut(BaseModel):
     key_deleted: bool
     compaction_pending: bool
     compacted_at: datetime | None = None
+    lake_blocked_reason: str | None = Field(
+        default=None,
+        description="Set while the Iceberg rows cannot be removed yet: a branch or tag keeps a "
+        "snapshot that still holds them. The request stays pending until the hold is released.",
+    )
 
     @classmethod
     def of(cls, r: ErasureRequest) -> ErasureOut:
@@ -145,7 +151,7 @@ class ErasureOut(BaseModel):
             id=r.id, pseudonym=r.pseudonym.hex(), requested_by=r.requested_by,
             requested_at=r.requested_at, status=r.status, player_known=r.player_known,
             key_deleted=r.key_deleted, compaction_pending=r.compaction_pending,
-            compacted_at=r.compacted_at,
+            compacted_at=r.compacted_at, lake_blocked_reason=r.lake_blocked_reason,
         )  # fmt: skip
 
 

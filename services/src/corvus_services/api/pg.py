@@ -614,12 +614,12 @@ class PgErasureTx:
 
 _ERASURE_COLS = (
     "id, pseudonym, requested_by, requested_at, status, player_known, key_deleted,"
-    " compaction_pending, compacted_at"
+    " compaction_pending, compacted_at, lake_blocked_reason"
 )
 
 
 def _erasure(r: tuple[Any, ...]) -> ErasureRequest:
-    return ErasureRequest(r[0], bytes(r[1]), r[2], r[3], r[4], r[5], r[6], r[7], r[8])
+    return ErasureRequest(r[0], bytes(r[1]), r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9])
 
 
 class PgErasureStore:
