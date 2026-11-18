@@ -96,7 +96,7 @@ layout only.
 | Catalog | Apache Polaris REST catalog, OAuth2 client credentials (Entra ID), warehouse `corvus` (`CORVUS_LAKE_WAREHOUSE`), namespace `capture` (`CORVUS_LAKE_NAMESPACE`, must exist) |
 | Ingest grants | `NAMESPACE_LIST`, `TABLE_LIST`, `TABLE_CREATE`, `TABLE_WRITE_DATA` on `capture` |
 | Data files | Ceph RGW bucket `polaris-corvus`, path-style, static S3 keys (`CORVUS_LAKE_S3_*`). No STS: the client sends `X-Iceberg-Access-Delegation` empty |
-| Tables | `capture.events` and `capture.raw` |
+| Tables | `capture.events`, `capture.raw`, `capture.sessions`, `capture.segments`, `capture.session_ends` |
 
 Settings: `CORVUS_LAKE_FORMAT` (`parquet` | `iceberg`); with `iceberg`, these are required and checked at start-up:
 `CORVUS_LAKE_CATALOG_URI`, `CORVUS_LAKE_OAUTH_TOKEN_URL`, `CORVUS_LAKE_OAUTH_SCOPE`, `CORVUS_LAKE_CLIENT_ID`,
@@ -126,8 +126,8 @@ Decision of 2026-11-18 (maintainer): the lake keeps the complete raw packet stre
   bucket and are reached through the catalog only; nothing copies `raw` out of the catalog.
 * **Retention is permanent.** No housekeeping job deletes Iceberg rows (housekeeping expires snapshots only). The
   contents are reviewed once a year.
-* **Erasure** of a player removes the Iceberg rows by `player_key` (and by session for null-key orphans) in both
-  tables, then expires the older snapshots and removes their files; see *Erasure in Iceberg* in section 2a. A completed
+* **Erasure** of a player removes the Iceberg rows by `player_key` (and by session for null-key orphans and for
+  `segments`) in all five tables, then expires the older snapshots and removes their files; see *Erasure in Iceberg* in section 2a. A completed
   erasure request in Iceberg mode means exactly that: the completion waits for the Iceberg step. The DEK deletion alone
   does not count. It does not yet remove an erased player's name from the payloads of other players' rows (see
   "Privacy and retention" above).
@@ -162,8 +162,57 @@ the session start (`SessionInfo.partition_date`), the partition source.
 | `payload` | `binary` | the payload bytes as received, plaintext |
 | `date` | `date` | partition column |
 
+Session metadata (Iceberg only, written next to the packets; Parquet mode has none). All three tables are append-only:
+no row is ever updated, so no snapshot needs an update commit. Each carries `date` (the UTC date of the session start,
+as in `raw`), so a join of `raw` with `segments` on (`session_id`, `segment`) prunes the same partitions.
+
+`sessions`: one row per `SessionStart`, the start fields of the session. It has no end data.
+
+| Column | Iceberg type | Notes |
+|---|---|---|
+| `session_id` | `fixed(16)` | |
+| `player_key` | `fixed(32)` | the pseudonym of the session's player (same semantics as in `raw`) |
+| `pseudonym_key_id` | `string` | key version of the pseudonym |
+| `client_protocol_version` | `int` | protocol version spoken by the client |
+| `observed_protocol_version` | `int` | protocol version of the frames as observed by the plugin |
+| `proxy_id` | `string` | |
+| `plugin_version` | `string` | |
+| `started_at` | `timestamptz` | |
+| `text_packets_captured` | `boolean` | capture policy of the session |
+| `names_kept` | `boolean` | capture policy of the session |
+| `date` | `date` | partition column |
+
+`session_ends`: one row per `SessionEnd`. Its counters are the ones of that message (the part since the last batch);
+the batch counters are not in the lake, only in the Postgres catalog. A session's end is found by joining on
+`session_id`. The session row stays unchanged. A session without an end (crash, lost connection) has no row here.
+
+| Column | Iceberg type | Notes |
+|---|---|---|
+| `session_id` | `fixed(16)` | |
+| `player_key` | `fixed(32)` (nullable) | null for orphan sessions, as in `raw` |
+| `ended_at` | `timestamptz` | |
+| `dropped_queue_full`, `dropped_privacy`, `listener_errors`, `dropped_transport` | `long` | the `SessionEnd` counters |
+| `date` | `date` | partition column |
+
+`segments`: one row per `SegmentStart`. The `player_key` is not repeated: a segment belongs to a session, and the
+session's `player_key` comes from `sessions`.
+
+| Column | Iceberg type | Notes |
+|---|---|---|
+| `session_id` | `fixed(16)` | |
+| `segment` | `long` | |
+| `backend_server` | `string` | |
+| `game_context` | `string` | tag from the backend-server mapping, e.g. `pvp`, `survival`, `lobby` |
+| `client_brand` | `string` | may be empty |
+| `started_at` | `timestamptz` | |
+| `date` | `date` | partition column |
+
 Table properties: `format-version` 2, `write.parquet.compression-codec` zstd, `corvus.lake-schema-version` 2.
-Partition spec: identity(`date`). Sort order: `session_id`, `seq` ascending, nulls first.
+Partition spec: identity(`date`). Sort order: `session_id`, then `seq` for `events` and `raw`, `segment` for `segments`
+(ascending, nulls first).
+
+A redelivered `SessionStart`, `SegmentStart` or `SessionEnd` appends its row again, so readers de-duplicate on `session_id`
+(and `segment`), as they do for `raw` on (`session_id`, `seq`).
 
 Changes to the columns: add an Iceberg schema evolution (append-only), bump `corvus.lake-schema-version` and
 `ICEBERG_LAKE_VERSION` together. The writer refuses at start-up a table whose lake schema version is not 2, and a table
@@ -177,7 +226,9 @@ production and are not migrated: drop the table and let ingest recreate it.
 * Flush: one append per (table, date) buffer, with the same flush limits as section 5. Rows are sorted by
   (`session_id`, `seq`) in the append.
 * Acks are unchanged: a message is acked only after the append committed for all its buffers; a failed append naks
-  the message (redelivery), as in section 5.
+  the message (redelivery), as in section 5. The session metadata rows go through the same buffers: a `SessionStart`
+  is acked after its `sessions` row is committed, a `SegmentStart` after its `segments` row, a `SessionEnd` after its
+  `session_ends` row. Postgres is written as before, first.
 * Commit conflicts (another writer committed first): the table is reloaded and the append retried, at most 5 attempts
   with jittered backoff (base 0.2 s, cap 5 s). A failed attempt leaves its data files unreferenced (orphans for
   Iceberg's `remove_orphan_files`).
@@ -196,9 +247,10 @@ production and are not migrated: drop the table and let ingest recreate it.
 `corvus-compact` (section 7) handles the Iceberg tables when `CORVUS_LAKE_FORMAT=iceberg`, in the same run as the Parquet
 files. Per erasure request, after the grace period:
 
-1. delete the player's rows from `events` and from `raw`: first every row whose `player_key` is the pseudonym (one commit
-   per table), then the rows with a null `player_key` of the player's sessions (`corvus.sessions`, orphan frames), with
-   `IN` lists of 1000 session ids. pyiceberg 0.10 deletes copy-on-write (`Table.delete`): files with only erased rows are
+1. delete the player's rows from all five tables: first every row whose `player_key` is the pseudonym (`events`, `raw`,
+   `sessions`, `session_ends`; one commit per table), then the rows with a null `player_key` of the player's sessions
+   (`corvus.sessions`, orphan frames of `events`, `raw` and `session_ends`), and every `segments` row of those sessions
+   (`segments` has no `player_key`). The session lists are `IN` lists of 1000 session ids. pyiceberg 0.10 deletes copy-on-write (`Table.delete`): files with only erased rows are
    dropped, mixed files are rewritten without them. Every delete commit is tagged in its snapshot summary with the
    request id (`corvus.erasure-request`);
 2. expire, per table, every snapshot older than the newest tagged snapshot (the cut). The cut and everything newer stay.
@@ -223,9 +275,11 @@ snapshots with erased raw artefacts.
 ### Retention in Iceberg
 
 * `raw` in Iceberg is kept, there is no time-based deletion of its rows: `CORVUS_RAW_RETENTION_DAYS` and pool retention
-  do not apply to it. Only an erasure removes Iceberg rows.
+  do not apply to it. The session metadata tables are kept the same way. Only an erasure removes Iceberg rows.
 * **Routine maintenance is owned by the platform.** The Airflow DAG `iceberg_maintenance` (Spark: `rewrite_data_files`,
-  `expire_snapshots`, `remove_orphan_files`) runs nightly on `capture.events` and `capture.raw`. Corvus does not run a
+  `expire_snapshots`, `remove_orphan_files`) runs nightly on `capture.events` and `capture.raw`. The table list of the
+  DAG must also name `capture.sessions`, `capture.segments` and `capture.session_ends` (platform side, not in this
+  repository). Corvus does not run a
   second orphan remover by default. Helm `lake.maintenance.enabled` (`CORVUS_LAKE_MAINTENANCE_ENABLED`, default `false`)
   switches on an opt-in variant in `corvus-housekeeping`: it expires snapshots older than
   `CORVUS_LAKE_SNAPSHOT_RETENTION_DAYS` (7) and removes orphan files older than 24 h, so that a long rewrite of the DAG

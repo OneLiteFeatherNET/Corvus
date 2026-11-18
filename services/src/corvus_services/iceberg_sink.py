@@ -1,11 +1,12 @@
-"""Iceberg lake sink: appends the frames of a buffer to the ``events`` and ``raw`` tables.
+"""Iceberg lake sink: appends the rows of a buffer to the lake tables.
 
 Target layout (docs/reference/data-lake.md section 2a):
 
-* columns = the Iceberg layout of ``schema.py`` (plaintext ``raw`` payloads, ``player_key`` on both
-  tables), unsigned integers widened to the signed Iceberg types (Iceberg has none), plus ``date``
-  (UTC date of the session start);
-* identity partition on ``date``; sort order (``session_id``, ``seq``); format version 2;
+* tables ``events`` and ``raw`` (plaintext ``raw`` payloads, ``player_key`` on both), and the
+  session metadata ``sessions``, ``segments`` and ``session_ends`` (append-only, see ``schema.py``);
+  unsigned integers widened to the signed Iceberg types (Iceberg has none), plus ``date`` (UTC date
+  of the session start);
+* identity partition on ``date``; sort order per table (``SORT_KEYS``); format version 2;
   ``write.parquet.compression-codec=zstd``;
 * table property ``corvus.lake-schema-version`` = ``ICEBERG_LAKE_VERSION``. Bump it (and add a
   schema evolution) for any change of the columns; the writer refuses a table whose columns differ.
@@ -51,12 +52,14 @@ from pyiceberg.types import (
     IntegerType,
     LongType,
     NestedField,
+    StringType,
+    TimestamptzType,
 )
 
 from .buffer import TableBuffer
 from .config import Settings
 from .ports import Committed
-from .schema import ICEBERG_LAYOUT, Layout
+from .schema import ICEBERG_LAYOUT, TIMESTAMP_TYPE, Layout
 
 log = logging.getLogger("corvus.ingest.iceberg")
 
@@ -70,6 +73,13 @@ TABLE_PROPERTIES = {
     "write.parquet.compression-codec": "zstd",
     LAKE_VERSION_PROPERTY: str(ICEBERG_LAKE_VERSION),
 }
+SORT_KEYS: dict[str, tuple[str, ...]] = {
+    "events": ("session_id", "seq"),
+    "raw": ("session_id", "seq"),
+    "segments": ("session_id", "segment"),
+    "sessions": ("session_id",),
+    "session_ends": ("session_id",),
+}
 
 _SCALARS: dict[pa.DataType, IcebergType] = {
     pa.uint8(): IntegerType(),
@@ -80,6 +90,8 @@ _SCALARS: dict[pa.DataType, IcebergType] = {
     pa.float64(): DoubleType(),
     pa.bool_(): BooleanType(),
     pa.binary(): BinaryType(),
+    pa.string(): StringType(),
+    TIMESTAMP_TYPE: TimestamptzType(),
 }
 
 
@@ -117,7 +129,7 @@ def partition_spec(schema: Schema) -> PartitionSpec:
     )
 
 
-def sort_order(schema: Schema) -> SortOrder:
+def sort_order(schema: Schema, keys: tuple[str, ...] = ("session_id", "seq")) -> SortOrder:
     return SortOrder(
         *(
             SortField(
@@ -126,7 +138,7 @@ def sort_order(schema: Schema) -> SortOrder:
                 direction=SortDirection.ASC,
                 null_order=NullOrder.NULLS_FIRST,
             )
-            for name in ("session_id", "seq")
+            for name in keys
         )
     )
 
@@ -205,7 +217,7 @@ class IcebergSink:
                     ident,
                     schema,
                     partition_spec=partition_spec(schema),
-                    sort_order=sort_order(schema),
+                    sort_order=sort_order(schema, SORT_KEYS[name]),
                     properties=TABLE_PROPERTIES,
                 )
                 log.info("created lake table %s", ident)
@@ -270,7 +282,7 @@ def _arrow_rows(buf: TableBuffer) -> pa.Table:
     columns = dict(buf.columns)
     columns[DATE_COLUMN] = [buf.day] * buf.rows
     rows = pa.Table.from_pydict(columns, schema=_ARROW_SCHEMAS[buf.table])
-    return rows.sort_by([("session_id", "ascending"), ("seq", "ascending")])
+    return rows.sort_by([(key, "ascending") for key in SORT_KEYS[buf.table]])
 
 
 _ARROW_SCHEMAS: dict[str, pa.Schema] = {

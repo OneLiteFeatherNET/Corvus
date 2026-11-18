@@ -60,6 +60,15 @@ def rig():
     r.executor.shutdown()
 
 
+async def test_parquet_mode_acks_session_start_at_once_and_buffers_no_session_rows(rig):
+    m = await rig.send(session_start_env())
+    seg = await rig.send(segment_env())
+
+    assert m.acked == 1
+    assert seg.acked == 1
+    assert rig.pipeline._buffers.pending_keys() == [], "session metadata is Iceberg only"
+
+
 async def test_message_is_acked_only_after_file_commit(rig):
     await rig.send(session_start_env())
     m = await rig.send(batch_env([0, 1]))

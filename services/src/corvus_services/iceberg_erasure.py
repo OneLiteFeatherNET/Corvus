@@ -2,11 +2,12 @@
 
 ``IcebergCleanup.erase`` runs for one erasure request, from ``corvus-compact``:
 
-1. delete the player's rows from ``events`` and ``raw``: first all rows with ``player_key`` equal
-   to the pseudonym (one commit per table), then the rows with a null ``player_key`` of the
-   player's sessions (orphan frames; chunked ``IN`` lists of session ids). Every delete commit is
-   tagged with the request id in its snapshot summary, so the snapshots of this erasure can be
-   found again;
+1. delete the player's rows from every table: first all rows with ``player_key`` equal to the
+   pseudonym (``events``, ``raw``, ``sessions``, ``session_ends``; one commit per table), then the
+   rows of the player's sessions without a ``player_key`` (orphan frames of ``events``, ``raw`` and
+   ``session_ends``) and every ``segments`` row of the player's sessions (``segments`` has no
+   ``player_key``; chunked ``IN`` lists of session ids). Every delete commit is tagged with the
+   request id in its snapshot summary, so the snapshots of this erasure can be found again;
 2. per table: the cut is the newest tagged snapshot. Every snapshot older than the cut is expired
    right away, the cut and everything newer is kept. Expiry is refused (``held_by``) while a
    branch or tag points at one of the snapshots to expire: the request then stays blocked;
@@ -59,16 +60,31 @@ from .iceberg_maintenance import (
     snapshot_seq,
 )
 from .iceberg_sink import open_catalog
-from .schema import SCHEMAS
+from .schema import ICEBERG_LAYOUT
 
 log = logging.getLogger("corvus.iceberg.cleanup")
 
+TABLES = tuple(ICEBERG_LAYOUT.schemas)
+"""The Iceberg tables of the lake (events, raw, sessions, segments, session_ends)."""
+PLAYER_KEYED = ("events", "raw", "sessions", "session_ends")
+"""Tables with a ``player_key`` column: erased by pseudonym."""
+NULL_KEYED = ("events", "raw", "session_ends")
+"""Tables whose ``player_key`` is null for orphan sessions: their rows are erased by session id."""
 ERASURE_PROPERTY = "corvus.erasure-request"
 """Snapshot summary key that tags every delete commit of an erasure request with its id."""
 DELETE_CHUNK = 1000
 """Session ids per delete commit (one ``IN`` list)."""
 
 T = TypeVar("T")
+
+
+def _session_predicate(name: str, chunk: list[bytes]) -> Any | None:
+    """Rows of the sessions in ``chunk`` that the ``player_key`` delete does not reach, or None."""
+    if name in NULL_KEYED:
+        return And(IsNull("player_key"), In("session_id", chunk))  # type: ignore[call-arg,arg-type]
+    if name == "segments":  # no player_key: every segment of the player's sessions
+        return In("session_id", chunk)  # type: ignore[call-arg,arg-type]
+    return None  # sessions: every row carries its player_key
 
 
 @dataclass(frozen=True)
@@ -125,23 +141,21 @@ class IcebergCleanup:
         idempotent)."""
         # pyiceberg 0.12 types these expressions as pydantic models whose fields do not match
         # their documented constructors; the positional calls are correct at runtime.
-        for name in SCHEMAS:
-            self._retry(
-                f"erasure delete {name}",
-                partial(self._delete_op, name, EqualTo("player_key", pseudonym), request_id),  # type: ignore[call-arg,arg-type]
-            )
+        for name in TABLES:
+            if name in PLAYER_KEYED:
+                self._retry(
+                    f"erasure delete {name}",
+                    partial(self._delete_op, name, EqualTo("player_key", pseudonym), request_id),  # type: ignore[call-arg,arg-type]
+                )
             for start in range(0, len(session_ids), self._delete_chunk):
                 chunk = session_ids[start : start + self._delete_chunk]
-                self._retry(
-                    f"erasure delete orphans {name}",
-                    partial(
-                        self._delete_op,
-                        name,
-                        And(IsNull("player_key"), In("session_id", chunk)),  # type: ignore[call-arg,arg-type]
-                        request_id,
-                    ),
-                )
-        outcomes = [self._erase_table(name, request_id) for name in SCHEMAS]
+                predicate = _session_predicate(name, chunk)
+                if predicate is not None:
+                    self._retry(
+                        f"erasure delete sessions {name}",
+                        partial(self._delete_op, name, predicate, request_id),
+                    )
+        outcomes = [self._erase_table(name, request_id) for name in TABLES]
         return [
             f"{o.table}: snapshots to expire are held by {', '.join(o.held_by)}"
             for o in outcomes
@@ -214,7 +228,7 @@ class IcebergCleanup:
         branch and tag head; a ref that points at an older snapshot keeps the whole chain from
         there on. Blocking: run it in a worker thread."""
         cutoff_ms = int((self._clock() - retention).timestamp() * 1000)
-        return [self._maintain_table(name, cutoff_ms) for name in SCHEMAS]
+        return [self._maintain_table(name, cutoff_ms) for name in TABLES]
 
     def _maintain_table(self, name: str, cutoff_ms: int) -> TableOutcome:
         expired = self._retry(f"expiry {name}", partial(self._expire_by_age, name, cutoff_ms))

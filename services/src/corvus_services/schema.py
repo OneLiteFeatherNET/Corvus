@@ -79,6 +79,50 @@ ICEBERG_RAW_SCHEMA = pa.schema(
 )
 
 
+# Session metadata (Iceberg only), written next to the packets so that dashboards can filter them
+# by proxy, backend server or game context. Append-only: ``sessions`` gets one row per SessionStart,
+# SessionEnd appends one row to ``session_ends`` and SegmentStart one row to ``segments``. Nothing
+# is ever updated. ``date`` is the UTC date of the session start, as in raw, so the join raw ->
+# segments on (session_id, segment) prunes the same partitions.
+TIMESTAMP_TYPE = pa.timestamp("us", tz="UTC")
+ICEBERG_SESSIONS_SCHEMA = pa.schema(
+    [
+        pa.field("session_id", pa.binary(16), nullable=False),
+        pa.field("player_key", pa.binary(PLAYER_KEY_BYTES), nullable=False),
+        pa.field("pseudonym_key_id", pa.string(), nullable=False),
+        pa.field("client_protocol_version", pa.int32(), nullable=False),
+        pa.field("observed_protocol_version", pa.int32(), nullable=False),
+        pa.field("proxy_id", pa.string(), nullable=False),
+        pa.field("plugin_version", pa.string(), nullable=False),
+        pa.field("started_at", TIMESTAMP_TYPE, nullable=False),
+        pa.field("text_packets_captured", pa.bool_(), nullable=False),
+        pa.field("names_kept", pa.bool_(), nullable=False),
+    ]
+)
+ICEBERG_SEGMENTS_SCHEMA = pa.schema(
+    [
+        pa.field("session_id", pa.binary(16), nullable=False),
+        pa.field("segment", pa.uint32(), nullable=False),
+        pa.field("backend_server", pa.string(), nullable=False),
+        pa.field("game_context", pa.string(), nullable=False),
+        pa.field("client_brand", pa.string(), nullable=False),
+        pa.field("started_at", TIMESTAMP_TYPE, nullable=False),
+    ]
+)
+# The counters are those of the SessionEnd message. ``player_key`` is null for orphan sessions.
+ICEBERG_SESSION_ENDS_SCHEMA = pa.schema(
+    [
+        pa.field("session_id", pa.binary(16), nullable=False),
+        pa.field("player_key", pa.binary(PLAYER_KEY_BYTES)),
+        pa.field("ended_at", TIMESTAMP_TYPE, nullable=False),
+        pa.field("dropped_queue_full", pa.uint64(), nullable=False),
+        pa.field("dropped_privacy", pa.uint64(), nullable=False),
+        pa.field("listener_errors", pa.uint64(), nullable=False),
+        pa.field("dropped_transport", pa.uint64(), nullable=False),
+    ]
+)
+
+
 @dataclass(frozen=True)
 class Layout:
     """What a lake format stores: the table schemas, and whether raw payloads are encrypted."""
@@ -90,9 +134,18 @@ class Layout:
 
 PARQUET_LAYOUT = Layout("parquet", SCHEMAS, encrypts_raw=True)
 ICEBERG_LAYOUT = Layout(
-    "iceberg", {"events": ICEBERG_EVENTS_SCHEMA, "raw": ICEBERG_RAW_SCHEMA}, encrypts_raw=False
+    "iceberg",
+    {
+        "events": ICEBERG_EVENTS_SCHEMA,
+        "raw": ICEBERG_RAW_SCHEMA,
+        "sessions": ICEBERG_SESSIONS_SCHEMA,
+        "segments": ICEBERG_SEGMENTS_SCHEMA,
+        "session_ends": ICEBERG_SESSION_ENDS_SCHEMA,
+    },
+    encrypts_raw=False,
 )
 
 # Rough in-memory cost per buffered row (fixed columns / overhead), used for the byte limits.
 EVENT_ROW_BYTES = 96
 RAW_ROW_OVERHEAD = 64
+METADATA_ROW_BYTES = 160
