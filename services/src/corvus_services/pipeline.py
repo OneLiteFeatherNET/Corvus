@@ -11,6 +11,11 @@ Delivery semantics (docs/reference/data-lake.md section 5) and the two idempoten
   exactly when it reaches zero. A failed flush naks its tickets (redelivery after a delay) and
   poisons them so a sibling buffer cannot ack them. Duplicate rows from redelivery are tolerated
   by the contract (readers de-duplicate on ``session_id, seq``).
+
+Iceberg only: the session metadata rows (``sessions`` at SessionStart, ``segments`` at SegmentStart,
+``session_ends`` at SessionEnd) go through the same buffers and tickets, so their message is acked
+only after the append. A redelivered message appends its row again; readers de-duplicate on
+``session_id`` (and ``segment``). Postgres is written exactly as before.
 """
 
 from __future__ import annotations
@@ -18,14 +23,22 @@ from __future__ import annotations
 import asyncio
 import logging
 from concurrent.futures import Executor
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from google.protobuf.message import DecodeError
 
 from .buffer import BufferKey, BufferSet, TableBuffer, Ticket
 from .clock import Clock
-from .codec import Row, event_row, plain_raw_row, raw_row
+from .codec import (
+    Row,
+    event_row,
+    plain_raw_row,
+    raw_row,
+    segment_row,
+    session_end_row,
+    session_row,
+)
 from .config import Settings
 from .crypto import Keyring, LruCache, UnwrapError
 from .lake import ParquetSink
@@ -42,7 +55,7 @@ from .ports import (
     WrappedDek,
 )
 from .proto import pb
-from .schema import EVENT_ROW_BYTES, RAW_ROW_OVERHEAD, Layout
+from .schema import EVENT_ROW_BYTES, METADATA_ROW_BYTES, RAW_ROW_OVERHEAD, Layout
 
 log = logging.getLogger("corvus.ingest")
 
@@ -76,6 +89,8 @@ class IngestPipeline:
         self._sink: LakeSink = sink or ParquetSink(store, catalog, executor, clock)
         # Row layout of the sink: Parquet encrypts raw payloads, Iceberg stores them in plaintext.
         self._layout: Layout = self._sink.layout
+        # Session metadata (sessions, segments, session_ends) goes to the lake only in Iceberg mode.
+        self._writes_metadata = "sessions" in self._layout.schemas
         self._buffers = BufferSet(
             settings.flush_max_rows,
             settings.flush_max_bytes,
@@ -108,15 +123,16 @@ class IngestPipeline:
             await msg.term()
             return
         try:
+            # The handlers return False when they deferred the message or buffered its row: the
+            # message is then acked by the flush of the buffer (or redelivered), not here.
             if body == "session_start":
-                await self._on_session_start(env.session_start)
+                if not await self._on_session_start(env.session_start, msg):
+                    return
             elif body == "segment_start":
                 if not await self._on_segment_start(env.segment_start, msg):
-                    await self._defer(msg)
                     return
             elif body == "session_end":
                 if not await self._on_session_end(env.session_end, msg):
-                    await self._defer(msg)
                     return
             else:
                 await self._on_batch(env.batch, msg)
@@ -183,7 +199,8 @@ class IngestPipeline:
         self._deks.put(pseudonym, dek)
         return dek
 
-    async def _on_session_start(self, s: Any) -> None:
+    async def _on_session_start(self, s: Any, msg: Message) -> bool:
+        """Returns True when the message can be acked now."""
         data = SessionData(
             session_id=bytes(s.session_id),
             pseudonym=bytes(s.player_pseudonym),
@@ -199,19 +216,27 @@ class IngestPipeline:
             data, WrappedDek(wrapped, self._keyring.kek_id)
         )
         self._sessions.put(info.session_id, (info, self._clock() + self._session_ttl))
+        if self._writes_metadata and not info.erased:
+            self._buffer_row("sessions", info.partition_date, session_row(s, data.started_at), msg)
+            return False
         # Iceberg stores raw payloads in plaintext: the stored DEK is never needed there.
         if not self._layout.encrypts_raw:
-            return
+            return True
         if stored is not None and not info.erased and self._deks.get(data.pseudonym) is None:
             if stored.wrapped == wrapped:
                 self._deks.put(data.pseudonym, candidate_dek)
             else:
                 self._deks.put(data.pseudonym, self._keyring.unwrap(data.pseudonym, stored.wrapped))
+        return True
 
     async def _on_segment_start(self, s: Any, msg: Message) -> bool:
+        """Returns True when the message can be acked now (False: deferred or buffered)."""
         session_id = bytes(s.session_id)
-        if await self._session_or_orphan(session_id, msg) is None:
+        session = await self._session_or_orphan(session_id, msg)
+        if session is None:
+            await self._defer(msg)
             return False
+        started_at = _dt(s.started_at_unix_millis)
         await self._catalog.start_segment(
             SegmentData(
                 session_id=session_id,
@@ -219,19 +244,41 @@ class IngestPipeline:
                 backend_server=s.backend_server,
                 game_context=s.game_context,
                 client_brand=s.client_brand,
-                started_at=_dt(s.started_at_unix_millis),
+                started_at=started_at,
             )
         )
+        if self._writes_metadata and not session.erased:
+            row = segment_row(s, started_at)
+            self._buffer_row("segments", session.partition_date, row, msg)
+            return False
         return True
 
     async def _on_session_end(self, e: Any, msg: Message) -> bool:
+        """Returns True when the message can be acked now (False: deferred or buffered)."""
         session_id = bytes(e.session_id)
-        if await self._session_or_orphan(session_id, msg) is None:
+        session = await self._session_or_orphan(session_id, msg)
+        if session is None:
+            await self._defer(msg)
             return False
-        await self._catalog.apply_counters(
-            session_id, msg.msg_id, _counters(e.counters), _dt(e.ended_at_unix_millis)
-        )
+        ended_at = _dt(e.ended_at_unix_millis)
+        counters = _counters(e.counters)
+        await self._catalog.apply_counters(session_id, msg.msg_id, counters, ended_at)
+        if self._writes_metadata and not session.erased:
+            row = session_end_row(session_id, session.pseudonym, ended_at, counters)
+            self._buffer_row("session_ends", session.partition_date, row, msg)
+            return False
         return True
+
+    def _buffer_row(self, table: str, day: date, row: Row, msg: Message) -> None:
+        """Buffer one session-metadata row. The message is acked when its buffer is durable."""
+        ticket = Ticket(msg)
+        buf = self._buffers.get(table, day, self._clock())
+        buf.attach(ticket)
+        buf.add_row(row, METADATA_ROW_BYTES)
+        self._buffers.note_bytes(METADATA_ROW_BYTES)
+        self._m.messages.labels("ok").inc()
+        self._update_gauge()
+        self._schedule_due()
 
     async def _on_batch(self, b: Any, msg: Message) -> None:
         session_id = bytes(b.session_id)

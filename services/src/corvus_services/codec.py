@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from .crypto import encrypt_payload
+from .ports import Counters
 
 EVENT_KIND_NONE = 0
 EVENT_KINDS = {
@@ -84,6 +86,49 @@ def raw_row(session_id: bytes, segment: int, frame: Any, dek: bytes) -> Row | No
         "payload_original_size": frame.payload_original_size,
         "nonce": nonce,
         "ciphertext": ciphertext,
+    }
+
+
+def session_row(s: Any, started_at: datetime) -> Row:
+    """One ``sessions`` row (Iceberg, section 2a) from a SessionStart; end data: session_ends."""
+    return {
+        "session_id": bytes(s.session_id),
+        "player_key": bytes(s.player_pseudonym),
+        "pseudonym_key_id": s.pseudonym_key_id,
+        "client_protocol_version": s.client_protocol_version,
+        "observed_protocol_version": s.observed_protocol_version,
+        "proxy_id": s.proxy_id,
+        "plugin_version": s.plugin_version,
+        "started_at": started_at,
+        "text_packets_captured": s.text_packets_captured,
+        "names_kept": s.names_kept,
+    }
+
+
+def segment_row(s: Any, started_at: datetime) -> Row:
+    """One ``segments`` row (Iceberg, section 2a) from a SegmentStart."""
+    return {
+        "session_id": bytes(s.session_id),
+        "segment": s.segment,
+        "backend_server": s.backend_server,
+        "game_context": s.game_context,
+        "client_brand": s.client_brand,
+        "started_at": started_at,
+    }
+
+
+def session_end_row(
+    session_id: bytes, player_key: bytes | None, ended_at: datetime, counters: Counters
+) -> Row:
+    """One ``session_ends`` row (Iceberg, section 2a) from a SessionEnd."""
+    return {
+        "session_id": session_id,
+        "player_key": player_key,
+        "ended_at": ended_at,
+        "dropped_queue_full": counters.dropped_queue_full,
+        "dropped_privacy": counters.dropped_privacy,
+        "listener_errors": counters.listener_errors,
+        "dropped_transport": counters.dropped_transport,
     }
 
 

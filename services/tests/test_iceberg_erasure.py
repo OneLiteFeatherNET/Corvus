@@ -38,6 +38,7 @@ PLAYER_A = b"\xa1" * 32  # pseudonym of ALICE, the erased player
 PLAYER_B = b"\xb2" * 32
 REQUEST = "11111111-1111-1111-1111-111111111111"
 TABLES = ("events", "raw")
+ALL_TABLES = ("events", "raw", "sessions", "segments", "session_ends")
 
 
 class LocalFiles:
@@ -114,6 +115,10 @@ def lake_rows(name: str, session: bytes, seqs: list[int], player_key: bytes | No
             values = [bytes(field.type.byte_width)] * n
         elif pa.types.is_binary(field.type) or pa.types.is_large_binary(field.type):
             values = [b"x"] * n
+        elif pa.types.is_string(field.type) or pa.types.is_large_string(field.type):
+            values = [""] * n
+        elif pa.types.is_timestamp(field.type):
+            values = [NOW] * n
         elif pa.types.is_boolean(field.type):
             values = [False] * n
         elif pa.types.is_floating(field.type):
@@ -141,8 +146,8 @@ def lake(tmp_path: Path) -> Lake:
     catalog.create_namespace("capture")
     IcebergSink(catalog, "capture").bootstrap()
     lk = Lake(catalog, warehouse)
-    # Two players: ALICE (erased) and BOB; both tables. Each append is one snapshot.
-    for name in TABLES:
+    # Two players: ALICE (erased) and BOB; every table. Each append is one snapshot.
+    for name in ALL_TABLES:
         lk.append(name, ALICE, [1, 2], PLAYER_A)
         lk.append(name, BOB, [1], PLAYER_B)
         lk.append(name, ALICE, [3], PLAYER_A)
@@ -277,11 +282,25 @@ def test_erasure_deletes_in_chunks_of_the_given_size(lake: Lake):
 
     cleanup(lake, delete_chunk=2, catalog=flaky).erase(REQUEST, PLAYER_A, sessions)
 
-    # per table: one delete by player_key, then the orphan deletes of 4 sessions in chunks of 2
-    assert flaky.deletes == 6
+    # one delete by player_key for events, raw, sessions and session_ends; the null-key deletes of
+    # 4 sessions in chunks of 2 for events, raw and session_ends; the segment deletes (chunks of 2)
+    assert flaky.deletes == 12
     for name in TABLES:
         assert lake.sessions(name) == {BOB}
         assert len(lake.table(name).snapshots()) == 1  # only the delete snapshot is left
+
+
+def test_erasure_deletes_the_player_rows_of_sessions_and_session_ends(lake: Lake):
+    assert cleanup(lake).erase(REQUEST, PLAYER_A, [ALICE]) == []
+
+    assert lake.sessions("sessions") == {BOB}
+    assert lake.sessions("session_ends") == {BOB}
+
+
+def test_erasure_deletes_the_segments_of_the_erased_sessions_only(lake: Lake):
+    assert cleanup(lake).erase(REQUEST, PLAYER_A, [ALICE]) == []
+
+    assert lake.sessions("segments") == {BOB}
 
 
 def _tag(snapshot: Any) -> str | None:
@@ -431,7 +450,7 @@ def test_maintenance_keeps_snapshots_within_the_retention(lake: Lake):
 
     outcomes = cleanup(lake, clock=NOW).maintain(timedelta(days=7))
 
-    assert [o.expired for o in outcomes] == [0, 0]
+    assert [o.expired for o in outcomes] == [0] * len(ALL_TABLES)
     assert {name: len(lake.table(name).snapshots()) for name in TABLES} == before
 
 

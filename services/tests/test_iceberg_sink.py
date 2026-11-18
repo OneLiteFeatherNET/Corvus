@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +12,14 @@ import pytest
 from pyiceberg.catalog.sql import SqlCatalog
 from pyiceberg.exceptions import CommitFailedException, NoSuchTableError
 from pyiceberg.schema import Schema
-from pyiceberg.types import BinaryType, DateType, FixedType, LongType, NestedField
+from pyiceberg.types import (
+    BinaryType,
+    DateType,
+    FixedType,
+    LongType,
+    NestedField,
+    TimestamptzType,
+)
 
 from corvus_services.buffer import TableBuffer
 from corvus_services.crypto import Keyring
@@ -29,7 +36,9 @@ from helpers import (
     FakeMessage,
     FakeStore,
     batch_env,
+    end_env,
     make_settings,
+    segment_env,
     session_start_env,
 )
 
@@ -213,6 +222,37 @@ def test_bootstrap_creates_raw_in_plaintext_with_player_key_and_protocol_version
     assert not fields["protocol_version"].required
     assert "ciphertext" not in raw.schema().column_names
     assert "nonce" not in raw.schema().column_names
+
+
+@pytest.mark.parametrize(
+    ("name", "sort_names"),
+    [
+        ("sessions", ["session_id"]),
+        ("segments", ["session_id", "segment"]),
+        ("session_ends", ["session_id"]),
+    ],
+)
+def test_bootstrap_creates_each_session_metadata_table_partitioned_by_date(
+    catalog, name, sort_names
+):
+    make_sink(catalog).bootstrap()
+
+    table = catalog.load_table(f"capture.{name}")
+    assert table.schema().column_names == ICEBERG_SCHEMAS[name].column_names
+    assert [f.name for f in table.spec().fields] == ["date"]
+    sorted_by = [table.schema().find_column_name(f.source_id) for f in table.sort_order().fields]
+    assert sorted_by == sort_names
+    assert table.properties["corvus.lake-schema-version"] == "2"
+
+
+def test_bootstrap_stores_session_times_as_timestamptz_and_ids_as_fixed_binary(catalog):
+    make_sink(catalog).bootstrap()
+
+    fields = {f.name: f for f in catalog.load_table("capture.sessions").schema().fields}
+    assert isinstance(fields["started_at"].field_type, TimestamptzType)
+    assert fields["session_id"].field_type == FixedType(16)
+    assert fields["player_key"].field_type == FixedType(32)
+    assert fields["player_key"].required
 
 
 def test_bootstrap_adds_player_key_to_events(catalog):
@@ -399,10 +439,10 @@ class _Logging:
         await self.inner.ping()
 
 
-async def test_iceberg_message_is_acked_only_after_both_tables_are_committed(catalog):
+async def test_iceberg_message_is_acked_only_after_all_its_tables_are_committed(catalog):
     rig = IcebergRig(catalog)
     try:
-        await rig.send(session_start_env())
+        session = await rig.send(session_start_env())
         m = await rig.send(batch_env([0, 1], payload=b"abc"))
         assert m.acked == 0, "frames are buffered, nothing committed yet"
 
@@ -410,11 +450,12 @@ async def test_iceberg_message_is_acked_only_after_both_tables_are_committed(cat
 
         assert m.acked == 1
         assert m.naked == 0
+        assert session.acked == 1
         assert len(rig.rows("events")) == 2
         assert len(rig.rows("raw")) == 2
         ack = rig.log.index(f"ack {m.msg_id}")
         commits = [i for i, e in enumerate(rig.log) if e.startswith("committed ")]
-        assert len(commits) == 2
+        assert len(commits) == 3, "sessions, events and raw"
         assert all(i < ack for i in commits)
     finally:
         rig.executor.shutdown()
@@ -527,5 +568,122 @@ async def test_frames_of_an_erased_player_are_acked_and_not_written(catalog):
         assert m.acked == 1
         assert rig.rows("events") == []
         assert rig.rows("raw") == []
+    finally:
+        rig.executor.shutdown()
+
+
+# ----- session metadata: sessions, segments, session_ends ----------------------------------------
+
+
+def _session_start(text_packets: bool = False, names: bool = False) -> Any:
+    env = session_start_env()
+    env.session_start.text_packets_captured = text_packets
+    env.session_start.names_kept = names
+    return env
+
+
+async def test_session_start_is_acked_only_after_its_sessions_row_is_committed(catalog):
+    rig = IcebergRig(catalog)
+    try:
+        m = await rig.send(session_start_env())
+        assert m.acked == 0, "the row waits in the sessions buffer"
+
+        await rig.pipeline.flush_all()
+
+        assert m.acked == 1
+        assert len(rig.rows("sessions")) == 1
+        ack = rig.log.index(f"ack {m.msg_id}")
+        assert rig.log.index("committed sessions") < ack
+    finally:
+        rig.executor.shutdown()
+
+
+async def test_sessions_row_carries_the_fields_of_the_session_start(catalog):
+    rig = IcebergRig(catalog)
+    try:
+        await rig.send(_session_start(text_packets=True, names=True))
+        await rig.pipeline.flush_all()
+
+        [row] = rig.rows("sessions")
+        assert row["session_id"] == SESSION
+        assert row["player_key"] == PSEUDONYM
+        assert row["pseudonym_key_id"] == "k1"
+        assert (row["client_protocol_version"], row["observed_protocol_version"]) == (769, 769)
+        assert row["proxy_id"] == "proxy-1"
+        assert row["plugin_version"] == "0.1.0"
+        assert row["started_at"] == T0
+        assert (row["text_packets_captured"], row["names_kept"]) == (True, True)
+        assert row["date"] == DAY
+    finally:
+        rig.executor.shutdown()
+
+
+async def test_segment_row_carries_the_fields_of_the_segment_start(catalog):
+    rig = IcebergRig(catalog)
+    try:
+        await rig.send(session_start_env())
+        await rig.send(segment_env(segment=0))
+        await rig.pipeline.flush_all()
+
+        [row] = rig.rows("segments")
+        assert row["session_id"] == SESSION
+        assert row["segment"] == 0
+        assert (row["backend_server"], row["game_context"], row["client_brand"]) == (
+            "pvp-1",
+            "pvp",
+            "vanilla",
+        )
+        assert row["started_at"] == T0
+        assert row["date"] == DAY, "the date of the session start, as in raw"
+    finally:
+        rig.executor.shutdown()
+
+
+async def test_raw_rows_join_their_segment_on_session_and_segment(catalog):
+    rig = IcebergRig(catalog)
+    try:
+        await rig.send(session_start_env())
+        await rig.send(segment_env(segment=0))
+        await rig.send(batch_env([0], payload=b"abc"))
+        await rig.pipeline.flush_all()
+
+        segments = {(r["session_id"], r["segment"]): r for r in rig.rows("segments")}
+        joined = [
+            (r["payload"], segments[(r["session_id"], r["segment"])]["backend_server"])
+            for r in rig.rows("raw")
+        ]
+        assert joined == [(b"abc", "pvp-1")]
+    finally:
+        rig.executor.shutdown()
+
+
+async def test_session_end_appends_a_session_ends_row_and_leaves_the_sessions_row_alone(catalog):
+    rig = IcebergRig(catalog)
+    try:
+        await rig.send(session_start_env())
+        m = await rig.send(end_env(dropped_privacy=3))
+        await rig.pipeline.flush_all()
+
+        assert m.acked == 1
+        assert len(rig.rows("sessions")) == 1
+        [end] = rig.rows("session_ends")
+        assert end["session_id"] == SESSION
+        assert end["player_key"] == PSEUDONYM
+        assert end["ended_at"] == T0 + timedelta(minutes=5)
+        assert end["dropped_privacy"] == 3
+        assert end["date"] == DAY
+    finally:
+        rig.executor.shutdown()
+
+
+async def test_session_metadata_of_an_erased_player_is_acked_and_not_written(catalog):
+    rig = IcebergRig(catalog)
+    try:
+        rig.pg.erased.add(PSEUDONYM)
+        m = await rig.send(session_start_env())
+        await rig.pipeline.flush_all()
+
+        assert m.acked == 1
+        assert rig.rows("sessions") == []
     finally:
         rig.executor.shutdown()
