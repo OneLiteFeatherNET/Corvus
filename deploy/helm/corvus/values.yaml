@@ -92,6 +92,31 @@ s3:
   # unless `endpointUrl` is set (then that wins, for example an in-cluster service URL).
   bucketConfigMap: ""
 
+# Format of the lake written by ingest (CORVUS_LAKE_FORMAT). `parquet` (default): Parquet files in the
+# bucket above, catalogued in PostgreSQL. `iceberg` (target format, docs/reference/data-lake.md section
+# 2a): the `events` and `raw` tables of an Iceberg REST catalog; then every value below without a
+# default is required and the chart refuses to render without it. Read by ingest only.
+lake:
+  format: parquet
+  catalogUri: ""
+  warehouse: corvus
+  namespace: capture
+  oauth:
+    tokenUrl: ""
+    scope: ""
+    clientId: ""
+    # Secret with the client secret of the ingest principal, under `clientSecretKey`.
+    existingSecret: ""
+    clientSecretKey: client-secret
+  s3:
+    # Object store of the catalog warehouse, reached with static keys (the catalog vends none).
+    endpointUrl: ""
+    region: us-east-1
+    # Secret with the S3 keys of the ingest principal, under the two keys below.
+    existingSecret: ""
+    accessKeyKey: access-key
+    secretKeyKey: secret-key
+
 # Key encryption key (base64, 32 bytes) wrapping every player data key. Losing it makes all raw
 # payloads unreadable. Needed by ingest only.
 kek:

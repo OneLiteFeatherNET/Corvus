@@ -1,4 +1,4 @@
-"""Ingest pipeline: envelopes in, durable Parquet files and catalog rows out.
+"""Ingest pipeline: envelopes in, durable lake files (Parquet or Iceberg) and catalog rows out.
 
 Delivery semantics (docs/reference/data-lake.md section 5) and the two idempotency mechanisms:
 
@@ -23,16 +23,17 @@ from typing import Any
 
 from google.protobuf.message import DecodeError
 
-from .buffer import BufferKey, BufferSet, TableBuffer, Ticket, encode_parquet
-from .clock import Clock, new_ulid
+from .buffer import BufferKey, BufferSet, TableBuffer, Ticket
+from .clock import Clock
 from .codec import event_row, raw_row
 from .config import Settings
 from .crypto import Keyring, LruCache, UnwrapError
+from .lake import ParquetSink
 from .metrics import Metrics
 from .ports import (
     Catalog,
     Counters,
-    FileRecord,
+    LakeSink,
     Message,
     ObjectStore,
     SegmentData,
@@ -41,7 +42,7 @@ from .ports import (
     WrappedDek,
 )
 from .proto import pb
-from .schema import EVENT_ROW_BYTES, RAW_ROW_OVERHEAD, SCHEMA_VERSION
+from .schema import EVENT_ROW_BYTES, RAW_ROW_OVERHEAD
 
 log = logging.getLogger("corvus.ingest")
 
@@ -64,14 +65,15 @@ class IngestPipeline:
         executor: Executor,
         clock: Clock,
         metrics: Metrics | None = None,
+        sink: LakeSink | None = None,
     ) -> None:
         self._s = settings
         self._catalog = catalog
-        self._store = store
         self._keyring = keyring
-        self._executor = executor
         self._clock = clock
         self._m = metrics or Metrics()
+        # Where flushed buffers become durable; the default is the Parquet layout.
+        self._sink: LakeSink = sink or ParquetSink(store, catalog, executor, clock)
         self._buffers = BufferSet(
             settings.flush_max_rows,
             settings.flush_max_bytes,
@@ -327,16 +329,7 @@ class IngestPipeline:
         started = loop.time()
         try:
             async with self._flush_slots:
-                data = await loop.run_in_executor(self._executor, encode_parquet, buf)
-                ulid = new_ulid(self._clock())
-                staging = f"_staging/{buf.table}/{ulid}.parquet"
-                final = f"lake/{buf.table}/date={buf.day.isoformat()}/part-{ulid}.parquet"
-                await self._store.put(staging, data)
-                await self._store.copy(staging, final)
-                await self._catalog.register_file(
-                    FileRecord(final, buf.table, buf.day, buf.rows, len(data), SCHEMA_VERSION),
-                    frozenset(buf.session_ids),
-                )
+                committed = await self._sink.commit(buf)
         except Exception:
             log.exception("flush of %s/%s failed (%d rows)", buf.table, buf.day, buf.rows)
             self._m.flushes.labels(buf.table, "error").inc()
@@ -344,14 +337,18 @@ class IngestPipeline:
             self._finish(buf)
             return
         self._m.flushes.labels(buf.table, "ok").inc()
-        self._m.bytes.labels(buf.table).inc(len(data))
+        if committed.bytes_written is not None:
+            self._m.bytes.labels(buf.table).inc(committed.bytes_written)
         await self._ack(buf)
         self._m.flush_seconds.observe(loop.time() - started)
         self._finish(buf)
-        try:
-            await self._store.delete(staging)
-        except Exception:
-            log.warning("could not delete staging object %s (housekeeping will)", staging)
+        if committed.cleanup is not None:
+            try:
+                await committed.cleanup()
+            except Exception:
+                log.warning(
+                    "cleanup after flush of %s/%s failed (housekeeping will)", buf.table, buf.day
+                )
 
     def _finish(self, buf: TableBuffer) -> None:
         self._inflight_bytes -= buf.bytes

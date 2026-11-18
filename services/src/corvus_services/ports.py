@@ -6,9 +6,13 @@ The pipeline only talks to these protocols; production adapters live in ``pgcata
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from .buffer import TableBuffer
 
 
 @dataclass(frozen=True)
@@ -136,6 +140,30 @@ class Catalog(Protocol):
 
     async def register_file(self, record: FileRecord, session_ids: frozenset[bytes]) -> int:
         """Insert ``lake_files`` and ``lake_file_sessions`` in one transaction."""
+
+    async def ping(self) -> None: ...
+
+
+@dataclass(frozen=True)
+class Committed:
+    """Result of a durable lake commit.
+
+    ``bytes_written`` is None when the format does not expose the size of the committed data.
+    ``cleanup`` runs after the messages were acked (best effort, e.g. deleting a staging object).
+    """
+
+    bytes_written: int | None
+    cleanup: Callable[[], Awaitable[None]] | None = None
+
+
+class LakeSink(Protocol):
+    """Makes one (table, date) buffer durable in the lake.
+
+    ``commit`` returns only once the data is visible to readers; the pipeline acks the messages
+    of the buffer afterwards and naks them when ``commit`` raises. Nothing is acked before.
+    """
+
+    async def commit(self, buf: TableBuffer) -> Committed: ...
 
     async def ping(self) -> None: ...
 

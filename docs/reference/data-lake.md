@@ -83,6 +83,61 @@ Retention is per pool (NFR-018): `pools.raw_retention_days` (default `CORVUS_RAW
 the snapshot manifests). Sessions in no snapshot, and pools that were deleted, count with the default. So a pool can
 shorten the life of data nobody else uses, and keep a file longer than the default.
 
+## 2a. Iceberg tables (target format, opt-in)
+
+Status: the target format of the lake. `CORVUS_LAKE_FORMAT=parquet` stays the default and keeps everything above;
+`iceberg` is chosen per deployment (Helm `lake.format`). Layout version 1 (`ICEBERG_LAKE_VERSION` in
+`services/src/corvus_services/iceberg_sink.py`).
+
+| Item | Value |
+|---|---|
+| Catalog | Apache Polaris REST catalog, OAuth2 client credentials (Entra ID), warehouse `corvus` (`CORVUS_LAKE_WAREHOUSE`), namespace `capture` (`CORVUS_LAKE_NAMESPACE`, must exist) |
+| Ingest grants | `NAMESPACE_LIST`, `TABLE_LIST`, `TABLE_CREATE`, `TABLE_WRITE_DATA` on `capture` |
+| Data files | Ceph RGW bucket `polaris-corvus`, path-style, static S3 keys (`CORVUS_LAKE_S3_*`). No STS: the client sends `X-Iceberg-Access-Delegation` empty |
+| Tables | `capture.events` and `capture.raw` |
+
+Settings: `CORVUS_LAKE_FORMAT` (`parquet` | `iceberg`); with `iceberg`, these are required and checked at start-up:
+`CORVUS_LAKE_CATALOG_URI`, `CORVUS_LAKE_OAUTH_TOKEN_URL`, `CORVUS_LAKE_OAUTH_SCOPE`, `CORVUS_LAKE_CLIENT_ID`,
+`CORVUS_LAKE_CLIENT_SECRET` (secret), `CORVUS_LAKE_S3_ENDPOINT_URL`, `CORVUS_LAKE_S3_ACCESS_KEY`,
+`CORVUS_LAKE_S3_SECRET_KEY` (secret). Optional: `CORVUS_LAKE_WAREHOUSE` (`corvus`), `CORVUS_LAKE_NAMESPACE` (`capture`),
+`CORVUS_LAKE_S3_REGION` (`us-east-1`).
+
+### Schema
+
+The columns of the two tables in sections 2 and 2a are the same, with these changes:
+
+* Iceberg has no unsigned integers: `uint8` becomes `int`, `uint32` and `uint64` become `long`. Values are unchanged.
+* New column `date` (`date`, not null): the UTC date of the session start (`SessionInfo.partition_date`), the partition source.
+
+Table properties: `format-version` 2, `write.parquet.compression-codec` zstd, `corvus.lake-schema-version` 1.
+Partition spec: identity(`date`). Sort order: `session_id`, `seq` ascending, nulls first.
+
+Changes to the columns: add an Iceberg schema evolution (append-only), bump `corvus.lake-schema-version` and
+`ICEBERG_LAKE_VERSION` together. The writer refuses at start-up a table whose columns or partition differ from this layout.
+
+### Writes
+
+* Start of ingest: the tables are created if missing (`CREATE` races between replicas are resolved by loading the
+  table another replica created).
+* Flush: one append per (table, date) buffer, with the same flush limits as section 5. Rows are sorted by
+  (`session_id`, `seq`) in the append.
+* Acks are unchanged: a message is acked only after the append committed for all its buffers; a failed append naks
+  the message (redelivery), as in section 5.
+* Commit conflicts (another writer committed first): the table is reloaded and the append retried, at most 5 attempts
+  with jittered backoff (base 0.2 s, cap 5 s). A failed attempt leaves its data files unreferenced (orphans for
+  Iceberg's `remove_orphan_files`).
+* No `lake_files` or `lake_file_sessions` rows in Iceberg mode. Session membership is read from the tables (filter on
+  `session_id`, prune by `date`). Everything else in the catalog (players, keys, sessions, segments, counters, batch
+  log) is unchanged.
+* Raw rows stay AES-256-GCM encrypted with the player's DEK, as in section 3.
+
+### Not covered yet
+
+Each is a separate step: backfill of the existing Parquet files, erasure of Iceberg rows (Iceberg deletes plus immediate
+snapshot expiry), snapshot pins by Iceberg snapshot id, and retention of `raw` in Iceberg. Until those land,
+`corvus-compact` and `corvus-housekeeping` do not see Iceberg data: erasure requests complete for the Parquet files only
+and `raw` in Iceberg is not expired.
+
 ## 3. Keys and erasure
 
 - Every pseudonymised player gets a random 256-bit data encryption key (DEK) on first sight.
@@ -114,8 +169,8 @@ after release.
 1. Fetch a batch of messages, decode envelopes, upsert `players`/`sessions`/`segments` immediately.
 2. Buffer frames in Arrow builders per (table, date); flush when a buffer exceeds the row or byte limit or its age
    limit (defaults 200 000 rows, 64 MiB, 60 s).
-3. Flush: write Parquet to `_staging/`, copy to the final key, insert `lake_files` + `lake_file_sessions` in one
-   transaction, then ack all messages whose frames are in the file, then delete the staging object.
+3. Flush (Parquet format, section 2a for Iceberg): write Parquet to `_staging/`, copy to the final key, insert `lake_files` +
+   `lake_file_sessions` in one transaction, then ack all messages whose frames are in the file, then delete the staging object.
 4. Redelivery can produce duplicate rows; readers de-duplicate on (`session_id`, `seq`). Final objects without a
    catalog row older than 1 h are orphans and are removed by housekeeping.
 

@@ -15,6 +15,7 @@ from .clock import system_clock
 from .config import Settings
 from .crypto import Keyring
 from .health import HealthServer
+from .lake import open_lake_sink
 from .metrics import Metrics
 from .nats_shutdown import FETCH_ENDED
 from .nats_source import NatsSource
@@ -58,15 +59,20 @@ async def run(settings: Settings) -> None:
     source = await NatsSource.connect(settings)
     keyring = Keyring(settings.kek_bytes(), settings.kek_id)
     executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="parquet")
-    pipeline = IngestPipeline(settings, catalog, store, keyring, executor, system_clock, metrics)
+    sink = await open_lake_sink(settings, store, catalog, executor, system_clock)
+    pipeline = IngestPipeline(
+        settings, catalog, store, keyring, executor, system_clock, metrics, sink=sink
+    )
 
     async def nats_check() -> None:
         if not source.connected:
             raise ConnectionError("NATS disconnected")
 
+    # Readiness names the lake store the format writes to (s3 for Parquet, lake for Iceberg).
+    lake_check = "s3" if settings.lake_format == "parquet" else "lake"
     health = HealthServer(
         metrics.registry,
-        {"nats": nats_check, "postgres": catalog.ping, "s3": store.ping},
+        {"nats": nats_check, "postgres": catalog.ping, lake_check: sink.ping},
         settings.metrics_port,
     )
     await health.start()
