@@ -10,7 +10,13 @@
   deleted once the retention of their snapshot's pool has passed since the newest session they were
   built from, i.e. they never outlive the raw data they derive from;
 * ``session_batches`` rows (redelivery bookkeeping) older than their retention are pruned;
-* ``score_history`` rows (online scoring) older than their retention are pruned.
+* ``score_history`` rows (online scoring) older than their retention are pruned;
+* with ``CORVUS_LAKE_FORMAT=iceberg`` and ``CORVUS_LAKE_MAINTENANCE_ENABLED=true`` (default off, the
+  platform's Airflow DAG ``iceberg_maintenance`` owns the routine maintenance): snapshots of the
+  ``events`` and ``raw`` tables older than ``CORVUS_LAKE_SNAPSHOT_RETENTION_DAYS`` are expired (not
+  while a branch or tag holds them) and orphan files older than 24 h that no retained snapshot reads
+  are removed. No Iceberg row is deleted here: ``raw`` in Iceberg is kept until an erasure removes
+  it.
 """
 
 from __future__ import annotations
@@ -20,7 +26,7 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 from .clock import Clock, system_clock
@@ -29,6 +35,9 @@ from .pgcatalog import PgCatalog
 from .ports import ObjectInfo, ObjectStore
 from .retention import LiveArtifact, artifact_expiry, delete_prefix, effective_raw_retention
 from .s3store import S3Store
+
+if TYPE_CHECKING:
+    from .iceberg_erasure import TableOutcome
 
 log = logging.getLogger("corvus.housekeeping")
 
@@ -61,6 +70,12 @@ def expired_artifacts(
     ]
 
 
+class LakeMaintenance(Protocol):
+    """Iceberg snapshot expiry and orphan removal (``iceberg_erasure.IcebergCleanup``, blocking)."""
+
+    def maintain(self, retention: timedelta) -> list[TableOutcome]: ...
+
+
 class HousekeepingCatalog(Protocol):
     async def known_keys(self, keys: list[str]) -> set[str]: ...
     async def expired_raw_files(
@@ -85,11 +100,18 @@ class Report:
     artifacts_expired: int = 0
     batches_pruned: int = 0
     scores_pruned: int = 0
+    iceberg_expired: int = 0
+    iceberg_orphans: int = 0
     errors: list[str] = field(default_factory=list)
 
 
 async def run_housekeeping(
-    settings: Settings, catalog: HousekeepingCatalog, store: ObjectStore, clock: Clock
+    settings: Settings,
+    catalog: HousekeepingCatalog,
+    store: ObjectStore,
+    clock: Clock,
+    *,
+    lake: LakeMaintenance | None = None,
 ) -> Report:
     now = clock()
     report = Report()
@@ -145,6 +167,23 @@ async def run_housekeeping(
         await catalog.mark_artifact_deleted(art.id, now, "retention")
         report.artifacts_expired += 1
 
+    if lake is not None:
+        try:
+            outcomes = await asyncio.to_thread(
+                lake.maintain, timedelta(days=settings.lake_snapshot_retention_days)
+            )
+        except Exception as e:
+            report.errors.append(f"iceberg: {e}")
+            log.warning("iceberg maintenance failed: %s", e)
+        else:
+            for out in outcomes:
+                report.iceberg_expired += out.expired
+                report.iceberg_orphans += out.orphans
+                if out.held_by:
+                    log.warning(
+                        "iceberg %s: snapshots held by %s", out.table, ", ".join(out.held_by)
+                    )
+
     report.batches_pruned = await catalog.prune_batches(
         now - timedelta(days=settings.batch_log_retention_days)
     )
@@ -153,23 +192,33 @@ async def run_housekeeping(
     )
     log.info(
         "housekeeping: %d orphans, %d staging, %d raw expired, %d artefacts expired, "
-        "%d batches pruned, %d score rows pruned, %d errors",
+        "%d batches pruned, %d score rows pruned, %d iceberg snapshots expired, "
+        "%d iceberg orphans, %d errors",
         report.orphans,
         report.staging,
         report.raw_expired,
         report.artifacts_expired,
         report.batches_pruned,
         report.scores_pruned,
+        report.iceberg_expired,
+        report.iceberg_orphans,
         len(report.errors),
     )
     return report
 
 
 async def _main(settings: Settings) -> int:
+    from .iceberg_erasure import IcebergCleanup
+
     catalog = await PgCatalog.open(settings.pg_dsn, 2)
+    lake = (
+        IcebergCleanup.from_settings(settings, system_clock)
+        if settings.lake_format == "iceberg" and settings.lake_maintenance_enabled
+        else None
+    )
     try:
         report = await run_housekeeping(
-            settings, catalog, S3Store.from_settings(settings), system_clock
+            settings, catalog, S3Store.from_settings(settings), system_clock, lake=lake
         )
     finally:
         await catalog.close()

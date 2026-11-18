@@ -32,6 +32,23 @@ DERIVED_FOR_REQUESTS_SQL = (
 )
 
 
+# Dataset snapshots that list a session of the request's pseudonym in their manifest. Their content
+# changes with the erasure, so they are marked like snapshots with erased raw artefacts. A rebuild
+# by a job that started after the request clears the mark (see api/pg.py).
+REBUILD_FOR_REQUEST_SQL = (
+    "INSERT INTO corvus.snapshot_state (snapshot_id, needs_rebuild, needs_rebuild_at, reason)"
+    " SELECT DISTINCT d.id, true, %s, 'erasure'"
+    " FROM corvus.erasure_requests r"
+    " JOIN corvus.sessions s ON s.pseudonym = r.pseudonym"
+    " JOIN corvus.dataset_snapshots d ON d.manifest -> 'sessions' ? encode(s.session_id, 'hex')"
+    " WHERE r.id = %s"
+    " ON CONFLICT (snapshot_id) DO UPDATE SET needs_rebuild = true,"
+    " needs_rebuild_at = GREATEST(EXCLUDED.needs_rebuild_at,"
+    "  COALESCE(corvus.snapshot_state.needs_rebuild_at, EXCLUDED.needs_rebuild_at)),"
+    " reason = 'erasure'"
+)
+
+
 def lock_key(file_id: int) -> int:
     return _LOCK_NAMESPACE | file_id
 
@@ -181,6 +198,45 @@ class PgCompactCatalog:
         async with self._pool.connection() as conn:
             await conn.execute(
                 "UPDATE corvus.lake_files SET purge_pending = false WHERE id = %s", (file_id,)
+            )
+
+    async def request_pseudonym(self, request_id: object) -> bytes:
+        if not isinstance(request_id, UUID):
+            raise TypeError(f"erasure request id must be a UUID, got {request_id!r}")
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT pseudonym FROM corvus.erasure_requests WHERE id = %s", (request_id,)
+            )
+            row = await cur.fetchone()
+            if row is None:
+                raise LookupError(f"erasure request {request_id} not found")
+            return bytes(row[0])
+
+    async def request_sessions(self, request_id: object) -> list[bytes]:
+        if not isinstance(request_id, UUID):
+            raise TypeError(f"erasure request id must be a UUID, got {request_id!r}")
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT s.session_id FROM corvus.erasure_requests r"
+                " JOIN corvus.sessions s ON s.pseudonym = r.pseudonym"
+                " WHERE r.id = %s ORDER BY s.session_id",
+                (request_id,),
+            )
+            return [bytes(r[0]) for r in await cur.fetchall()]
+
+    async def mark_snapshots_needing_rebuild(self, request_id: object, now: datetime) -> None:
+        if not isinstance(request_id, UUID):
+            raise TypeError(f"erasure request id must be a UUID, got {request_id!r}")
+        async with self._pool.connection() as conn:
+            await conn.execute(REBUILD_FOR_REQUEST_SQL, (now, request_id))
+
+    async def set_lake_block(self, request_id: object, reason: str | None) -> None:
+        if not isinstance(request_id, UUID):
+            raise TypeError(f"erasure request id must be a UUID, got {request_id!r}")
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                "UPDATE corvus.erasure_requests SET lake_blocked_reason = %s WHERE id = %s",
+                (reason, request_id),
             )
 
     async def complete_requests(self, request_ids: list[object], now: datetime) -> None:

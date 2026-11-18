@@ -1,0 +1,141 @@
+suite: lake format of compaction and housekeeping
+templates:
+  - compact.yaml
+  - housekeeping.yaml
+tests:
+  - it: compaction keeps the parquet format by default and needs no catalog settings
+    template: compact.yaml
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_FORMAT
+            value: parquet
+      - notContains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_CATALOG_URI
+            value: https://polaris.example.invalid/api/catalog
+
+  - it: compaction passes the iceberg settings and secrets when the format is iceberg
+    template: compact.yaml
+    documentIndex: 0
+    set:
+      lake.format: iceberg
+      lake.catalogUri: https://polaris.example.invalid/api/catalog
+      lake.oauth.tokenUrl: https://login.example.invalid/token
+      lake.oauth.scope: api://example/.default
+      lake.oauth.clientId: compact-client
+      lake.oauth.existingSecret: corvus-lake-oauth
+      lake.s3.endpointUrl: http://rook-ceph-rgw.example.invalid
+      lake.s3.existingSecret: corvus-lake-s3
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_FORMAT
+            value: iceberg
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_CATALOG_URI
+            value: https://polaris.example.invalid/api/catalog
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: corvus-lake-oauth
+                key: client-secret
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_S3_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: corvus-lake-s3
+                key: access-key
+
+  - it: housekeeping passes the snapshot retention and the format
+    template: housekeeping.yaml
+    documentIndex: 0
+    set:
+      lake.snapshotRetentionDays: 14
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_SNAPSHOT_RETENTION_DAYS
+            value: "14"
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_FORMAT
+            value: parquet
+
+  - it: housekeeping passes the iceberg settings when the format is iceberg
+    template: housekeeping.yaml
+    documentIndex: 0
+    set:
+      lake.format: iceberg
+      lake.catalogUri: https://polaris.example.invalid/api/catalog
+      lake.oauth.tokenUrl: https://login.example.invalid/token
+      lake.oauth.scope: api://example/.default
+      lake.oauth.clientId: housekeeping-client
+      lake.oauth.existingSecret: corvus-lake-oauth
+      lake.s3.endpointUrl: http://rook-ceph-rgw.example.invalid
+      lake.s3.existingSecret: corvus-lake-s3
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_CATALOG_URI
+            value: https://polaris.example.invalid/api/catalog
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_S3_SECRET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: corvus-lake-s3
+                key: secret-key
+
+  - it: housekeeping refuses to render iceberg without a catalog uri
+    template: housekeeping.yaml
+    documentIndex: 0
+    set:
+      lake.format: iceberg
+    asserts:
+      - failedTemplate:
+          errorMessage: lake.catalogUri is required when lake.format is iceberg
+
+  - it: rejects a snapshot retention below one day in the schema
+    template: housekeeping.yaml
+    set:
+      lake.snapshotRetentionDays: 0
+    asserts:
+      - failedTemplate: {}
+
+  - it: housekeeping maintenance is off by default
+    template: housekeeping.yaml
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_MAINTENANCE_ENABLED
+            value: "false"
+
+  - it: housekeeping maintenance can be switched on
+    template: housekeeping.yaml
+    documentIndex: 0
+    set:
+      lake.maintenance.enabled: true
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CORVUS_LAKE_MAINTENANCE_ENABLED
+            value: "true"
