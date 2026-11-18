@@ -23,10 +23,11 @@ attempt leaves its data files unreferenced (orphans for ``remove_orphan_files``)
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
 import random
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 import pyarrow as pa
 from pyiceberg.catalog import Catalog
@@ -50,6 +51,7 @@ from pyiceberg.types import (
     FloatType,
     IcebergType,
     IntegerType,
+    ListType,
     LongType,
     NestedField,
     StringType,
@@ -95,9 +97,16 @@ _SCALARS: dict[pa.DataType, IcebergType] = {
 }
 
 
-def _iceberg_type(t: pa.DataType) -> IcebergType:
+def _iceberg_type(t: pa.DataType, element_ids: Iterator[int]) -> IcebergType:
+    """Iceberg type of an Arrow type. List element ids are taken from ``element_ids``."""
     if pa.types.is_fixed_size_binary(t):
         return FixedType(t.byte_width)
+    if pa.types.is_list(t):
+        return ListType(
+            element_id=next(element_ids),
+            element=_iceberg_type(t.value_type, element_ids),
+            element_required=not t.value_field.nullable,
+        )
     try:
         return _SCALARS[t]
     except KeyError as e:
@@ -105,11 +114,21 @@ def _iceberg_type(t: pa.DataType) -> IcebergType:
 
 
 def iceberg_schema(arrow: pa.Schema) -> Schema:
-    """Iceberg schema of a lake table: the Arrow columns in order, then ``date``."""
-    fields: list[NestedField] = []
-    for field_id, f in enumerate(arrow, start=1):
-        fields.append(NestedField(field_id, f.name, _iceberg_type(f.type), required=not f.nullable))
-    fields.append(NestedField(len(fields) + 1, DATE_COLUMN, DateType(), required=True))
+    """Iceberg schema of a lake table: the Arrow columns in order, then ``date``. As the catalog
+    numbers them on create, top-level fields get ids 1..n (``date`` last), nested list elements
+    the ids after that. The writer's compatibility check compares these ids."""
+    top_level = len(arrow) + 1
+    element_ids = itertools.count(top_level + 1)
+    fields = [
+        NestedField(
+            field_id,
+            f.name,
+            _iceberg_type(f.type, element_ids),
+            required=not f.nullable,
+        )
+        for field_id, f in enumerate(arrow, start=1)
+    ]
+    fields.append(NestedField(top_level, DATE_COLUMN, DateType(), required=True))
     return Schema(*fields)
 
 

@@ -205,7 +205,15 @@ session's `player_key` comes from `sessions`.
 | `game_context` | `string` | tag from the backend-server mapping, e.g. `pvp`, `survival`, `lobby` |
 | `client_brand` | `string` | may be empty |
 | `started_at` | `timestamptz` | |
+| `cloudnet_task` | `string` | CloudNet task of the backend service, e.g. `Lobby`; empty when CloudNet does not know the server |
+| `cloudnet_groups` | `list<string>` (list required, elements optional) | CloudNet groups of the backend service; empty list when unknown |
+| `cloudnet_node` | `string` | CloudNet node that runs the backend service; empty when unknown |
+| `cloudnet_environment` | `string` | CloudNet `ServiceEnvironmentType`, e.g. `MINECRAFT_SERVER`; empty when unknown |
+| `stage` | `string` | `production` or `staging`; empty when CloudNet does not know the server |
 | `date` | `date` | partition column |
+
+The `cloudnet_*` and `stage` columns are empty (empty string, empty list) for segments reported by plugins that
+predate them, as `client_brand` is for an empty brand. They are not null.
 
 Table properties: `format-version` 2, `write.parquet.compression-codec` zstd, `corvus.lake-schema-version` 2.
 Partition spec: identity(`date`). Sort order: `session_id`, then `seq` for `events` and `raw`, `segment` for `segments`

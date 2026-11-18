@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -188,7 +189,9 @@ def session_start_env(
     return env
 
 
-def segment_env(session_id: bytes = SESSION, segment: int = 0) -> Any:
+def segment_env(
+    session_id: bytes = SESSION, segment: int = 0, cloudnet: Mapping[str, Any] | None = None
+) -> Any:
     env = pb.Envelope()
     s = env.segment_start
     s.session_id = session_id
@@ -197,6 +200,11 @@ def segment_env(session_id: bytes = SESSION, segment: int = 0) -> Any:
     s.game_context = "pvp"
     s.client_brand = "vanilla"
     s.started_at_unix_millis = int(T0.timestamp() * 1000)
+    for name, value in (cloudnet or {}).items():
+        if isinstance(value, list):
+            getattr(s, name).extend(value)
+        else:
+            setattr(s, name, value)
     return env
 
 

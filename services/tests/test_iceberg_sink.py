@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+import pyarrow as pa
 import pytest
 from pyiceberg.catalog.sql import SqlCatalog
 from pyiceberg.exceptions import CommitFailedException, NoSuchTableError
@@ -16,14 +17,21 @@ from pyiceberg.types import (
     BinaryType,
     DateType,
     FixedType,
+    ListType,
     LongType,
     NestedField,
+    StringType,
     TimestamptzType,
 )
 
 from corvus_services.buffer import TableBuffer
 from corvus_services.crypto import Keyring
-from corvus_services.iceberg_sink import ICEBERG_SCHEMAS, MAX_COMMIT_ATTEMPTS, IcebergSink
+from corvus_services.iceberg_sink import (
+    ICEBERG_SCHEMAS,
+    MAX_COMMIT_ATTEMPTS,
+    IcebergSink,
+    iceberg_schema,
+)
 from corvus_services.pipeline import IngestPipeline
 from corvus_services.schema import EVENT_ROW_BYTES, ICEBERG_LAYOUT, RAW_ROW_OVERHEAD
 from helpers import (
@@ -44,6 +52,13 @@ from helpers import (
 
 DAY = date(2026, 10, 15)
 OTHER_DAY = date(2026, 10, 16)
+CLOUDNET_FIELDS = {
+    "cloudnet_task": "Lobby-Staging",
+    "cloudnet_groups": ["Lobby", "Staging"],
+    "cloudnet_node": "node-1",
+    "cloudnet_environment": "MINECRAFT_SERVER",
+    "stage": "staging",
+}
 
 
 @pytest.fixture
@@ -253,6 +268,35 @@ def test_bootstrap_stores_session_times_as_timestamptz_and_ids_as_fixed_binary(c
     assert fields["session_id"].field_type == FixedType(16)
     assert fields["player_key"].field_type == FixedType(32)
     assert fields["player_key"].required
+
+
+def test_bootstrap_stores_cloudnet_groups_as_a_list_of_strings(catalog):
+    make_sink(catalog).bootstrap()
+
+    fields = {f.name: f for f in catalog.load_table("capture.segments").schema().fields}
+    groups = fields["cloudnet_groups"].field_type
+    assert isinstance(groups, ListType)
+    assert groups.element_type == StringType()
+    assert groups.element_required is False
+    assert fields["cloudnet_groups"].required
+    assert fields["stage"].field_type == StringType()
+
+
+def test_list_of_strings_maps_to_a_list_of_required_strings_with_its_own_element_id():
+    arrow = pa.schema(
+        [
+            pa.field("a", pa.string(), nullable=False),
+            pa.field("groups", pa.list_(pa.string()), nullable=False),
+            pa.field("b", pa.string(), nullable=False),
+        ]
+    )
+
+    schema = iceberg_schema(arrow)
+
+    assert [f.field_id for f in schema.fields] == [1, 2, 3, 4], "top-level fields, date last"
+    groups = schema.find_field("groups").field_type
+    assert isinstance(groups, ListType)
+    assert groups.element_id == 5, "the list element id comes after all top-level ids"
 
 
 def test_bootstrap_adds_player_key_to_events(catalog):
@@ -635,6 +679,40 @@ async def test_segment_row_carries_the_fields_of_the_segment_start(catalog):
         )
         assert row["started_at"] == T0
         assert row["date"] == DAY, "the date of the session start, as in raw"
+    finally:
+        rig.executor.shutdown()
+
+
+async def test_segment_with_cloudnet_fields_lands_them_in_the_segments_table(catalog):
+    rig = IcebergRig(catalog)
+    try:
+        await rig.send(session_start_env())
+        await rig.send(segment_env(segment=0, cloudnet=CLOUDNET_FIELDS))
+        await rig.pipeline.flush_all()
+
+        [row] = rig.rows("segments")
+        assert row["cloudnet_task"] == "Lobby-Staging"
+        assert row["cloudnet_groups"] == ["Lobby", "Staging"]
+        assert row["cloudnet_node"] == "node-1"
+        assert row["cloudnet_environment"] == "MINECRAFT_SERVER"
+        assert row["stage"] == "staging"
+    finally:
+        rig.executor.shutdown()
+
+
+async def test_segment_without_cloudnet_fields_stores_empty_values(catalog):
+    rig = IcebergRig(catalog)
+    try:
+        await rig.send(session_start_env())
+        await rig.send(segment_env(segment=0))
+        await rig.pipeline.flush_all()
+
+        [row] = rig.rows("segments")
+        assert row["cloudnet_task"] == ""
+        assert row["cloudnet_groups"] == []
+        assert row["cloudnet_node"] == ""
+        assert row["cloudnet_environment"] == ""
+        assert row["stage"] == ""
     finally:
         rig.executor.shutdown()
 
