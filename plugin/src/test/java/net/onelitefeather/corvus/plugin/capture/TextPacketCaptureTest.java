@@ -11,11 +11,13 @@ import net.onelitefeather.corvus.plugin.support.RecordingSink;
 import net.onelitefeather.corvus.plugin.vocab.CorvusPacket;
 import net.onelitefeather.corvus.proto.capture.v1.ConnectionState;
 import net.onelitefeather.corvus.proto.capture.v1.Frame;
+import net.onelitefeather.corvus.proto.capture.v1.SessionStart;
 import org.junit.jupiter.api.Test;
 
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Chat, commands, signing, player lists and names with the default options (complete raw stream). */
@@ -130,5 +132,38 @@ class TextPacketCaptureTest {
 
         assertEquals(0, sink.frames.size());
         assertEquals(1, f.metrics.droppedPrivacy.sum());
+    }
+
+    private static SessionStart sessionStart(RecordingSink sink) {
+        return sink.controls.stream()
+                .filter(WriteItem.Start.class::isInstance)
+                .map(w -> ((WriteItem.Start) w).envelope().getSessionStart())
+                .findFirst()
+                .orElseThrow();
+    }
+
+    @Test
+    void sessionDeclaresTextPacketsAndKeptNamesByDefault() {
+        RecordingSink sink = new RecordingSink();
+        EngineFixture f = EngineFixture.withSink(sink);
+
+        f.engine.onPacket(new FakePacketView().type(PacketType.Play.Client.CHAT_MESSAGE));
+
+        assertTrue(sessionStart(sink).getTextPacketsCaptured(), "default capture records chat");
+        assertTrue(sessionStart(sink).getNamesKept(), "default capture keeps names");
+    }
+
+    @Test
+    void sessionDeclaresNoTextPacketsUnderDropAndNoNamesUnderRedaction() {
+        RecordingSink dropSink = new RecordingSink();
+        EngineFixture.withSink(dropSink, new PrivacyOptions(PrivacyOptions.TextPackets.DROP, false))
+                .engine.onPacket(new FakePacketView().type(PacketType.Play.Client.CHAT_MESSAGE));
+        assertFalse(sessionStart(dropSink).getTextPacketsCaptured());
+
+        RecordingSink redactSink = new RecordingSink();
+        EngineFixture.withSink(redactSink, REDACT)
+                .engine.onPacket(new FakePacketView().type(PacketType.Play.Client.CHAT_MESSAGE));
+        assertFalse(sessionStart(redactSink).getNamesKept());
+        assertTrue(sessionStart(redactSink).getTextPacketsCaptured());
     }
 }

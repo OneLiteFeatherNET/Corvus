@@ -33,6 +33,12 @@ message SessionStart {
   string proxy_id = 6;
   string plugin_version = 7;
   int64 started_at_unix_millis = 8;
+  // Capture policy of the session (absent, hence false, in captures written before this field existed). The
+  // analyzer reports the text packets of a session that declares them as expected, not as violations.
+  // True when chat, commands, signing and player lists were recorded (capture.text_packets = "full").
+  bool text_packets_captured = 9;
+  // True when names and free text stayed in the payloads (capture.redact_names = false).
+  bool names_kept = 10;
 }
 
 // Emitted when the player connects to a backend server (first join and every switch).

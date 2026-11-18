@@ -170,6 +170,8 @@ public final class CaptureEngine {
                 .setProxyId(settings.proxyId())
                 .setPluginVersion(settings.pluginVersion())
                 .setStartedAtUnixMillis(session.startedAtMillis())
+                .setTextPacketsCaptured(settings.privacy().textPackets() == PrivacyOptions.TextPackets.FULL)
+                .setNamesKept(!settings.privacy().redactNames())
                 .build();
         sink.offerControl(new WriteItem.Start(session, Envelope.newBuilder().setSessionStart(start).build()));
         metrics.sessionsStarted.increment();
