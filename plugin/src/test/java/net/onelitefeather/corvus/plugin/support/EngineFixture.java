@@ -3,6 +3,7 @@ package net.onelitefeather.corvus.plugin.support;
 import net.onelitefeather.corvus.plugin.capture.CaptureEngine;
 import net.onelitefeather.corvus.plugin.capture.CaptureSink;
 import net.onelitefeather.corvus.plugin.capture.GameContextMapper;
+import net.onelitefeather.corvus.plugin.capture.ServiceMetadataSource;
 import net.onelitefeather.corvus.plugin.capture.Metrics;
 import net.onelitefeather.corvus.plugin.config.CorvusConfig;
 import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
@@ -33,6 +34,13 @@ public final class EngineFixture {
 
     public CaptureSink sink;
     public CaptureEngine engine;
+    private ServiceMetadataSource metadata = ServiceMetadataSource.NONE;
+
+    /** Sets the orchestrator source used by the next {@code build}. */
+    public EngineFixture withMetadata(ServiceMetadataSource source) {
+        this.metadata = source;
+        return this;
+    }
 
     public static EngineFixture withSink(CaptureSink sink) {
         return withSink(sink, PrivacyOptions.DEFAULT);
@@ -65,6 +73,7 @@ public final class EngineFixture {
                 key == null ? null : new Pseudonymizer(key),
                 filter,
                 new GameContextMapper(Map.of("lobby", "lobby"), "unknown"),
+                metadata,
                 sink, nanos::get, wallClock,
                 () -> {
                     byte[] id = new byte[16];

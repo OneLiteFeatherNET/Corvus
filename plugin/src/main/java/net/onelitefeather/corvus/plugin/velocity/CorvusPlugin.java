@@ -27,6 +27,7 @@ import net.onelitefeather.corvus.plugin.capture.EnvelopeTransport;
 import net.onelitefeather.corvus.plugin.capture.FileTransport;
 import net.onelitefeather.corvus.plugin.capture.NatsTransport;
 import net.onelitefeather.corvus.plugin.capture.GameContextMapper;
+import net.onelitefeather.corvus.plugin.cloudnet.CloudNetAvailability;
 import net.onelitefeather.corvus.plugin.capture.Metrics;
 import net.onelitefeather.corvus.plugin.capture.StatsReporter;
 import net.onelitefeather.corvus.plugin.capture.WriterThread;
@@ -176,6 +177,8 @@ public final class CorvusPlugin {
                 new PlayerFilter(config.listMode(), config.allowlist(), config.blocklist(), this::syncedBlocked),
                 new GameContextMapper(config.serverContexts(), config.defaultGameContext(),
                         config.stripInstanceSuffix()),
+                CloudNetAvailability.load(CorvusPlugin.class.getClassLoader(), InstantSource.system(),
+                        logger::info, logger::warn),
                 queue, nano, InstantSource.system(),
                 () -> {
                     byte[] id = new byte[16];

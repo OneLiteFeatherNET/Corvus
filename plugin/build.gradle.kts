@@ -39,6 +39,9 @@ dependencies {
     compileOnly("com.google.code.gson:gson:2.15.0")
     compileOnly("io.netty:netty-buffer:$nettyVersion")
     compileOnly("io.netty:netty-transport:$nettyVersion")
+    // Optional: CloudNet service metadata when the proxy runs as a CloudNet v4 service. Matches the production
+    // CloudNet version. compileOnly keeps it out of the shaded jar; cloudnet/CloudNetAvailability detects it at runtime.
+    compileOnly("eu.cloudnetservice.cloudnet:driver-api:4.0.0-RC17")
 
     testImplementation("com.velocitypowered:velocity-api:$velocityVersion")
     testImplementation("com.github.retrooper:packetevents-api:$packetEventsVersion")

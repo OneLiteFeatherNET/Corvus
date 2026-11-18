@@ -7,6 +7,7 @@ import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
 import net.onelitefeather.corvus.plugin.privacy.PrivacyOptions;
 import net.onelitefeather.corvus.plugin.support.EngineFixture;
 import net.onelitefeather.corvus.plugin.support.FakePacketView;
+import net.onelitefeather.corvus.plugin.support.FakeServiceMetadataSource;
 import net.onelitefeather.corvus.plugin.support.RecordingSink;
 import net.onelitefeather.corvus.plugin.vocab.CorvusPacket;
 import net.onelitefeather.corvus.proto.capture.v1.Frame;
@@ -18,6 +19,7 @@ import net.onelitefeather.corvus.plugin.score.PseudonymDirectory;
 import net.onelitefeather.corvus.plugin.score.RateLimitedLog;
 
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -307,6 +309,54 @@ class CaptureEngineTest {
         assertEquals(1, first.getSegment());
         assertEquals("unknown", second.getGameContext());
         assertEquals(2, second.getSegment());
+    }
+
+    @Test
+    void backendConnectFillsCloudNetFieldsAndStage() {
+        RecordingSink sink = new RecordingSink();
+        var orchestrator = new FakeServiceMetadataSource()
+                .service("Slender-Staging-1", "Slender-Staging", List.of("Proxy", "Staging"));
+        EngineFixture f = new EngineFixture().withMetadata(orchestrator).build(sink, EngineFixture.KEY,
+                PayloadMode.SERVERBOUND, 2048, new PlayerFilter(CorvusConfig.ListMode.ALL, Set.of(), Set.of()),
+                PrivacyOptions.DEFAULT);
+        f.engine.onPacket(new FakePacketView());
+
+        f.engine.onBackendConnected(FakePacketView.PLAYER, "Slender-Staging-1", "vanilla");
+        f.engine.onBackendConnected(FakePacketView.PLAYER, "Tamias-Staging-1", null);
+
+        var known = ((WriteItem.Segment) sink.controls.get(1)).envelope().getSegmentStart();
+        assertEquals("slender", known.getGameContext());
+        assertEquals("staging", known.getStage());
+        assertEquals("Slender-Staging", known.getCloudnetTask());
+        assertEquals(List.of("Proxy", "Staging"), known.getCloudnetGroupsList());
+        assertEquals("node-1", known.getCloudnetNode());
+        assertEquals("MINECRAFT_SERVER", known.getCloudnetEnvironment());
+        assertEquals("Slender-Staging-1", known.getBackendServer());
+        assertEquals(List.of("Slender-Staging-1", "Tamias-Staging-1"), orchestrator.lookups);
+
+        var unknown = ((WriteItem.Segment) sink.controls.get(2)).envelope().getSegmentStart();
+        assertEquals("unknown", unknown.getGameContext());
+        assertEquals("", unknown.getStage());
+        assertEquals("", unknown.getCloudnetTask());
+        assertEquals(0, unknown.getCloudnetGroupsCount());
+        assertEquals("", unknown.getCloudnetNode());
+        assertEquals("", unknown.getCloudnetEnvironment());
+    }
+
+    @Test
+    void failingOrchestratorLeavesSegmentWithListOnlyFields() {
+        RecordingSink sink = new RecordingSink();
+        EngineFixture f = new EngineFixture()
+                .withMetadata(new FakeServiceMetadataSource().failingWith(new IllegalStateException("down")))
+                .build(sink, EngineFixture.KEY, PayloadMode.SERVERBOUND, 2048,
+                        new PlayerFilter(CorvusConfig.ListMode.ALL, Set.of(), Set.of()), PrivacyOptions.DEFAULT);
+        f.engine.onPacket(new FakePacketView());
+
+        f.engine.onBackendConnected(FakePacketView.PLAYER, "Lobby", "vanilla");
+
+        var segment = ((WriteItem.Segment) sink.controls.get(1)).envelope().getSegmentStart();
+        assertEquals("lobby", segment.getGameContext(), "the list still applies when the orchestrator fails");
+        assertEquals("", segment.getStage());
     }
 
     @Test
