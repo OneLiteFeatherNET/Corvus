@@ -7,8 +7,9 @@ import net.onelitefeather.corvus.proto.capture.v1.ConnectionState;
 import java.util.Set;
 
 /**
- * Decides which packets must never be recorded. Chat, commands, signing, chat sessions, completions and
- * packets carrying other players' names/UUIDs are dropped before any byte is copied.
+ * Decides which packets must not be recorded. Handshake, status and login frames are never recorded. The text
+ * bearing play types (chat, commands, signing, chat sessions, completions, player lists) are dropped only when
+ * {@code capture.text_packets = "drop"}; by default they are recorded, see {@link PrivacyOptions}.
  */
 public final class PrivacyFilter {
 
@@ -43,17 +44,24 @@ public final class PrivacyFilter {
     private PrivacyFilter() {
     }
 
-    /** The packet types that are always dropped (play and configuration). */
+    /** The packet types that are private under {@link PrivacyOptions#ANALYSIS} (play and configuration). */
     public static Set<PacketTypeCommon> privateTypes() {
         return PRIVATE_TYPES;
     }
 
-    /** True if a frame of this type/state must not be recorded at all (counted as dropped_privacy). */
-    public static boolean isPrivate(PacketTypeCommon type, ConnectionState state) {
+    /**
+     * True if a frame of this type/state must not be recorded at all (counted as dropped_privacy). Handshake,
+     * status and login frames always are; text bearing types only with {@link PrivacyOptions.TextPackets#DROP}.
+     */
+    public static boolean isPrivate(PacketTypeCommon type, ConnectionState state,
+                                    PrivacyOptions.TextPackets textPackets) {
         if (state != ConnectionState.CONNECTION_STATE_PLAY && state != ConnectionState.CONNECTION_STATE_CONFIGURATION) {
             // handshake (server address), status and login (name, UUID) never reach the data lake
             return true;
         }
-        return type == null || PRIVATE_TYPES.contains(type);
+        if (type == null) {
+            return true;
+        }
+        return textPackets == PrivacyOptions.TextPackets.DROP && PRIVATE_TYPES.contains(type);
     }
 }

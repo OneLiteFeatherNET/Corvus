@@ -137,6 +137,21 @@ class Vocabulary:
         return Denylist(frozenset(e.id for e in self.entries.values() if e.private))
 
 
+EXPECTED_TEXT = "text_packets_captured"
+EXPECTED_NAMES = "names_kept"
+
+# Credential material: stays a violation even where names are kept.
+_ALWAYS_STRIPPED_NAMES = frozenset({"C_COOKIE_RESPONSE"})
+
+
+@dataclass(frozen=True)
+class CaptureDeclaration:
+    """Capture policy declared in a session's ``SessionStart``; older captures declare none."""
+
+    text_captured: bool = False  # chat, commands, signing and player lists were recorded
+    names_kept: bool = False  # names and free text stayed in the payloads
+
+
 @dataclass(frozen=True)
 class PayloadCheck:
     """Checks recorded payloads against the vocabulary's payload policy.
@@ -147,6 +162,35 @@ class PayloadCheck:
 
     vocabulary: Vocabulary
     mode: str = "serverbound"
+
+    def expected(
+        self,
+        declaration: CaptureDeclaration | None,
+        direction: str,
+        packet_type: int,
+        payload_size: int,
+    ) -> str | None:
+        """Reason if the frame is a text or name packet that its session declares as captured.
+
+        Such frames are reported as expected, not as violations: the analysis policy still
+        excludes them from the
+        models. Frames of sessions without a declaration never get an expectation.
+        """
+        if declaration is None or not packet_type or self.mode == "none":
+            return None
+        entry = self.vocabulary.entries.get(packet_type)
+        if entry is None:
+            return None
+        if entry.private and declaration.text_captured:
+            return EXPECTED_TEXT
+        if (
+            declaration.names_kept
+            and payload_size
+            and entry.payload_policy == "stripped"
+            and entry.name not in _ALWAYS_STRIPPED_NAMES
+        ):
+            return EXPECTED_NAMES
+        return None
 
     def violation(self, direction: str, packet_type: int, payload_size: int) -> str | None:
         """Reason string if a frame carries a payload its policy forbids, else None."""
@@ -217,15 +261,22 @@ class PrivacyFindings:
     counts: dict[str, int] = field(default_factory=dict)
     samples: list[str] = field(default_factory=list)
     max_samples: int = 20
+    # Informational only: text and name packets that sessions declare as captured (never a failure).
+    expected: dict[str, int] = field(default_factory=dict)
 
     def add(self, reason: str, where: str) -> None:
         self.counts[reason] = self.counts.get(reason, 0) + 1
         if len(self.samples) < self.max_samples:
             self.samples.append(f"{reason}: {where}")
 
+    def add_expected(self, reason: str) -> None:
+        self.expected[reason] = self.expected.get(reason, 0) + 1
+
     def merge(self, other: PrivacyFindings) -> None:
         for reason, count in other.counts.items():
             self.counts[reason] = self.counts.get(reason, 0) + count
+        for reason, count in other.expected.items():
+            self.expected[reason] = self.expected.get(reason, 0) + count
         room = self.max_samples - len(self.samples)
         if room > 0:
             self.samples.extend(other.samples[:room])

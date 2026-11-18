@@ -6,6 +6,7 @@ import net.onelitefeather.corvus.plugin.capture.GameContextMapper;
 import net.onelitefeather.corvus.plugin.capture.Metrics;
 import net.onelitefeather.corvus.plugin.config.CorvusConfig;
 import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
+import net.onelitefeather.corvus.plugin.privacy.PrivacyOptions;
 import net.onelitefeather.corvus.plugin.privacy.PlayerFilter;
 import net.onelitefeather.corvus.plugin.privacy.PseudonymKey;
 import net.onelitefeather.corvus.plugin.privacy.Pseudonymizer;
@@ -34,7 +35,12 @@ public final class EngineFixture {
     public CaptureEngine engine;
 
     public static EngineFixture withSink(CaptureSink sink) {
-        return new EngineFixture().build(sink, KEY, PayloadMode.SERVERBOUND, 2048);
+        return withSink(sink, PrivacyOptions.DEFAULT);
+    }
+
+    public static EngineFixture withSink(CaptureSink sink, PrivacyOptions privacy) {
+        return new EngineFixture().build(sink, KEY, PayloadMode.SERVERBOUND, 2048,
+                new PlayerFilter(CorvusConfig.ListMode.ALL, Set.of(), Set.of()), privacy);
     }
 
     public static EngineFixture withoutKey(CaptureSink sink) {
@@ -48,9 +54,14 @@ public final class EngineFixture {
 
     public EngineFixture build(CaptureSink sink, PseudonymKey key, PayloadMode payloadMode, int maxPayload,
                                PlayerFilter filter) {
+        return build(sink, key, payloadMode, maxPayload, filter, PrivacyOptions.DEFAULT);
+    }
+
+    public EngineFixture build(CaptureSink sink, PseudonymKey key, PayloadMode payloadMode, int maxPayload,
+                               PlayerFilter filter, PrivacyOptions privacy) {
         this.sink = sink;
         this.engine = new CaptureEngine(
-                new CaptureEngine.Settings(payloadMode, maxPayload, "proxy-test", "0.0.0-test"),
+                new CaptureEngine.Settings(payloadMode, maxPayload, "proxy-test", "0.0.0-test", privacy),
                 key == null ? null : new Pseudonymizer(key),
                 filter,
                 new GameContextMapper(Map.of("lobby", "lobby"), "unknown"),

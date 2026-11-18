@@ -4,6 +4,7 @@ import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import net.onelitefeather.corvus.plugin.config.CorvusConfig;
 import net.onelitefeather.corvus.plugin.privacy.PlayerFilter;
 import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
+import net.onelitefeather.corvus.plugin.privacy.PrivacyOptions;
 import net.onelitefeather.corvus.plugin.support.EngineFixture;
 import net.onelitefeather.corvus.plugin.support.FakePacketView;
 import net.onelitefeather.corvus.plugin.support.RecordingSink;
@@ -211,14 +212,24 @@ class CaptureEngineTest {
     }
 
     @Test
-    void signUpdatePayloadIsStrippedButTheFrameIsKept() {
+    void signUpdatePayloadIsStrippedWhenNamesAreRedactedButTheFrameIsKept() {
         RecordingSink sink = new RecordingSink();
-        EngineFixture f = EngineFixture.withSink(sink);
+        EngineFixture f = EngineFixture.withSink(sink, new PrivacyOptions(PrivacyOptions.TextPackets.FULL, true));
 
         f.engine.onPacket(new FakePacketView().type(PacketType.Play.Client.UPDATE_SIGN).payload(new byte[]{1, 2}));
 
         assertTrue(onlyFrame(sink).getPayload().isEmpty());
         assertEquals(CorvusPacket.C_UPDATE_SIGN.id(), onlyFrame(sink).getPacketType());
+    }
+
+    @Test
+    void signUpdatePayloadIsRecordedByDefault() {
+        RecordingSink sink = new RecordingSink();
+        EngineFixture f = EngineFixture.withSink(sink);
+
+        f.engine.onPacket(new FakePacketView().type(PacketType.Play.Client.UPDATE_SIGN).payload(new byte[]{1, 2}));
+
+        assertEquals(2, onlyFrame(sink).getPayload().size());
     }
 
     @Test

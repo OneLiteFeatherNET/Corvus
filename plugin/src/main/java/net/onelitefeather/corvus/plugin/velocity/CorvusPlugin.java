@@ -42,6 +42,7 @@ import net.onelitefeather.corvus.plugin.score.ScoreRegistry;
 import net.onelitefeather.corvus.plugin.pe.CorvusPacketListener;
 import net.onelitefeather.corvus.plugin.privacy.KeyLoader;
 import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
+import net.onelitefeather.corvus.plugin.privacy.PrivacyOptions;
 import net.onelitefeather.corvus.plugin.privacy.PlayerFilter;
 import net.onelitefeather.corvus.plugin.privacy.PseudonymKey;
 import net.onelitefeather.corvus.plugin.privacy.Pseudonymizer;
@@ -56,6 +57,7 @@ import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.InstantSource;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -123,6 +125,12 @@ public final class CorvusPlugin {
             return;
         }
 
+        logger.info("capture.text_packets = \"{}\", capture.redact_names = {}: {}",
+                config.privacy().textPackets().name().toLowerCase(Locale.ROOT),
+                config.privacy().redactNames(),
+                config.privacy().textPackets() == PrivacyOptions.TextPackets.FULL
+                        ? "chat, commands, signing and player lists are captured"
+                        : "chat, commands, signing and player lists are dropped");
         if (config.payloadMode() == PayloadMode.ALL) {
             logger.warn("capture.raw_payloads = \"all\": payloads of clientbound packets that may contain names "
                     + "and UUIDs of other players are recorded. Use for local debugging only, never for data "
@@ -162,7 +170,7 @@ public final class CorvusPlugin {
         SecureRandom random = new SecureRandom();
         engine = new CaptureEngine(
                 new CaptureEngine.Settings(config.payloadMode(), config.maxPayloadBytes(), config.proxyId(),
-                        BuildConstants.VERSION),
+                        BuildConstants.VERSION, config.privacy()),
                 natsBlocked && config.sinkType() == CorvusConfig.SinkType.NATS ? null
                         : key.map(Pseudonymizer::new).orElse(null),
                 new PlayerFilter(config.listMode(), config.allowlist(), config.blocklist(), this::syncedBlocked),

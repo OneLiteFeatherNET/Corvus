@@ -11,10 +11,12 @@ Rules:
 - `0` means "unmapped" (the frame is still recorded, with its wire id and raw payload).
 - Ranges: `1-99` serverbound play, `100-199` clientbound play, `200-299` configuration. New entries take the
   next free number in their range.
-- Privacy-dropped types (chat, commands, signing, player lists; see `PrivacyFilter`) also have ids. The frames
-  are never recorded; the ids exist so the analyzer can deny them. Every type in `PrivacyFilter`, in the
-  payload-stripped set and in the clientbound payload allowlist (see `PayloadPolicy`) must have an id; a unit
-  test enforces this.
+- Privacy-dropped types (chat, commands, signing, player lists; see `PrivacyFilter`) also have ids. The export
+  describes the analysis policy (`PrivacyOptions.ANALYSIS`: these frames are private, names are stripped), which
+  is what models may train on. It does not follow the capture settings: the plugin may record these frames
+  (`capture.text_packets`, `capture.redact_names`), the analyzer and the models still exclude them. Every type in
+  `PrivacyFilter`, in the payload-stripped set and in the clientbound payload allowlist (see `PayloadPolicy`) must
+  have an id; a unit test enforces this.
 - Packet types that are not in the vocabulary are recorded with id `0`, and their payload is only kept in
   `capture.raw_payloads = "all"` (fail closed).
 

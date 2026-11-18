@@ -17,6 +17,8 @@ from corvus_ml.model import (
     SessionSummary,
 )
 from corvus_ml.privacy import (
+    EXPECTED_TEXT,
+    CaptureDeclaration,
     Denylist,
     PayloadCheck,
     PrivacyFindings,
@@ -78,6 +80,7 @@ class _Session:
     has_end: bool = False
     end_counters: Counters | None = None
     last_seq: int | None = None
+    declaration: CaptureDeclaration = field(default_factory=CaptureDeclaration)
     max_offset: int = 0
     segments: dict[int, _Segment] = field(default_factory=dict)
 
@@ -150,12 +153,22 @@ def _record_frames(
             seg.max_offset = frame.offset_nanos
         session.max_offset = max(session.max_offset, frame.offset_nanos)
 
+        expected = (
+            payload_check.expected(session.declaration, direction, frame.packet_type, size)
+            if payload_check
+            else None
+        )
         reason = denylist.hit(direction, state, frame.packet_type, frame.wire_packet_id)
         if reason:
-            findings.add(reason, f"{file_name} seq={frame.seq} {direction}/{state}")
+            if expected == EXPECTED_TEXT and reason == "denylisted_packet_type":
+                findings.add_expected(expected)
+            else:
+                findings.add(reason, f"{file_name} seq={frame.seq} {direction}/{state}")
         if payload_check:
             reason = payload_check.violation(direction, frame.packet_type, size)
-            if reason:
+            if reason and expected:
+                findings.add_expected(expected)
+            elif reason:
                 findings.add(
                     reason,
                     f"{file_name} seq={frame.seq} {direction}/{state} type={frame.packet_type}",
@@ -278,6 +291,9 @@ def aggregate_stream(
             s.observed_protocol = m.observed_protocol_version
             s.plugin_version = m.plugin_version
             s.started_ms = m.started_at_unix_millis
+            s.declaration = CaptureDeclaration(
+                text_captured=bool(m.text_packets_captured), names_kept=bool(m.names_kept)
+            )
             _scan_strings(m, f"{name}.session_start", result.privacy)
         elif kind == "segment_start":
             m = env.segment_start

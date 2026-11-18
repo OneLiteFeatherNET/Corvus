@@ -7,19 +7,21 @@ import net.onelitefeather.corvus.proto.capture.v1.ConnectionState;
 import net.onelitefeather.corvus.proto.capture.v1.Direction;
 
 import java.util.Set;
+import java.util.stream.Stream;
 
 /**
- * Pure decision: may the raw payload of a packet be written to the capture? Payloads of other players' packets
- * (names, UUIDs in scoreboard, teams, titles, spawn, boss bars...) and of text-bearing serverbound packets must
- * never reach the data lake.
+ * Pure decision: may the raw payload of a packet be written to the capture? The decision depends on the configured
+ * {@link PayloadMode} and on {@link PrivacyOptions}. The default options are the capture defaults (complete raw
+ * stream, names kept). The one-argument constructor and {@link #levelOf(PacketTypeCommon, Direction, ConnectionState)}
+ * use {@link PrivacyOptions#ANALYSIS}, the policy of the committed vocabulary export.
  */
 public final class PayloadPolicy {
 
     /** Per-type payload level; {@link #json()} is the value written to {@code vocabulary.json}. */
     public enum Level {
-        /** The whole frame is dropped (chat, commands, player lists...), see {@link PrivacyFilter}. */
+        /** The whole frame is dropped (chat, commands, player lists under the drop setting, login...). */
         FRAME_DROPPED("frame_dropped"),
-        /** The frame is recorded but its payload is always stripped, in every mode. */
+        /** The frame is recorded but its payload is always stripped. */
         STRIPPED("stripped"),
         /** Payload recorded in modes {@code serverbound} and {@code all}. */
         DEFAULT("default"),
@@ -37,11 +39,16 @@ public final class PayloadPolicy {
         }
     }
 
+    /** Credential material: stripped in every setting. */
+    private static final Set<PacketTypeCommon> ALWAYS_STRIPPED_SERVERBOUND = Set.of(
+            // cookies carry tokens and identities defined by the server (credential material, not names)
+            PacketType.Play.Client.COOKIE_RESPONSE);
+
     /**
-     * Serverbound play types that carry free text, item data with custom names, or other identifiers. Their
-     * payload is stripped in every mode.
+     * Serverbound play types that carry free text, item data with custom names, or other identifiers. Their payload
+     * is stripped under {@link PrivacyOptions#ANALYSIS} and recorded when {@code redact_names = false}.
      */
-    private static final Set<PacketTypeCommon> STRIPPED_SERVERBOUND = Set.of(
+    private static final Set<PacketTypeCommon> REDACTABLE_SERVERBOUND = Set.of(
             PacketType.Play.Client.UPDATE_SIGN,
             PacketType.Play.Client.EDIT_BOOK,
             PacketType.Play.Client.NAME_ITEM,
@@ -50,8 +57,6 @@ public final class PayloadPolicy {
             PacketType.Play.Client.UPDATE_COMMAND_BLOCK_MINECART,
             PacketType.Play.Client.UPDATE_STRUCTURE_BLOCK,
             PacketType.Play.Client.UPDATE_JIGSAW_BLOCK,
-            // cookies are opaque server-defined data (tokens, identities)
-            PacketType.Play.Client.COOKIE_RESPONSE,
             // test blocks and game rules carry free-text names/values
             PacketType.Play.Client.SET_TEST_BLOCK,
             PacketType.Play.Client.TEST_INSTANCE_BLOCK_ACTION,
@@ -63,6 +68,10 @@ public final class PayloadPolicy {
             // inventory clicks carry item stacks, which can hold custom names, lore and skull owners
             PacketType.Play.Client.CLICK_WINDOW,
             PacketType.Play.Client.CREATIVE_INVENTORY_ACTION);
+
+    /** Every serverbound play type whose payload the analysis policy strips. */
+    private static final Set<PacketTypeCommon> STRIPPED_SERVERBOUND = Set.copyOf(Stream.concat(
+            ALWAYS_STRIPPED_SERVERBOUND.stream(), REDACTABLE_SERVERBOUND.stream()).toList());
 
     /** Clientbound motion packets: entity ids and numbers only, no names or UUIDs. */
     private static final Set<PacketTypeCommon> CLIENTBOUND_ALLOWLIST = Set.of(
@@ -76,9 +85,16 @@ public final class PayloadPolicy {
             PacketType.Play.Server.PLAYER_POSITION_AND_LOOK);
 
     private final PayloadMode mode;
+    private final PrivacyOptions options;
 
+    /** The analysis policy ({@link PrivacyOptions#ANALYSIS}). */
     public PayloadPolicy(PayloadMode mode) {
+        this(mode, PrivacyOptions.ANALYSIS);
+    }
+
+    public PayloadPolicy(PayloadMode mode, PrivacyOptions options) {
         this.mode = mode;
+        this.options = options;
     }
 
     public static Set<PacketTypeCommon> strippedServerboundTypes() {
@@ -89,31 +105,40 @@ public final class PayloadPolicy {
         return CLIENTBOUND_ALLOWLIST;
     }
 
-    /** The level of a packet type, independent of the configured mode. */
+    /** The level of a packet type under the analysis policy, independent of the capture settings. */
     public static Level levelOf(PacketTypeCommon type, Direction direction, ConnectionState state) {
-        if (PrivacyFilter.isPrivate(type, state)) {
+        return levelOf(type, direction, state, PrivacyOptions.ANALYSIS);
+    }
+
+    /** The level of a packet type under the given privacy options, independent of the configured mode. */
+    public static Level levelOf(PacketTypeCommon type, Direction direction, ConnectionState state,
+                                PrivacyOptions options) {
+        if (PrivacyFilter.isPrivate(type, state, options.textPackets())) {
             return Level.FRAME_DROPPED;
         }
         if (state != ConnectionState.CONNECTION_STATE_PLAY) {
             return Level.ALL_ONLY;
         }
+        if (ALWAYS_STRIPPED_SERVERBOUND.contains(type)) {
+            return Level.STRIPPED;
+        }
+        if (REDACTABLE_SERVERBOUND.contains(type) || PrivacyFilter.privateTypes().contains(type)) {
+            return options.redactNames() ? Level.STRIPPED : Level.DEFAULT;
+        }
         if (direction == Direction.DIRECTION_SERVERBOUND) {
-            if (STRIPPED_SERVERBOUND.contains(type)) {
-                return Level.STRIPPED;
-            }
             // unknown (unmapped) serverbound types are not vetted for free text: fail closed
             return CorvusPacket.idOf(type) != 0 ? Level.DEFAULT : Level.ALL_ONLY;
         }
         return CLIENTBOUND_ALLOWLIST.contains(type) ? Level.DEFAULT : Level.ALL_ONLY;
     }
 
-    /** True if the payload of this packet may be recorded under the configured mode. */
+    /** True if the payload of this packet may be recorded under the configured mode and options. */
     public boolean recordsPayload(PacketTypeCommon type, Direction direction, ConnectionState state) {
         return switch (mode) {
             case NONE -> false;
-            case SERVERBOUND -> levelOf(type, direction, state) == Level.DEFAULT;
+            case SERVERBOUND -> levelOf(type, direction, state, options) == Level.DEFAULT;
             case ALL -> {
-                Level level = levelOf(type, direction, state);
+                Level level = levelOf(type, direction, state, options);
                 yield level == Level.DEFAULT || level == Level.ALL_ONLY;
             }
         };

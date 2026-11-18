@@ -167,6 +167,7 @@ def build_report(result: FileResult) -> dict:
             "denylist_active": result.denylist_active,
             "violations": dict(result.privacy.counts),
             "samples": result.privacy.samples,
+            "expected": dict(result.privacy.expected),
         },
     }
 

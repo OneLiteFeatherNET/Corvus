@@ -1,6 +1,7 @@
 package net.onelitefeather.corvus.plugin.config;
 
 import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
+import net.onelitefeather.corvus.plugin.privacy.PrivacyOptions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -23,6 +24,38 @@ class CorvusConfigTest {
         assertEquals("unknown", c.defaultGameContext());
         assertEquals("lobby", c.serverContexts().get("lobby"));
         assertEquals("k1", c.keyId());
+        assertEquals(new PrivacyOptions(PrivacyOptions.TextPackets.FULL, false), c.privacy());
+    }
+
+    @Test
+    void textPacketsAndRedactNamesDefaultToCompleteCapture() {
+        PrivacyOptions p = CorvusConfig.parse("proxy_id = \"x\"\n").privacy();
+
+        assertEquals(PrivacyOptions.TextPackets.FULL, p.textPackets());
+        assertFalse(p.redactNames());
+    }
+
+    @Test
+    void textPacketsDropIsParsed() {
+        assertEquals(PrivacyOptions.TextPackets.DROP,
+                CorvusConfig.parse("[capture]\ntext_packets = \"drop\"\n").privacy().textPackets());
+    }
+
+    @Test
+    void redactNamesTrueIsParsed() {
+        assertTrue(CorvusConfig.parse("[capture]\nredact_names = true\n").privacy().redactNames());
+    }
+
+    @Test
+    void unknownTextPacketsValueIsRejected() {
+        assertThrows(IllegalArgumentException.class,
+                () -> CorvusConfig.parse("[capture]\ntext_packets = \"some\"\n"));
+    }
+
+    @Test
+    void redactNamesMustBeABoolean() {
+        assertThrows(IllegalArgumentException.class,
+                () -> CorvusConfig.parse("[capture]\nredact_names = \"yes\"\n"));
     }
 
     @Test

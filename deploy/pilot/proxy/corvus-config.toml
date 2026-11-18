@@ -20,10 +20,13 @@ allowlist = []
 blocklist = []
 
 [capture]
-# Privacy: "serverbound" records payload bytes of serverbound play packets (minus text-bearing types
-# such as signs, books, anvil names, plugin messages) and of a few clientbound motion packets.
-# Clientbound payloads would contain names and UUIDs of other players and are not kept.
-# Use "none" to record no payload bytes at all. "all" is for local debugging only.
+# Chat, commands, signing, player lists: "full" records them, the data lake keeps the complete raw stream
+# (plaintext, Polaris grants only). "drop" never records them.
+text_packets = "full"
+# Names and free text inside payloads: false records them, true strips the payload of such packets.
+redact_names = false
+# Raw payload bytes: "none", "serverbound" (serverbound play packets, the clientbound name and chat packets and a few
+# motion packets; other clientbound payloads such as chunks are not kept) or "all" (local debugging only).
 raw_payloads = "serverbound"
 max_payload_bytes = 2048
 queue_max_bytes = 67108864

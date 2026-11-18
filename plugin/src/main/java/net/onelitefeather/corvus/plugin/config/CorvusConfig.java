@@ -2,6 +2,7 @@ package net.onelitefeather.corvus.plugin.config;
 
 import com.moandjiezana.toml.Toml;
 import net.onelitefeather.corvus.plugin.privacy.PayloadMode;
+import net.onelitefeather.corvus.plugin.privacy.PrivacyOptions;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -21,6 +22,7 @@ public record CorvusConfig(
         Set<UUID> allowlist,
         Set<UUID> blocklist,
         PayloadMode payloadMode,
+        PrivacyOptions privacy,
         int maxPayloadBytes,
         long queueMaxBytes,
         int batchSize,
@@ -108,10 +110,16 @@ public record CorvusConfig(
             blocklist = []
 
             [capture]
+            # Chat, commands, message signing, player lists and chat session frames: "full" records them with
+            # their payload (default: the data lake keeps the complete raw stream). "drop" never records them.
+            text_packets = "full"
+            # Names, UUIDs and free text inside packet payloads: false (default) records them, true strips the
+            # payload of such packets (the frames are still recorded). Credential cookies are always stripped.
+            redact_names = false
             # Raw packet bytes to store: "none", "serverbound" or "all" (true = serverbound, false = none).
-            # "serverbound": serverbound play packets except text-bearing ones (signs, books, anvil names,
-            # plugin messages, command blocks...) plus a few clientbound motion packets. Other clientbound
-            # packets carry names and UUIDs of other players and never keep their payload.
+            # "serverbound": serverbound play packets, the clientbound packets that carry names or chat (only with
+            # redact_names = false, see above) and a few clientbound motion packets. Other clientbound packets
+            # (chunks, entities...) never keep their payload here.
             # "all" is for local debugging only and logs a warning at startup.
             raw_payloads = "serverbound"
             # Payloads longer than this are truncated (chunk data etc. are not useful and expensive).
@@ -230,7 +238,8 @@ public record CorvusConfig(
                 listMode,
                 uuids(toml.getList("players.allowlist")),
                 uuids(toml.getList("players.blocklist")),
-                PayloadMode.parse(rawPayloadsValue(toml)),
+                PayloadMode.parse(captureValue(toml, "raw_payloads")),
+                parsePrivacy(toml),
                 Math.max(0, maxPayload),
                 Math.max(1024L, toml.getLong("capture.queue_max_bytes", 64L * 1024 * 1024)),
                 (int) Math.max(1L, toml.getLong("capture.batch_size", 200L)),
@@ -302,9 +311,19 @@ public record CorvusConfig(
                 (int) Math.min(100_000L, Math.max(1L, toml.getLong("nats.partitions", (long) Nats.DEFAULT_PARTITIONS))));
     }
 
-    private static Object rawPayloadsValue(Toml toml) {
+    private static PrivacyOptions parsePrivacy(Toml toml) {
+        PrivacyOptions.TextPackets textPackets = PrivacyOptions.TextPackets.parse(captureValue(toml, "text_packets"));
+        Object redact = captureValue(toml, "redact_names");
+        if (redact != null && !(redact instanceof Boolean)) {
+            throw new IllegalArgumentException("capture.redact_names must be true or false, got: " + redact);
+        }
+        boolean redactNames = redact != null && (Boolean) redact;
+        return new PrivacyOptions(textPackets, redactNames);
+    }
+
+    private static Object captureValue(Toml toml, String key) {
         Toml capture = toml.getTable("capture");
-        return capture == null ? null : capture.toMap().get("raw_payloads");
+        return capture == null ? null : capture.toMap().get(key);
     }
 
     private static Set<UUID> uuids(List<Object> raw) {

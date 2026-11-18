@@ -108,11 +108,20 @@ Settings: `CORVUS_LAKE_FORMAT` (`parquet` | `iceberg`); with `iceberg`, these ar
 
 ### Privacy and retention
 
-* **`capture.raw` is personal data in plaintext.** Each row holds the packet payload exactly as the plugin sent it,
-  without any further filtering by ingest. Payloads can contain names, chat and command text, depending on what the
-  capture plugin records. The plugin still decides what it sends: `PrivacyFilter` drops chat, commands, signing and
-  player-list frames and `PayloadPolicy` strips the payload of text-bearing types (see `docs/pilot.md`, payload policy).
-  Ingest does not re-admit anything the plugin dropped.
+Decision of 2026-11-18 (maintainer): the lake keeps the complete raw packet stream, "wirklich alles".
+
+* **`capture.raw` is personal data in plaintext, including chat, commands and names.** Each row holds the packet
+  payload exactly as the plugin sent it. The plugin records chat, commands, message-signing frames and player lists
+  (`capture.text_packets = "full"`, the default) and keeps names, UUIDs and free text inside payloads
+  (`capture.redact_names = false`, the default). Ingest does not filter anything further. What the plugin sends is
+  described in `docs/pilot.md` (text packets, names and raw payload policy). Cookie responses (credential material)
+  stay stripped in every setting, and the handshake, status and login frames are never recorded.
+  An operator can switch back to `text_packets = "drop"` and `redact_names = true` in the plugin config; frames
+  captured before that switch keep their content.
+* **Names of other players are in the rows of the observing player.** Clientbound player list packets carry names and
+  UUIDs of players other than the session's player, and chat carries the sender's name. Erasing a player by
+  `player_key` removes the rows of that player's own sessions only. It does not remove that player's name from the
+  sessions of other players. Erasure has to cover both cases (see "Not covered yet").
 * **Access** is only through the Polaris grants on the `capture` namespace. Data files live in the `polaris-corvus`
   bucket and are reached through the catalog only; nothing copies `raw` out of the catalog.
 * **Retention is permanent.** No housekeeping job deletes Iceberg rows (housekeeping expires snapshots only). The
@@ -120,10 +129,12 @@ Settings: `CORVUS_LAKE_FORMAT` (`parquet` | `iceberg`); with `iceberg`, these ar
 * **Erasure** of a player removes the Iceberg rows by `player_key` (and by session for null-key orphans) in both
   tables, then expires the older snapshots and removes their files; see *Erasure in Iceberg* in section 2a. A completed
   erasure request in Iceberg mode means exactly that: the completion waits for the Iceberg step. The DEK deletion alone
-  does not count.
-* **Player attribution** is the pseudonym (section 3's HMAC, 32 bytes, `player_key`), never the Mojang UUID or name.
-  Frames of orphan sessions (no `SessionStart` seen) have a null `player_key` and a null `protocol_version`. They cannot
-  be attributed to a player, so they cannot be erased by player either.
+  does not count. It does not yet remove an erased player's name from the payloads of other players' rows (see
+  "Privacy and retention" above).
+* **Player attribution** is the pseudonym (section 3's HMAC, 32 bytes, `player_key`). The Mojang UUID and the name are
+  now also present in plaintext inside payloads (see above), so the pseudonym is no longer the only identifier in
+  the lake. Frames of orphan sessions (no `SessionStart` seen) have a null `player_key` and a null `protocol_version`.
+  They cannot be attributed to a player, so they cannot be erased by player either.
 
 ### Schema
 
@@ -227,8 +238,9 @@ snapshots with erased raw artefacts.
 ### Not covered yet
 
 Each is a separate step: backfill of the existing Parquet files into Iceberg, snapshot pins by Iceberg snapshot id,
-reading Iceberg `raw` in the ML jobs (`corvus-ml` reads the Parquet `raw` layout only), and a re-check of an erasure
-after its request completed (rows that land after the grace period are not seen again).
+reading Iceberg `raw` in the ML jobs (`corvus-ml` reads the Parquet `raw` layout only), a re-check of an erasure
+after its request completed (rows that land after the grace period are not seen again), and removal of an erased
+player's name from other players' payloads (see "Privacy and retention").
 
 ## 3. Keys and erasure
 

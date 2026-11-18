@@ -5,7 +5,7 @@ The pilot answers, on a real proxy with real clients:
 - real packet rates per player (connection state, direction, packet type, game context) and bytes/s,
 - drop rates of the capture queue,
 - whether frames are in the client's native protocol or the backend's (ViaVersion on Velocity),
-- that no chat or command packets are captured,
+- which chat and command packets are captured, as configured by `capture.text_packets` (default `full`),
 - that chat signing still works with the plugin installed.
 
 ## Prerequisites
@@ -145,25 +145,45 @@ addition to the UUID lists of `[players]`. The request carries `Authorization: B
   first success only the config lists apply.
 - `/corvus stats` shows `blocklist_size`, `blocklist_last_sync` and `blocklist_last_result`.
 
-### Raw payload policy (`capture.raw_payloads`)
+### Text packets, names and raw payload policy
 
-Clientbound packets such as scoreboard, teams, titles, spawn player, boss bars contain names and UUIDs
-of other players, so payload bytes are restricted. The setting is `none`, `serverbound` (default) or
-`all`; the old booleans still parse (`true` = `serverbound`, `false` = `none`).
+The lake keeps the complete raw packet stream, including chat, commands, message-signing frames and player names
+(decision of 2026-11-18, plaintext, see `data-lake.md` section 2a). Three settings control the capture:
+
+| Setting | Values | Default | Effect |
+| --- | --- | --- | --- |
+| `capture.text_packets` | `full`, `drop` | `full` | `full` records chat, commands, signing, chat sessions, tab completion, command tree, chat completions, previews and player lists (`PLAYER_INFO*`, which carry names and UUIDs). `drop` never records them (the behaviour before 2026-11-18). |
+| `capture.redact_names` | `true`, `false` | `false` | `false` records the payload of packets that carry names, UUIDs or free text. `true` keeps the frame and strips its payload. |
+| `capture.raw_payloads` | `none`, `serverbound`, `all` | `serverbound` | Which payloads are recorded at all (table below). |
+
+Both new settings are read at start-up and can be switched back without a release: set `text_packets = "drop"`
+and/or `redact_names = true` in `plugins/corvus/config.toml` and restart the proxy. Other values are rejected at
+start-up. The plugin logs the effective values at INFO.
 
 | Packet group | `none` | `serverbound` | `all` |
 | --- | --- | --- | --- |
-| Chat, commands, signing, tab completion, player info (see `PrivacyFilter`) | frame dropped | frame dropped | frame dropped |
-| Serverbound text-bearing play types (sign, book, anvil name, plugin message, command blocks, structure and jigsaw blocks, cookie response, test blocks, game rule, custom click action, spectate, inventory clicks) | no payload | no payload | no payload |
-| Other serverbound play types in the vocabulary | no payload | payload | payload |
-| Serverbound play types outside the vocabulary | no payload | no payload | payload |
-| Clientbound entity relative move (and rotation), rotation, head look, teleport, velocity, position sync, player position and look | no payload | payload | payload |
-| All other clientbound play types and all configuration packets | no payload | no payload | payload |
+| Handshake, status and login (name, UUID, server address) | frame never recorded | frame never recorded | frame never recorded |
+| Chat, commands, signing, chat sessions, completions, previews, command tree, player lists (`text_packets = full`) | frame, no payload | frame, payload | frame, payload |
+| Same group with `redact_names = true` | frame, no payload | frame, no payload | frame, no payload |
+| Same group with `text_packets = drop` | frame dropped | frame dropped | frame dropped |
+| Serverbound text and name bearing play types (sign, book, anvil name, plugin message, command blocks, structure and jigsaw blocks, test blocks, game rule, custom click action, spectate, inventory clicks) | frame, no payload | frame, payload | frame, payload |
+| Same group with `redact_names = true` | frame, no payload | frame, no payload | frame, no payload |
+| Cookie response (credential material) | frame, no payload | frame, no payload | frame, no payload |
+| Other serverbound play types in the vocabulary | frame, no payload | frame, payload | frame, payload |
+| Serverbound play types outside the vocabulary | frame, no payload | frame, no payload | frame, payload |
+| Clientbound motion (entity relative move and rotation, rotation, head look, teleport, velocity, position sync, player position and look) | frame, no payload | frame, payload | frame, payload |
+| All other clientbound play types and all configuration packets | frame, no payload | frame, no payload | frame, payload |
 
-Frames are always recorded with their packet type; only the payload bytes differ. `all` logs a WARN
-at startup and is for local debugging only: never feed such captures into the data lake.
-`Frame.payload_original_size` holds the size before truncation to `max_payload_bytes`; the analyzer
-reports the share of truncated payloads.
+Frames are recorded with their packet type; only the payload bytes differ. `serverbound` therefore also records the
+payloads of clientbound chat and player list packets (by default). It does not record clientbound payloads such as
+chunks, entities or scoreboards. `all` logs a WARN at startup and is for local debugging only.
+`Frame.payload_original_size` holds the size before truncation to `max_payload_bytes`; the analyzer reports the share
+of truncated payloads.
+
+Privacy note: with the defaults, player names, Mojang UUIDs and chat text appear in plaintext in the captures and in
+the lake. Access to the lake is only through the Polaris grants (`data-lake.md` section 2a). The analyzer and the ML
+jobs do not change with these settings: they apply the strict policy of the vocabulary export (see "Privacy check"),
+so captures recorded with the defaults contain frames that the analyzer reports and the models do not train on.
 
 ## Start
 
@@ -240,14 +260,22 @@ player-second; `per_player_frames_per_s` gives min/median/p95/max over player-se
 
 ### Privacy check
 
-The analyzer loads `proto/corvus/capture/v1/vocabulary.json` (exported from the plugin, kept in sync
-by `VocabularyJsonTest`) and fails when
+The analyzer loads `proto/corvus/capture/v1/vocabulary.json` (exported from the plugin with the analysis policy,
+kept in sync by `VocabularyJsonTest`) and fails when
 
-- a frame has a privacy-dropped packet type (chat, commands, signing, player lists),
-- a frame of a payload-stripped type (sign, book, ...) carries a payload,
+- a frame has a privacy-dropped packet type (chat, commands, signing, player lists) and its session does not declare
+  that it captured them,
+- a frame of a payload-stripped type (cookie response, or sign, book and similar when names are not kept) carries a
+  payload and its session does not declare that names were kept,
 - under the default policy a frame carries a payload outside the policy: any clientbound payload
   other than the motion allowlist, or a serverbound payload of a type that is not in the vocabulary,
 - any string field looks like a UUID or an IP address (the finding reports only the field).
+
+Each capture declares its capture policy in every session (`SessionStart.text_packets_captured` and
+`names_kept`, set by the plugin from `capture.text_packets` and `capture.redact_names`). A text or name packet of a
+session that declares it is reported under `expected` in the JSON report (informational, not a failure). Such
+frames are still excluded from the models: the analysis policy does not change. Captures without a declaration
+(recorded before the fields existed) are checked strictly, as before.
 
 `--payload-policy none|serverbound|all` states which `capture.raw_payloads` the captures were
 recorded with (default `serverbound`); only the `stripped` rule applies to `all`. `--vocabulary FILE`
@@ -267,7 +295,7 @@ Payload bytes are not scanned for identifiers; the payload policy is what keeps 
 | Corvus-caused kicks and errors | 0 |
 | Chat signing | signed chat and commands work on both servers, all clients, across server switches |
 | Drop rate (`queue_full / (captured + queue_full)`) | < 0.1 % under normal load, per context and overall |
-| Privacy check | analyzer exits 0 (vocabulary denylist and payload policy are always active) |
+| Privacy check | analyzer exits 0; text and name packets of sessions that declare them count as expected, not as violations |
 | Native protocol | `via_before_pe` and the version table understood; any translated frames reported as a finding |
 
 Also report: observed rates per player and context (these size the real pipeline), sequence gaps
