@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.7.0](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.6.0...v0.7.0) (2026-11-19)
+
+
+### Features
+
+* **plugin:** record cloudnet service metadata per segment ([#138](https://github.com/OneLiteFeatherNET/Corvus/issues/138)) ([dfc965f](https://github.com/OneLiteFeatherNET/Corvus/commit/dfc965f82835af718f464e4a97d4ac0a26c2b248))
+* **services:** store cloudnet service metadata in the segments table ([#142](https://github.com/OneLiteFeatherNET/Corvus/issues/142)) ([f278c77](https://github.com/OneLiteFeatherNET/Corvus/commit/f278c77f67d17cf7aa5cbc0e4e805a125df829fd))
+* **services:** write session and segment metadata to iceberg tables ([#139](https://github.com/OneLiteFeatherNET/Corvus/issues/139)) ([f53784f](https://github.com/OneLiteFeatherNET/Corvus/commit/f53784fa2e7b401e5379f4413178a9c5f1182709))
+
+
+### Bug Fixes
+
+* **deps:** pin the cloudnet driver to the production release ([#143](https://github.com/OneLiteFeatherNET/Corvus/issues/143)) ([d18029d](https://github.com/OneLiteFeatherNET/Corvus/commit/d18029df26bbb8be3d15c5bb35e53f8810c37a8c))
+* **deps:** update dependency eu.cloudnetservice.cloudnet:driver-api to v4.0.0-rc18-snapshot ([#140](https://github.com/OneLiteFeatherNET/Corvus/issues/140)) ([e6606c7](https://github.com/OneLiteFeatherNET/Corvus/commit/e6606c771a731006eb1f7e993d9779de85d6d7c2))
+
 ## [0.6.0](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.5.0...v0.6.0) (2026-11-18)
 
 
