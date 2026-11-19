@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.7.0...v0.7.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* **plugin:** look up the cloudnet service provider through the injection layer ([#144](https://github.com/OneLiteFeatherNET/Corvus/issues/144)) ([6f8bbc2](https://github.com/OneLiteFeatherNET/Corvus/commit/6f8bbc27c7a3fb8692205d1b67aef37edc82505e))
+
 ## [0.7.0](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.6.0...v0.7.0) (2026-11-19)
 
 
