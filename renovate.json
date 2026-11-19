@@ -2,5 +2,12 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "github>OneLiteFeatherNET/renovate:default(OneLiteFeatherNET/corvus-maintainers)"
+  ],
+  "packageRules": [
+    {
+      "description": "CloudNet driver must match the CloudNet release running in production; never a snapshot.",
+      "matchPackageNames": ["eu.cloudnetservice.cloudnet:driver-api"],
+      "allowedVersions": "!/SNAPSHOT$/"
+    }
   ]
 }
