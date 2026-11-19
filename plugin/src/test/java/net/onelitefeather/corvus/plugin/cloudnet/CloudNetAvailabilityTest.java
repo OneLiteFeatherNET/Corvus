@@ -1,9 +1,11 @@
 package net.onelitefeather.corvus.plugin.cloudnet;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.time.InstantSource;
@@ -38,5 +40,27 @@ class CloudNetAvailabilityTest {
         }
         assertTrue(info.get(0).contains("not on the class path"), "the absence is logged as information");
         assertTrue(warn.isEmpty(), "a missing optional dependency is not a warning");
+    }
+
+    @Test
+    void unusableReasonNamesTheRootCauseBehindReflection() {
+        var root = new IllegalStateException("no CloudServiceProvider registered");
+        var wrapped = new InvocationTargetException(new RuntimeException("constructor failed", root));
+
+        assertEquals("java.lang.IllegalStateException: no CloudServiceProvider registered",
+                CloudNetAvailability.describe(wrapped));
+    }
+
+    @Test
+    void unusableReasonOmitsTheMessageWhenThereIsNone() {
+        var wrapped = new InvocationTargetException(new NullPointerException());
+
+        assertEquals("java.lang.NullPointerException", CloudNetAvailability.describe(wrapped));
+    }
+
+    @Test
+    void unusableReasonOfADirectFailureIsTheFailureItself() {
+        assertEquals("java.lang.LinkageError: bad class",
+                CloudNetAvailability.describe(new LinkageError("bad class")));
     }
 }
