@@ -2,7 +2,7 @@
 #   docker build -f services/Dockerfile -t corvus-services .
 FROM ghcr.io/astral-sh/uv:0.12.24 AS uv
 
-FROM python:3.13-slim AS build
+FROM python:3.15-slim AS build
 COPY --from=uv /uv /usr/local/bin/uv
 # The venv is built at the path it runs from: console-script shebangs and the pyvenv.cfg
 # point into it, so copying a venv built elsewhere would break corvus-ingest and friends.
@@ -21,7 +21,7 @@ COPY services/src src
 RUN PATH="/opt/venv/bin:$PATH" scripts/gen_proto.sh \
  && uv sync --frozen --no-dev --no-editable
 
-FROM python:3.13-slim
+FROM python:3.15-slim
 RUN groupadd --system --gid 10001 corvus \
  && useradd --system --uid 10001 --gid corvus --no-create-home corvus
 COPY --from=build /opt/venv /opt/venv
