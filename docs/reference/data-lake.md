@@ -307,17 +307,20 @@ UTC date range, and it is idempotent (operator steps below).
 * `raw`: the payloads are decrypted with the player's DEK and joined with the events of the same date on
   `(session_id, seq)` for offset, direction, state, packet type and wire packet id. The payload is stored in plaintext,
   like every Iceberg `raw` row. `protocol_version` is the client protocol of the session.
-* `session_ends`: the sessions that ended, with their counters, from PostgreSQL.
+* `session_ends`: the sessions that ended, with their counters, from PostgreSQL. Only sessions that have rows in the
+  Parquet files of their day are imported; a session already in `capture.session_ends` (written by ingest) is not.
+  A day without Parquet files imports nothing.
 * Not imported: `sessions` and `segments`. Their non-nullable columns `text_packets_captured`, `names_kept`, the CloudNet
   fields and `stage` are not stored in PostgreSQL. Dashboards that join to `sessions` or `segments` do not see the
   imported captures; the `events` and `raw` rows of those sessions are there.
 * Never imported, each counted in the report: rows of an erased player, rows of a player without a DEK (including orphan
   sessions), rows of sessions unknown to the catalog. A raw row without its event, a payload that does not decrypt and a
   repeated `(session_id, seq)` of the lake's at-least-once duplicates are skipped too (a repeated event is copied once).
-* Idempotency: each commit is tagged in its snapshot summary with `corvus.parquet-import-source` (the S3 key of the
-  Parquet file, or `postgres:session_ends:<date>`). A rerun skips every source that is still in the snapshot history.
-  Expired snapshots no longer carry the tag, so a rerun after snapshot expiry would import the file again. Finish the
-  import within the snapshot retention, and use the dry run to check a rerun.
+* Idempotency is data-based: before a file is appended, rows whose key already exists in the Iceberg partition of
+  their date are dropped (`(session_id, seq)` for `events` and `raw`, `session_id` for `session_ends`). The key columns
+  are read with a filter on `date`. A rerun, a resume after a failure, or a table whose snapshots were expired by the
+  maintenance imports nothing twice. Each commit is also tagged with `corvus.parquet-import-source` in its snapshot
+  summary; the tag only lets a rerun skip the key read of an already committed file and is not relied on.
 
 #### Running it once (operator)
 
