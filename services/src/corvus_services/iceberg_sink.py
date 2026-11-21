@@ -28,6 +28,7 @@ import logging
 import random
 import time
 from collections.abc import Callable, Iterator
+from datetime import date
 
 import pyarrow as pa
 from pyiceberg.catalog import Catalog
@@ -67,6 +68,8 @@ log = logging.getLogger("corvus.ingest.iceberg")
 
 ICEBERG_LAKE_VERSION = 2
 LAKE_VERSION_PROPERTY = "corvus.lake-schema-version"
+IMPORT_PROPERTY = "corvus.parquet-import-source"
+"""Snapshot summary key of a one-off import commit: the Parquet object or Postgres source copied."""
 DATE_COLUMN = "date"
 PARTITION_FIELD_ID = 1000
 MAX_COMMIT_ATTEMPTS = 5
@@ -257,11 +260,35 @@ class IcebergSink:
     def _write(self, buf: TableBuffer) -> None:
         self._append_with_retry(buf.table, _arrow_rows(buf))
 
-    def _append_with_retry(self, name: str, rows: pa.Table) -> None:
+    def append_import(self, name: str, rows: pa.Table, source: str) -> None:
+        """One commit of imported rows (``lake_rows`` layout), tagged with ``source`` in the
+        snapshot summary under ``IMPORT_PROPERTY``. ``imported_sources`` reads the tags back."""
+        self._append_with_retry(name, rows, {IMPORT_PROPERTY: source})
+
+    def imported_sources(self, name: str) -> set[str]:
+        """Sources whose import committed to ``name``: the snapshots still in the table's history.
+        An expired snapshot no longer counts (see docs/reference/data-lake.md, one-off import)."""
+        try:
+            table = self._catalog.load_table(self.ident(name))
+        except NoSuchTableError:
+            return set()
+        found: set[str] = set()
+        for snapshot in table.metadata.snapshots:
+            summary = snapshot.summary
+            if summary is not None and IMPORT_PROPERTY in summary.additional_properties:
+                found.add(summary.additional_properties[IMPORT_PROPERTY])
+        return found
+
+    def _append_with_retry(
+        self, name: str, rows: pa.Table, snapshot_properties: dict[str, str] | None = None
+    ) -> None:
         for attempt in range(1, MAX_COMMIT_ATTEMPTS + 1):
             table = self._catalog.load_table(self.ident(name))
             try:
-                table.append(rows)
+                if snapshot_properties:
+                    table.append(rows, snapshot_properties=snapshot_properties)
+                else:
+                    table.append(rows)
                 return
             except CommitFailedException:
                 if attempt == MAX_COMMIT_ATTEMPTS:
@@ -302,6 +329,16 @@ def _arrow_rows(buf: TableBuffer) -> pa.Table:
     columns[DATE_COLUMN] = [buf.day] * buf.rows
     rows = pa.Table.from_pydict(columns, schema=_ARROW_SCHEMAS[buf.table])
     return rows.sort_by([(key, "ascending") for key in SORT_KEYS[buf.table]])
+
+
+def lake_rows(table: str, data: pa.Table, day: date) -> pa.Table:
+    """Rows of a lake table from ``data``, which holds every column of the table but ``date``.
+    Adds the ``date`` partition value and sorts like the sink does (one-off import)."""
+    schema = _ARROW_SCHEMAS[table]
+    columns = {name: data.column(name).cast(schema.field(name).type) for name in data.column_names}
+    columns[DATE_COLUMN] = [day] * data.num_rows
+    rows = pa.Table.from_pydict(columns, schema=schema)
+    return rows.sort_by([(key, "ascending") for key in SORT_KEYS[table]])
 
 
 _ARROW_SCHEMAS: dict[str, pa.Schema] = {
