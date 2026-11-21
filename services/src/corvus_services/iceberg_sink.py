@@ -29,6 +29,7 @@ import random
 import time
 from collections.abc import Callable, Iterator
 from datetime import date
+from typing import Any
 
 import pyarrow as pa
 from pyiceberg.catalog import Catalog
@@ -38,6 +39,7 @@ from pyiceberg.exceptions import (
     NoSuchTableError,
     TableAlreadyExistsError,
 )
+from pyiceberg.expressions import EqualTo
 from pyiceberg.partitioning import PartitionField, PartitionSpec
 from pyiceberg.schema import Schema
 from pyiceberg.table import Table
@@ -265,9 +267,21 @@ class IcebergSink:
         snapshot summary under ``IMPORT_PROPERTY``. ``imported_sources`` reads the tags back."""
         self._append_with_retry(name, rows, {IMPORT_PROPERTY: source})
 
+    def existing_keys(self, name: str, day: date, columns: tuple[str, ...]) -> set[tuple[Any, ...]]:
+        """Values of ``columns`` of the rows in the ``date`` partition ``day`` of ``name``: a data
+        read of the key columns only, so it does not depend on snapshot history (one-off import)."""
+        try:
+            table = self._catalog.load_table(self.ident(name))
+        except NoSuchTableError:
+            return set()
+        predicate = EqualTo(DATE_COLUMN, day)  # type: ignore[call-arg,arg-type]
+        scan = table.scan(row_filter=predicate, selected_fields=columns)
+        arrow = scan.to_arrow()
+        return set(zip(*(arrow.column(c).to_pylist() for c in columns), strict=True))
+
     def imported_sources(self, name: str) -> set[str]:
         """Sources whose import committed to ``name``: the snapshots still in the table's history.
-        An expired snapshot no longer counts (see docs/reference/data-lake.md, one-off import)."""
+        A fast path only: expired snapshots lose their tags, ``existing_keys`` is the check."""
         try:
             table = self._catalog.load_table(self.ident(name))
         except NoSuchTableError:

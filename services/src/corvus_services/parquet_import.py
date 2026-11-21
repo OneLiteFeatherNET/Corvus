@@ -24,13 +24,14 @@ catalog. A raw row without its event, a payload that does not decrypt and a repe
 ``(session_id, seq)`` of the lake's at-least-once duplicates are skipped and counted too; a repeated
 event is copied once, the first occurrence in file order.
 
-Idempotency: each commit carries its source in the snapshot summary under ``IMPORT_PROPERTY``: the
-S3 key of a Parquet file, or ``postgres:session_ends:<date>``. A run skips the commit of every
-source found in the snapshot history of its table, so a rerun or a resume after a failure imports
-the rest exactly once. Every file is still read on every run, because the join index and the
-duplicate check need all events of a date. Snapshots that were expired before a rerun are no longer
-seen: finish the import within the snapshot retention (``CORVUS_LAKE_SNAPSHOT_RETENTION_DAYS``),
-or check the report.
+Idempotency is data-based. Before a file is appended, every row whose key already exists in the
+Iceberg partition of its date is dropped: ``(session_id, seq)`` for events and raw, ``session_id``
+for session_ends. A rerun, a resume after a failure, or a table whose snapshots were expired and
+rewritten therefore imports nothing twice. The snapshot tag (``IMPORT_PROPERTY``: the S3 key of a
+Parquet file, or ``postgres:session_ends:<date>``) is only a fast path that skips the key read of a
+file already committed. Every file is still read on every run, because the join index and the
+duplicate check need all events of a date. session_ends are imported only for sessions with rows in
+the Parquet files of their day.
 """
 
 from __future__ import annotations
@@ -213,11 +214,13 @@ def _events_rows(
     index: dict[tuple[bytes, int], _Event],
     report: Report,
     day: date,
+    seen: set[bytes],
 ) -> pa.Table:
     """The importable rows of one events file (Parquet layout plus ``player_key``). Fills the
     join index of the date with the rows it keeps; a repeated (session_id, seq) is dropped."""
     table = _read(data)
     sids = table.column("session_id").to_pylist()
+    seen.update(sids)
     seqs = table.column("seq").to_pylist()
     fields = {name: table.column(name).to_pylist() for name in EVENT_FIELDS}
     keep: list[int] = []
@@ -245,10 +248,12 @@ def _raw_rows(
     index: dict[tuple[bytes, int], _Event],
     report: Report,
     day: date,
+    seen: set[bytes],
 ) -> pa.Table:
     """The importable raw rows of one raw file in the Iceberg layout, payloads decrypted."""
     table = _read(data)
     cols = {name: table.column(name).to_pylist() for name in RAW_FIELDS}
+    seen.update(cols["session_id"])
     out: dict[str, list[Any]] = {name: [] for name in ICEBERG_LAYOUT.schemas["raw"].names}
     aeads: dict[bytes, AESGCM] = {}
     for i in range(table.num_rows):
@@ -293,11 +298,16 @@ def _raw_rows(
 
 
 def _session_end_rows(
-    resolver: _Resolver, sessions: Sequence[SessionRecord], report: Report, day: date
+    resolver: _Resolver,
+    sessions: Sequence[SessionRecord],
+    seen: set[bytes],
+    report: Report,
+    day: date,
 ) -> pa.Table:
+    """session_ends of the sessions that have rows in the Parquet files of ``day`` (``seen``)."""
     out: dict[str, list[Any]] = {name: [] for name in ICEBERG_LAYOUT.schemas["session_ends"].names}
     for s in sessions:
-        if s.ended_at is None or _utc_date(s.started_at) != day:
+        if s.ended_at is None or _utc_date(s.started_at) != day or s.session_id not in seen:
             continue
         report.add("session_ends", day, "rows_read")
         access = resolver.access(s.session_id)
@@ -314,14 +324,23 @@ def _session_end_rows(
     return pa.Table.from_pydict(out, schema=ICEBERG_LAYOUT.schemas["session_ends"])
 
 
+KEY_COLUMNS: dict[str, tuple[str, ...]] = {
+    "events": ("session_id", "seq"),
+    "raw": ("session_id", "seq"),
+    "session_ends": ("session_id",),
+}
+
+
 class _Committer:
-    """One commit per source, skipped when the source is already in the table's history."""
+    """One commit per file. Rows whose key is already in the Iceberg partition of their date are
+    dropped first, so correctness does not depend on the snapshot tags (which expire)."""
 
     def __init__(self, sink: IcebergSink, report: Report, dry_run: bool) -> None:
         self._sink = sink
         self._report = report
         self._dry_run = dry_run
         self._done: dict[str, set[str]] = {}
+        self._existing: dict[tuple[str, date], set[tuple[Any, ...]]] = {}
 
     def load(self) -> None:
         for name in TABLES:
@@ -332,11 +351,21 @@ class _Committer:
         if source in self._done[table]:
             self._report.add(table, day, "files_already_imported")
             return
-        if rows.num_rows == 0:
+        key_columns = KEY_COLUMNS[table]
+        existing = self._existing.get((table, day))
+        if existing is None:
+            existing = self._sink.existing_keys(table, day, key_columns)
+            self._existing[(table, day)] = existing
+        keys = list(zip(*(rows.column(c).to_pylist() for c in key_columns), strict=True))
+        keep = [i for i, key in enumerate(keys) if key not in existing]
+        self._report.add(table, day, "skipped_in_iceberg", len(keys) - len(keep))
+        if not keep:
             return
-        self._report.add(table, day, "rows_imported", rows.num_rows)
+        new_rows = rows.take(pa.array(keep, pa.int64()))
+        existing.update(keys[i] for i in keep)
+        self._report.add(table, day, "rows_imported", new_rows.num_rows)
         if not self._dry_run:
-            self._sink.append_import(table, lake_rows(table, rows, day), source)
+            self._sink.append_import(table, lake_rows(table, new_rows, day), source)
 
 
 def run_import(
@@ -365,11 +394,8 @@ def run_import(
     report = Report()
     committer = _Committer(sink, report, dry_run)
     committer.load()
-    days = sorted(
-        {f.date for f in files}
-        | {_utc_date(s.started_at) for s in sessions if s.ended_at is not None}
-    )
-    for day in (d for d in days if _in_range(d, date_from, date_to)):
+    # Days without Parquet files produce nothing: session_ends follow the files of their day.
+    for day in sorted({f.date for f in files}):
         _import_day(day, files, sessions, objects, resolver, committer, report)
     return report
 
@@ -390,15 +416,16 @@ def _import_day(
         (f for f in files if f.date == day and f.table_name == "raw"), key=lambda f: f.s3_key
     )
     index: dict[tuple[bytes, int], _Event] = {}
+    seen: set[bytes] = set()
     for f in events_files:
         report.add("events", day, "files_read")
-        rows = _events_rows(objects.get(f.s3_key), resolver, index, report, day)
+        rows = _events_rows(objects.get(f.s3_key), resolver, index, report, day, seen)
         committer.commit("events", day, f.s3_key, rows)
     for f in raw_files:
         report.add("raw", day, "files_read")
-        rows = _raw_rows(objects.get(f.s3_key), resolver, index, report, day)
+        rows = _raw_rows(objects.get(f.s3_key), resolver, index, report, day, seen)
         committer.commit("raw", day, f.s3_key, rows)
-    ends = _session_end_rows(resolver, sessions, report, day)
+    ends = _session_end_rows(resolver, sessions, seen, report, day)
     committer.commit("session_ends", day, f"postgres:session_ends:{day.isoformat()}", ends)
 
 

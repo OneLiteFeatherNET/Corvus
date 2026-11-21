@@ -19,7 +19,7 @@ from pyiceberg.catalog.sql import SqlCatalog
 from pyiceberg.exceptions import NoSuchTableError
 
 from corvus_services.crypto import Keyring, UnwrapError, encrypt_payload
-from corvus_services.iceberg_sink import IcebergSink
+from corvus_services.iceberg_sink import IcebergSink, lake_rows
 from corvus_services.parquet_import import (
     LiveFile,
     PlayerRecord,
@@ -430,3 +430,83 @@ def test_cli_refuses_to_run_against_the_parquet_lake(capsys):
 
     assert code == 2
     assert "CORVUS_LAKE_FORMAT=iceberg" in capsys.readouterr().err
+
+
+class UntaggedSink(IcebergSink):
+    """The table as it is after its snapshots were expired: the rows are there, the tags are not."""
+
+    def append_import(self, name, rows, source):  # type: ignore[override]
+        self._append_with_retry(name, rows)
+
+
+def test_a_rerun_without_snapshot_tags_imports_nothing(source, objects, sink, keyring, catalog):
+    _run(source, objects, UntaggedSink(catalog, "capture", sleep=lambda _s: None), keyring)
+    before = {name: _scan(catalog, name).num_rows for name in ICEBERG_LAYOUT.schemas}
+
+    rerun = _run(source, objects, sink, keyring)
+
+    after = {name: _scan(catalog, name).num_rows for name in ICEBERG_LAYOUT.schemas}
+    assert after == before
+    assert rerun.total("rows_imported") == 0
+
+
+def test_a_rerun_without_snapshot_tags_does_not_duplicate_raw_rows(
+    source, objects, sink, keyring, catalog
+):
+    _run(source, objects, UntaggedSink(catalog, "capture", sleep=lambda _s: None), keyring)
+
+    _run(source, objects, sink, keyring)
+
+    seqs = sorted(
+        r["seq"] for r in _scan(catalog, "raw").to_pylist() if r["session_id"] == SESSION_A
+    )
+    assert seqs == [1, 2]
+
+
+def test_session_ends_of_a_session_already_in_iceberg_are_not_imported(
+    source, objects, sink, keyring, catalog
+):
+    sink.bootstrap()
+    live_end = pa.Table.from_pydict(
+        {
+            "session_id": [SESSION_A],
+            "player_key": [PLAYER_A],
+            "ended_at": [_ts(DAY, 11)],
+            "dropped_queue_full": [9],
+            "dropped_privacy": [9],
+            "listener_errors": [9],
+            "dropped_transport": [9],
+        },
+        schema=ICEBERG_LAYOUT.schemas["session_ends"],
+    )
+    sink.append_import("session_ends", lake_rows("session_ends", live_end, DAY), "live-ingest")
+
+    report = _run(source, objects, sink, keyring)
+
+    ends = _scan(catalog, "session_ends").to_pylist()
+    assert len(ends) == 1
+    assert ends[0]["dropped_queue_full"] == 9
+    assert report.count("session_ends", DAY, "rows_imported") == 0
+
+
+def test_a_day_with_only_postgres_sessions_imports_nothing(keyring, sink, catalog):
+    ended = SessionRecord(SESSION_A, PLAYER_A, 767, _ts(DAY, 10), _ts(DAY, 11), 0, 0, 0, 0)
+    source = FakeSource(files=[], sessions=[ended], players=_players(keyring))
+
+    report = _run(source, FakeObjects({}), sink, keyring)
+
+    assert _scan(catalog, "session_ends").num_rows == 0
+    assert report.total("rows_imported") == 0
+
+
+def test_session_ends_are_only_imported_for_sessions_with_rows_in_the_day_files(
+    source, objects, sink, keyring, catalog
+):
+    no_rows_in_files = SessionRecord(
+        bytes([7]) * 16, PLAYER_A, 767, _ts(DAY, 9), _ts(DAY, 10), 0, 0, 0, 0
+    )
+    source.sessions.append(no_rows_in_files)
+
+    _run(source, objects, sink, keyring)
+
+    assert [r["session_id"] for r in _scan(catalog, "session_ends").to_pylist()] == [SESSION_A]
