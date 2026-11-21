@@ -33,6 +33,7 @@ corvus-ingest = "corvus_services.ingest:main"
 corvus-migrate = "corvus_services.migrate:main"
 corvus-housekeeping = "corvus_services.housekeeping:main"
 corvus-compact = "corvus_services.compact:main"
+corvus-import-parquet = "corvus_services.parquet_import:main"
 corvus-api = "corvus_services.api.app:main"
 corvus-score = "corvus_services.scoring.main:main"
 

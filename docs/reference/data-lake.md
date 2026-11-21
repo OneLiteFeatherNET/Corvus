@@ -297,12 +297,49 @@ snapshots with erased raw artefacts.
   opt-in maintenance (24 h margin) or the DAG's orphan removal removes them.
 * The Parquet `raw` files that exist from before the switch (`lake_files`) keep their retention until they are expired.
 
+### One-off import of the Parquet lake
+
+`corvus-import-parquet` copies the live Parquet files of the lake (`corvus.lake_files`, `deleted_at IS NULL`) into the
+Iceberg tables once, so that captures written before the switch are in the Iceberg tables too. It is run by hand, per
+UTC date range, and it is idempotent (operator steps below).
+
+* `events`: the rows as stored, with the player key of their session.
+* `raw`: the payloads are decrypted with the player's DEK and joined with the events of the same date on
+  `(session_id, seq)` for offset, direction, state, packet type and wire packet id. The payload is stored in plaintext,
+  like every Iceberg `raw` row. `protocol_version` is the client protocol of the session.
+* `session_ends`: the sessions that ended, with their counters, from PostgreSQL. Only sessions that have rows in the
+  Parquet files of their day are imported; a session already in `capture.session_ends` (written by ingest) is not.
+  A day without Parquet files imports nothing.
+* Not imported: `sessions` and `segments`. Their non-nullable columns `text_packets_captured`, `names_kept`, the CloudNet
+  fields and `stage` are not stored in PostgreSQL. Dashboards that join to `sessions` or `segments` do not see the
+  imported captures; the `events` and `raw` rows of those sessions are there.
+* Never imported, each counted in the report: rows of an erased player, rows of a player without a DEK (including orphan
+  sessions), rows of sessions unknown to the catalog. A raw row without its event, a payload that does not decrypt and a
+  repeated `(session_id, seq)` of the lake's at-least-once duplicates are skipped too (a repeated event is copied once).
+* Idempotency is data-based: before a file is appended, rows whose key already exists in the Iceberg partition of
+  their date are dropped (`(session_id, seq)` for `events` and `raw`, `session_id` for `session_ends`). The key columns
+  are read with a filter on `date`. A rerun, a resume after a failure, or a table whose snapshots were expired by the
+  maintenance imports nothing twice. Each commit is also tagged with `corvus.parquet-import-source` in its snapshot
+  summary; the tag only lets a rerun skip the key read of an already committed file and is not relied on.
+
+#### Running it once (operator)
+
+1. Run a Job from the services image (the one of the compact CronJob) with the command `corvus-import-parquet`
+   and the environment of the compact CronJob. The Job also needs `CORVUS_KEK` and `CORVUS_KEK_ID` from the same
+   secret the ingest Deployment uses: the compact template does not carry the KEK. Set `restartPolicy: Never` and
+   `backoffLimit: 0`; a failed run is resumed by starting a new Job, not by Kubernetes retrying it.
+2. First run with `--dry-run`. It reads the lake and the catalog, creates nothing and prints the counts per table and
+   date. Check the skipped counts and the rows to import against the expectation.
+3. Run it without `--dry-run`. Optional `--date-from YYYY-MM-DD` and `--date-to YYYY-MM-DD` (inclusive, UTC) split the
+   work by day. The events of one UTC date are read into memory at once, so size the Job's memory for the largest date.
+4. Compare the row counts of the Iceberg tables with the report (`session_ends`, `events`, `raw` of the imported dates).
+
 ### Not covered yet
 
-Each is a separate step: backfill of the existing Parquet files into Iceberg, snapshot pins by Iceberg snapshot id,
-reading Iceberg `raw` in the ML jobs (`corvus-ml` reads the Parquet `raw` layout only), a re-check of an erasure
-after its request completed (rows that land after the grace period are not seen again), and removal of an erased
-player's name from other players' payloads (see "Privacy and retention").
+Each is a separate step: snapshot pins by Iceberg snapshot id, reading Iceberg `raw` in the ML jobs (`corvus-ml` reads
+the Parquet `raw` layout only), importing `sessions` and `segments` (needs the four columns above in PostgreSQL), a
+re-check of an erasure after its request completed (rows that land after the grace period are not seen again), and
+removal of an erased player's name from other players' payloads (see "Privacy and retention").
 
 ## 3. Keys and erasure
 
