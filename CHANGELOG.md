@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.7.1...v0.8.0) (2026-11-28)
+
+
+### Features
+
+* **services:** import parquet history into iceberg tables ([#148](https://github.com/OneLiteFeatherNET/Corvus/issues/148)) ([85971d8](https://github.com/OneLiteFeatherNET/Corvus/commit/85971d8107c60ed1af1097302aebed5ac8f60d4d))
+
 ## [0.7.1](https://github.com/OneLiteFeatherNET/Corvus/compare/v0.7.0...v0.7.1) (2026-11-19)
 
 
